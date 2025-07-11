@@ -1,0 +1,101 @@
+# Development Containerfile for Prow Hook component
+# This provides a complete development environment for contributors
+# to work on Prow plugins with real GitHub state but blocked writes.
+
+FROM golang:1.24-alpine AS builder
+
+# Install development dependencies
+RUN apk add --no-cache \
+    git \
+    make \
+    curl \
+    jq \
+    bash \
+    vim \
+    htop \
+    tree
+
+# Set working directory
+WORKDIR /workspace
+
+# Copy source code (will be overridden by volume mount in development)
+COPY . .
+
+# Build the development proxy and hook
+RUN go build -o /usr/local/bin/ghproxy-dev ./cmd/ghproxy-dev
+RUN go build -o /usr/local/bin/hook ./cmd/hook
+
+# Development stage with additional tools
+FROM golang:1.24-alpine AS development
+
+# Install development and debugging tools
+RUN apk add --no-cache \
+    git \
+    make \
+    curl \
+    jq \
+    bash \
+    vim \
+    nano \
+    htop \
+    tree \
+    netcat-openbsd \
+    tcpdump \
+    strace \
+    delve
+
+# Install air for hot reloading
+RUN go install github.com/air-verse/air@latest
+
+# Install goimports and other Go development tools
+RUN go install golang.org/x/tools/cmd/goimports@latest
+RUN go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+RUN go install golang.org/x/tools/gopls@latest
+
+# Copy built binaries
+COPY --from=builder /usr/local/bin/ghproxy-dev /usr/local/bin/ghproxy-dev
+COPY --from=builder /usr/local/bin/hook /usr/local/bin/hook
+
+# Create workspace directory
+WORKDIR /workspace
+
+# Create development configuration directory
+RUN mkdir -p /etc/prow-dev /var/cache/ghproxy-dev
+
+# Create development user (non-root for security)
+RUN adduser -D -u 1000 -g 1000 -s /bin/bash prowdev
+
+# Set up development environment
+ENV GOCACHE=/tmp/gocache
+ENV GOMODCACHE=/tmp/gomodcache
+ENV PATH="/workspace/bin:${PATH}"
+
+# Create development directories
+RUN mkdir -p \
+    /tmp/gocache \
+    /tmp/gomodcache \
+    /workspace/bin \
+    /workspace/configs \
+    /workspace/logs
+
+# Change ownership to prowdev user
+RUN chown -R prowdev:prowdev /workspace /etc/prow-dev /var/cache/ghproxy-dev /tmp/gocache /tmp/gomodcache
+
+# Switch to development user
+USER prowdev
+
+# Expose ports
+# 8888: ghproxy-dev (GitHub API proxy)
+# 8889: hook component
+# 8890: metrics
+# 8891: health checks
+EXPOSE 8888 8889 8890 8891
+
+# Set default working directory
+WORKDIR /workspace
+
+# Copy development scripts to a location that won't be overridden
+COPY --chown=prowdev:prowdev hack/dev-scripts/ /usr/local/bin/dev-scripts/
+
+# Default command starts the development environment
+CMD ["/usr/local/bin/dev-scripts/start-dev-environment.sh"]

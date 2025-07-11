@@ -121,6 +121,8 @@ type IssueClient interface {
 	ListOpenIssues(org, repo string) ([]Issue, error)
 	GetIssue(org, repo string, number int) (*Issue, error)
 	EditIssue(org, repo string, number int, issue *Issue) (*Issue, error)
+	PinIssue(org, repo string, number int) error
+	UnpinIssue(org, repo string, number int) error
 }
 
 // PullRequestClient interface for pull request related API actions
@@ -3276,6 +3278,72 @@ func (c *client) ReopenIssue(org, repo string, number int) error {
 		exitCodes:   []int{200},
 	}, nil)
 	return stateCannotBeChangedOrOriginalError(err)
+}
+
+// PinIssue pins an issue to a repository
+//
+// See https://docs.github.com/en/graphql/reference/mutations#pinissue
+func (c *client) PinIssue(org, repo string, number int) error {
+	durationLogger := c.log("PinIssue", org, repo, number)
+	defer durationLogger()
+
+	issue, err := c.GetIssue(org, repo, number)
+	if err != nil {
+		return fmt.Errorf("failed to get issue: %w", err)
+	}
+
+	return c.pinIssue(org, issue.NodeID)
+}
+
+// UnpinIssue unpins an issue from a repository
+//
+// See https://docs.github.com/en/graphql/reference/mutations#unpinissue
+func (c *client) UnpinIssue(org, repo string, number int) error {
+	durationLogger := c.log("UnpinIssue", org, repo, number)
+	defer durationLogger()
+
+	issue, err := c.GetIssue(org, repo, number)
+	if err != nil {
+		return fmt.Errorf("failed to get issue: %w", err)
+	}
+
+	return c.unpinIssue(org, issue.NodeID)
+}
+
+// pinIssueMutation is a GraphQL mutation struct compatible with shurcooL/githubql's client
+type pinIssueMutation struct {
+	PinIssue struct {
+		Issue struct {
+			ID githubql.ID
+		}
+	} `graphql:"pinIssue(input: $input)"`
+}
+
+// unpinIssueMutation is a GraphQL mutation struct compatible with shurcooL/githubql's client
+type unpinIssueMutation struct {
+	UnpinIssue struct {
+		Issue struct {
+			ID githubql.ID
+		}
+	} `graphql:"unpinIssue(input: $input)"`
+}
+
+// pinIssue pins an issue using GraphQL mutation
+func (c *client) pinIssue(org, issueNodeID string) error {
+	m := &pinIssueMutation{}
+	input := githubql.PinIssueInput{
+		IssueID: githubql.ID(issueNodeID),
+	}
+	return c.MutateWithGitHubAppsSupport(context.Background(), m, input, nil, org)
+}
+
+// unpinIssue unpins an issue using GraphQL mutation
+func (c *client) unpinIssue(org, issueNodeID string) error {
+	m := &unpinIssueMutation{}
+	input := githubql.UnpinIssueInput{
+		IssueID: githubql.ID(issueNodeID),
+	}
+	return c.MutateWithGitHubAppsSupport(context.Background(), m, input, nil, org)
 }
 
 // ClosePullRequest closes the existing, open PR provided

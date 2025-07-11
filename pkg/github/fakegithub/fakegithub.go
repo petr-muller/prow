@@ -60,6 +60,7 @@ type FakeClient struct {
 	CreatedStatuses            map[string][]github.Status
 	IssueEvents                map[int][]github.ListedIssueEvent
 	Commits                    map[string]github.RepositoryCommit
+	PinnedIssues               map[int]bool
 
 	// All Labels That Exist In The Repo
 	RepoLabelsExisting []string
@@ -473,6 +474,42 @@ func (f *FakeClient) CloseIssueAsNotPlanned(org, repo string, number int) error 
 
 	f.Issues[number].State = "closed"
 	f.Issues[number].StateReason = "not_planned"
+
+	return nil
+}
+
+// PinIssue pins an issue to a repository (fake implementation)
+func (f *FakeClient) PinIssue(org, repo string, number int) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	if _, ok := f.Issues[number]; !ok {
+		return fmt.Errorf("issue number %d does not exist", number)
+	}
+
+	// Track pinned issues separately since Issue struct doesn't have Pinned field
+	if f.PinnedIssues == nil {
+		f.PinnedIssues = make(map[int]bool)
+	}
+	f.PinnedIssues[number] = true
+
+	return nil
+}
+
+// UnpinIssue unpins an issue from a repository (fake implementation)
+func (f *FakeClient) UnpinIssue(org, repo string, number int) error {
+	f.lock.Lock()
+	defer f.lock.Unlock()
+
+	if _, ok := f.Issues[number]; !ok {
+		return fmt.Errorf("issue number %d does not exist", number)
+	}
+
+	// Track pinned issues separately since Issue struct doesn't have Pinned field
+	if f.PinnedIssues == nil {
+		f.PinnedIssues = make(map[int]bool)
+	}
+	f.PinnedIssues[number] = false
 
 	return nil
 }

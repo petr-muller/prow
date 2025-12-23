@@ -85,8 +85,10 @@ After creating the file, commit it to the triage branch:
 
 ```bash
 git add ISSUE-TRIAGE.md
-git commit -m "Initialize triage for issue #{issue_number}"
+git commit -m "Initialize triage for issue {issue_number}"
 ```
+
+**IMPORTANT**: Do NOT include `#` before the issue number in commit messages. Use `issue 388` not `issue #388`.
 
 ### 4. Summary
 
@@ -254,3 +256,35 @@ Additional focused subcommands may be added to assist with:
 - The ISSUE-TRIAGE.md file serves as the shared state between different triage subcommands
 - Commits should be made regularly to preserve triage progress
 - Run subcommands in sequence, starting with `initial` validation
+
+## Git Commit Guidelines
+
+**CRITICAL**: When making commits during triage, **NEVER** include issue or PR references in commit messages:
+
+- ❌ **DO NOT** include `#NUMBER` references (e.g., `#388`, `#123`)
+- ❌ **DO NOT** include issue URLs (e.g., `https://github.com/kubernetes-sigs/prow/issues/388`)
+- ❌ **DO NOT** include PR URLs
+- ❌ **DO NOT** use phrases like "Fixes #388" or "Closes #123"
+
+**Why**: Issue/PR references in commit messages can trigger unwanted GitHub automation:
+- May auto-link commits to issues in confusing ways
+- Can trigger notification spam
+- Can affect issue/PR state unexpectedly
+- Triage commits are for documentation, not for linking to issues
+
+**Good commit messages**:
+```
+Initialize triage for issue 388
+Revised analysis: Caching problem, not stale files
+Add area/pod-utils label - two-component bug
+Remove workaround recommendation - fix root cause instead
+```
+
+**Bad commit messages**:
+```
+Initialize triage for #388          ❌ (has #NUMBER)
+Fix issue #388: Add cache headers  ❌ (has #NUMBER)
+Fixes https://github.com/.../388   ❌ (has URL)
+```
+
+**Exception**: The ISSUE-TRIAGE.md file content itself CAN contain issue references since it's documentation, not a commit message.

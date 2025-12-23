@@ -434,6 +434,63 @@ Frontend test coverage for Deck is minimal. While adding proper TypeScript tests
 **Alignment with Maintainer Expectations**:
 Maintainer petr-muller commented: "I _think_ this should not be too tricky, seems like what we need is to filter out garbage Prowjobs". This assessment aligns with that expectation - the fix is indeed not tricky and is well-suited for a community contributor.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title accurately describes the symptom users observe ("unknown state job" in the UI). While it could be more technically precise ("malformed ProwJob without status field"), the current wording is searchable and clear enough. Minor grammar issue ("break" vs "breaks") doesn't warrant retitling noise.
+
+### Proposed GitHub Comment
+
+```
+## Technical Details
+
+The root cause is missing runtime validation in Deck's frontend. The code in `cmd/deck/static/prow/prow.ts` uses destructuring to extract `build.status.state`, but when a ProwJob resource is missing the entire `.status` field (as can happen with manually-created resources), the destructuring produces an empty string state that propagates through the rendering pipeline.
+
+## Fix Location
+
+Two locations need defensive guards added (before destructuring):
+1. `cmd/deck/static/prow/prow.ts:49-86` in `optionsForRepo()` - before line 59
+2. `cmd/deck/static/prow/prow.ts:502-683` in main `redraw()` loop - before line 516
+
+Add the guard: `if (!build.status) { console.warn(\`Skipping ProwJob without status: ${build.metadata?.name || 'unknown'}\`); continue; }`
+
+## Implementation Guidance
+
+This is a straightforward defensive coding fix - just null checks before processing. The fix prevents malformed ProwJobs from appearing in state dropdowns and breaking the job-bar visualization. Manual testing can verify empty states don't appear in the UI. Similar guard clause patterns exist throughout the codebase for reference.
+
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Specific code locations with line numbers (missing from original issue discussion)
+- Technical explanation of the destructuring issue (root cause detail)
+- Exact guard clause to add (implementation guidance)
+- Testing approach (manual verification method)
+
+This information transforms the issue from "needs defensive filtering" (already noted by maintainer) into actionable guidance with specific file/line references and implementation pattern.
+
+**Why these labels**:
+- `/good-first-issue`: Effort assessment confirmed Level 1 (Easy) - all factors point to this being perfect for new contributors. The issue is already assigned to Qqkyu as a learning opportunity, confirming the good-first-issue classification. This label is currently missing but should be applied based on the triage assessment.
+- `/area deck`: Already applied ✓
+- `/kind bug`: Already applied ✓
+- `/help-wanted`: Already applied ✓ (can remain, though good-first-issue is more specific)
+
+**What's NOT included**:
+- No `/retitle`: Current title is adequate and searchable
+- No priority label: Issue already has an active contributor and clear path forward; not blocking or urgent
+- No repetition of information: Original issue and comments already explain the symptom and high-level solution ("filter garbage ProwJobs"); augmentation adds specific implementation details only
+
+**Should this comment be posted**:
+Recommended: **Yes, but only if the assigned contributor (Qqkyu) would benefit from the specific code locations and implementation guidance**. Since the issue is already assigned and being worked on, consider:
+- Option A: Post the comment to help Qqkyu with specific line numbers and implementation pattern
+- Option B: Wait to see if Qqkyu asks for guidance (avoid being overly prescriptive)
+- Option C: Apply just the `/good-first-issue` label without the detailed comment
+
+The detailed comment provides value (specific lines and guard clause pattern) that isn't in the existing discussion, so it could help accelerate the fix. However, since someone is actively working on it, there's a balance between being helpful and being overly directive.
+
 ## Next Steps
 
 1. Monitor progress on the assigned issue

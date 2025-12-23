@@ -356,6 +356,8 @@ if filename == "latest-build.txt" {
 ```
 
 Part 1 provides immediate relief and diagnostic logging. Part 2 prevents future caching issues.
+
+/area pod-utils
 ```
 
 ### Rationale
@@ -368,8 +370,10 @@ Part 1 provides immediate relief and diagnostic logging. Part 2 prevents future 
 - File/line references for both read and write sides
 
 **Why these labels**:
-- Labels are already correct: `area/deck`, `kind/bug`, `help-wanted`
-- No changes needed - issue was already properly labeled
+- `area/deck` - Already applied (read side issue)
+- `kind/bug` - Already applied
+- `help-wanted` - Already applied (matches Level 2)
+- **Need to add**: `area/pod-utils` - Write side issue (missing Cache-Control in upload code)
 
 **What's NOT included**:
 - Didn't retitle - current title is already clear and specific

@@ -414,3 +414,8 @@ This fixes the root cause rather than working around it.
 - Didn't repeat symptoms/examples already well-documented in issue
 - **Not recommending fallback/workaround** - better to fix root cause properly
 - Kept comment concise (3 sections) focusing on root cause fix
+
+## Comment Posted
+
+Posted augmentation comment on: 2025-12-23
+Comment URL: https://github.com/kubernetes-sigs/prow/issues/388#issuecomment-3687265493

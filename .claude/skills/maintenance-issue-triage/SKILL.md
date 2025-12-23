@@ -156,6 +156,27 @@ After the triage environment is set up, you can use focused subcommands to analy
 
 **How to invoke**: After the user mentions wanting to assess effort or determine appropriate labels, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/assess-effort.md` and follow them.
 
+### Subcommand: augment
+
+**Purpose**: Propose improvements to the issue based on all triage findings.
+
+**When to use**: After completing initial validation, research, and effort assessment.
+
+**What it does**:
+- Synthesizes all triage findings into a GitHub comment
+- Proposes title improvements (if needed) via /retitle command
+- Adds 2-3 paragraphs of missing context from research (root cause, technical details, etc.)
+- Applies appropriate /area and /kind labels
+- Applies difficulty labels (/good-first-issue or /help-wanted based on effort level)
+- Transforms the issue into a high-quality report as if written by an omniscient expert
+
+**Output**:
+- Draft GitHub comment with /retitle (optional), context paragraphs, and label commands
+- Rationale explaining what's being added and why
+- Guidance on whether to post the comment or just apply labels
+
+**How to invoke**: After the user mentions wanting to improve the issue, augment it, or prepare a comment, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/augment.md` and follow them.
+
 ### Future Subcommands
 
 Additional focused subcommands may be added to assist with:

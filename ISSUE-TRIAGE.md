@@ -254,61 +254,68 @@ if top == emptyID || top > latest {
 
 ## Recommendation
 
-**Implement Solution 1 + Solution 2 (Both)** because:
+**Implement Solution 1 (Cache-Control header)** - Fix the root cause:
 
-**Solution 1 (Cache-Control header):**
-- Fixes the root cause for future uploads
-- Prevents the caching issue from happening
+**Why Solution 1:**
+- Fixes the actual problem (caching)
 - Best practice for frequently-changing files
+- Prevents the issue from recurring
+- Standard HTTP caching solution
 
-**Solution 2 (Fallback logic):**
-- Provides immediate relief for existing cached files
-- Makes system resilient even if Solution 1 has gaps
-- Adds logging to help diagnose caching issues
-- Simple enough for "help wanted" contributors
+**Optional: Add diagnostic logging** (without workaround logic):
+```go
+// In cmd/deck/job_history.go after line 451
+logrus.WithFields(logrus.Fields{
+    "job": root,
+    "latest_from_file": latest,
+}).Debug("Read latest-build.txt")
+```
 
-**Implementation order:**
-1. Implement Solution 2 first (easier, immediate impact, helps diagnose)
-2. Then implement Solution 1 (prevents recurrence)
-3. Monitor warning logs to see if caching issues decrease
+This helps verify the fix works without masking the problem.
 
-**Why not Solution 3:**
+**Why NOT Solution 2 (Fallback):**
+- Masks the real issue instead of fixing it
+- Could ignore correct data if timing causes legitimate differences
+- No pressure to fix root cause if workaround "works"
+- Better to fix caching properly than work around it
+
+**Why NOT Solution 3:**
 - More invasive change
-- Loses the optimization benefit of latest-build.txt
-- Solutions 1+2 are sufficient and less risky
+- Loses optimization benefit of latest-build.txt
+- Solution 1 should be sufficient once caching is fixed
 
 ## Next Steps
 
 1. **Immediate**: Assign to a contributor (issue already labeled "help wanted")
 2. **Implementation**:
-   - Modify `cmd/deck/job_history.go` with fallback logic
-   - Add unit tests in `cmd/deck/job_history_test.go`
-   - Test manually with known-affected job (e.g., ci-kubernetes-e2e-gci-gce)
+   - Modify `pkg/pod-utils/gcs/metadata.go:WriterOptionsFromFileName()` to set Cache-Control for latest-build.txt
+   - Add unit tests in `pkg/pod-utils/gcs/metadata_test.go`
+   - Optionally add debug logging in `cmd/deck/job_history.go` after line 451
 3. **Testing**:
-   - Create test case with stale latest-build.txt
-   - Verify fallback activates correctly
-   - Verify warning logs appear
+   - Verify Cache-Control header is set on uploaded latest-build.txt files
+   - Test that job history shows recent builds after fix
+   - Monitor debug logs (if added) to verify caching is resolved
 4. **Deployment**:
    - Deploy to staging Prow first
-   - Monitor for warnings about stale latest-build.txt
+   - Verify job history displays recent builds correctly
+   - Check that caching issues no longer occur
    - Deploy to production
 5. **Follow-up**:
-   - Monitor warning logs to identify jobs with upload issues
-   - Investigate specific jobs to understand why uploads fail
-   - Consider Solution 3 if pattern emerges
+   - Monitor for any reports of the issue recurring
+   - If caching still occurs, investigate client-side caching in GCS reader
 
 ## Communication Plan
 
 **For the issue:**
-- Comment with findings and proposed solution
-- Ask for maintainer feedback on approach
-- Mention that this is a good "help wanted" issue for contributors
-- Reference this triage analysis
+- Comment with findings (caching root cause, not stale files)
+- Propose Cache-Control header fix
+- Add area/pod-utils label (upload side fix needed)
+- Mention this is a good "help wanted" issue for contributors familiar with pod-utils
 
 **For assignee (hector-vido):**
-- Share triage findings
+- Share triage findings and caching discovery
 - Offer to collaborate on implementation
-- Suggest reviewing Solution 1 as the recommended approach
+- Recommend fixing root cause (Cache-Control) rather than workaround
 
 ## Proposed Issue Augmentation
 
@@ -337,25 +344,30 @@ The issue occurs in `cmd/deck/job_history.go:getJobHistory()`:
 
 **Root cause**: Files uploaded to GCS without `Cache-Control` headers (`pkg/pod-utils/gcs/metadata.go:36-66`), causing GCS/client caching.
 
-## Recommended Fix (Two-Part)
+## Recommended Fix
 
-**Part 1 - Immediate workaround** (add fallback logic in `cmd/deck/job_history.go` after line 470):
+Set `Cache-Control` header when uploading `latest-build.txt` to prevent caching:
+
 ```go
-if len(buildIDs) > 0 && buildIDs[0] > latest {
-    logrus.Warnf("latest-build.txt (%d) cached, actual latest is %d", latest, buildIDs[0])
-    latest = buildIDs[0]
+// In pkg/pod-utils/gcs/metadata.go:WriterOptionsFromFileName()
+func WriterOptionsFromFileName(filename string) (string, io.WriterOptions) {
+    attrs := io.WriterOptions{}
+
+    // Prevent caching of latest-build.txt
+    if filename == "latest-build.txt" {
+        attrs.CacheControl = ptr.To("no-cache, no-store, must-revalidate")
+    }
+
+    // ... existing code for ContentType, ContentEncoding ...
 }
 ```
 
-**Part 2 - Root cause fix** (set Cache-Control header when uploading `latest-build.txt`):
+**Optional**: Add debug logging in `cmd/deck/job_history.go` after line 451 to verify caching is resolved:
 ```go
-// In pkg/pod-utils/gcs/metadata.go or pkg/gcsupload/run.go
-if filename == "latest-build.txt" {
-    attrs.CacheControl = ptr.To("no-cache, no-store, must-revalidate")
-}
+logrus.WithFields(logrus.Fields{"job": root, "latest": latest}).Debug("Read latest-build.txt")
 ```
 
-Part 1 provides immediate relief and diagnostic logging. Part 2 prevents future caching issues.
+This fixes the root cause rather than working around it.
 
 /area pod-utils
 ```
@@ -366,8 +378,9 @@ Part 1 provides immediate relief and diagnostic logging. Part 2 prevents future 
 - **Revised root cause**: Caching issue, not stale files (based on investigation)
 - Evidence that file is correct in GCS but Deck reads cached version
 - Technical flow showing how caching leads to filtering bug
-- Two-part solution: immediate workaround + root cause fix
-- File/line references for both read and write sides
+- Root cause fix: Add Cache-Control header in upload code
+- Optional debug logging to verify fix (without workaround logic)
+- File/line references for upload side where fix is needed
 
 **Why these labels**:
 - `area/deck` - Already applied (read side issue)
@@ -379,4 +392,5 @@ Part 1 provides immediate relief and diagnostic logging. Part 2 prevents future 
 - Didn't retitle - current title is already clear and specific
 - Didn't add priority label - already has assignee working on it
 - Didn't repeat symptoms/examples already well-documented in issue
-- Kept comment concise (3 sections) focusing on root cause discovery and actionable fixes
+- **Not recommending fallback/workaround** - better to fix root cause properly
+- Kept comment concise (3 sections) focusing on root cause fix

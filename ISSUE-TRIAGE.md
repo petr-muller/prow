@@ -292,10 +292,166 @@ This is the approach proposed in PR #563 and addresses the root cause most direc
 - Monitor for any PRs incorrectly blocked (false positives), though unlikely
 - No migration of existing state needed - tracking starts from rollout
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+Fixing this race condition requires deep understanding of concurrency, Tide's merge logic, and careful state management. While the solution approach is well-defined (PR #563), the complexity of race conditions and the criticality of Tide's merge path make this appropriate only for experienced contributors.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: 3 files affected (pkg/tide/tide.go, pkg/tide/status.go, pkg/tide/tide_test.go), estimated ~150 lines of code modifications. Changes touch critical merge decision path.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: High
+- **Details**:
+  - Race condition involving timing windows between GitHub API calls
+  - State tracking across sync loops
+  - Concurrent access to shared state requires proper synchronization
+  - Timing-dependent behavior difficult to test and debug
+  - Must handle context disappearance/reappearance correctly
+- **Level Indication**: 3-4
+
+#### Required Expertise
+- **Assessment**: Deep
+- **Details**:
+  - Understanding of race conditions and concurrent programming
+  - Deep knowledge of Tide's architecture and merge flow
+  - Familiarity with GitHub API behavior (CheckRun lifecycle)
+  - State management and cleanup patterns
+  - Go concurrency primitives (mutexes, proper locking)
+  - Critical path in production system - mistakes could cause incorrect merges or blocks
+- **Level Indication**: 3-4
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Root cause clearly identified (GitHub removes old CheckRun before creating new one)
+  - Solution approach documented in PR #563
+  - Known implementation: track previously seen contexts
+  - Testing scenarios defined
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Complex
+- **Details**:
+  - Must test race condition scenario (context disappears during re-trigger)
+  - Requires understanding timing windows
+  - Need tests for edge cases: optional vs required contexts, reappearance, cleanup
+  - Integration with existing Tide test suite
+  - Difficult to reproduce timing-dependent behavior reliably in tests
+- **Level Indication**: 3-4
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - Only prevents incorrect merges (conservative change)
+  - No configuration changes required
+  - No breaking changes to Tide's behavior
+  - Existing deployments benefit immediately without changes
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**:
+  - Extends existing context checking mechanism
+  - Follows Tide's pattern of tracking PR state
+  - Adds state tracking but doesn't contradict architecture
+  - Requires new pattern (context history per PR/commit) but well-justified
+- **Level Indication**: 2-3
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**:
+  - Works around GitHub API behavior (documented in issue)
+  - GitHub's CheckRun removal-then-creation is external limitation
+  - Solution doesn't require GitHub API changes
+  - No blocking external dependencies
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+Based on this assessment, recommend the following labels:
+- [x] `area/tide`: Core Tide functionality
+- [x] `kind/bug`: Fixing race condition causing incorrect merges
+- [x] `priority/important-soon`: Can cause incorrect merges in production
+- [ ] `good-first-issue`: **Not recommended** - Requires deep expertise in concurrency and Tide
+- [ ] `help-needed`: **Not recommended** - Too complex for typical help-needed; requires Tide expertise
+
+### Guidance for Contributors
+
+**For Level 3 (Large - Requires Expertise)**:
+
+**Prerequisites**:
+- Experience with concurrent programming and race conditions
+- Strong understanding of Tide's architecture
+- Familiarity with Go synchronization primitives
+- Understanding of GitHub API behavior and webhooks
+
+**Recommended Preparation**:
+1. Review existing Tide code:
+   - pkg/tide/tide.go:847-858 (`isPassingTests`)
+   - pkg/tide/tide.go:865-889 (`unsuccessfulContexts`)
+   - pkg/tide/github.go:333-392 (`headContexts`)
+   - pkg/tide/tide.go:2200-2216 (`checkRunToContext`)
+
+2. Understand the race condition:
+   - GitHub removes old CheckRun when re-triggered
+   - Brief window where context is missing from API response
+   - Tide may see "no unsuccessful contexts" and incorrectly merge
+
+3. Study PR #563:
+   - Review the proposed implementation
+   - Understand the state tracking approach
+   - Examine test cases added
+
+**Key Implementation Considerations**:
+- **Thread Safety**: Shared state for tracking contexts must be protected with proper locking
+- **State Cleanup**: Implement cleanup for merged/closed PRs to prevent unbounded memory growth
+- **Context Identification**: Ensure exact matching of context names across observations
+- **Edge Cases**: Handle optional vs required contexts, reappearing contexts, stale data
+
+**Testing Strategy**:
+- Test required context disappears → merge blocked
+- Test optional context disappears → merge proceeds
+- Test context reappears after disappearing → merge proceeds when SUCCESS
+- Test state cleanup for old PRs
+- Consider timing-dependent test scenarios
+
+**Before Starting**:
+- Consult with Tide maintainers
+- Verify approach aligns with PR #563 or propose alternatives
+- Discuss testing strategy for race conditions
+- Plan rollout and monitoring strategy
+
+### Caveats and Considerations
+
+**Why Level 3 (not Level 2)**:
+While the solution is well-defined by PR #563, several factors elevate this to Level 3:
+- Race conditions are notoriously difficult to implement correctly
+- Tide's merge path is critical infrastructure - bugs could cause widespread issues
+- Concurrent state management requires advanced Go expertise
+- Testing race conditions properly is challenging
+
+**Why Level 3 (not Level 4)**:
+- Solution approach is clear and proven viable (PR #563 exists)
+- No architectural contradictions - extends existing patterns
+- Fully backwards compatible
+- No external blockers
+
+**Alternative Consideration**:
+If PR #563 already implements a complete solution and only needs review, the remaining work (code review, testing verification, deployment) might be Level 2. However, implementing this from scratch is definitively Level 3.
+
 ## Next Steps
 
 1. ✅ **Review PR #563**: Solution tracks previously seen contexts to detect disappearing checks
 2. ✅ **Root cause identified**: GitHub removes old CheckRun before new one starts during re-trigger
-3. **Verify PR #563 implementation**: Review code changes to ensure complete solution
-4. **Test coverage**: Ensure PR #563 includes tests for the disappearing context scenario
-5. **Consider monitoring**: Add metrics to track how often contexts disappear to measure bug frequency
+3. ✅ **Effort assessed**: Level 3 - Requires expertise due to concurrency complexity
+4. **Verify PR #563 implementation**: Review code changes to ensure complete solution
+5. **Test coverage**: Ensure PR #563 includes tests for the disappearing context scenario
+6. **Consider monitoring**: Add metrics to track how often contexts disappear to measure bug frequency

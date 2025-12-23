@@ -177,6 +177,32 @@ After the triage environment is set up, you can use focused subcommands to analy
 
 **How to invoke**: After the user mentions wanting to improve the issue, augment it, or prepare a comment, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/augment.md` and follow them.
 
+### Subcommand: brief
+
+**Purpose**: Provide an interactive, step-by-step briefing of triage findings to a human maintainer.
+
+**When to use**: After completing all triage subcommands (initial, research, assess-effort, augment) when the maintainer needs a concise summary.
+
+**What it does**:
+- Presents findings in 7 concise slides (like a presentation)
+- Interactive: waits for user acknowledgment between slides
+- Each slide takes 15-30 seconds to read
+- Total briefing: ~3 minutes
+- Covers: overview, legitimacy, root cause, technical details, solution, effort, recommendations
+- Answers questions as they arise
+- Similar to an engineer briefing an architect
+
+**Slide structure**:
+1. Issue Overview (30s)
+2. Legitimacy Assessment (15s)
+3. Root Cause Analysis (30s)
+4. Technical Details (30s)
+5. Solution Approach (30s)
+6. Effort Assessment (30s)
+7. Recommendations (15s)
+
+**How to invoke**: After the user asks to be briefed, wants a summary, or asks you to walk them through the findings, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/brief.md` and follow them.
+
 ### Future Subcommands
 
 Additional focused subcommands may be added to assist with:

@@ -82,3 +82,11 @@ hugo.linux
 # Tilt local developer settings and personal Tiltfile overrides
 tilt-settings.yaml
 tilt.d/*.tiltfile
+
+.claude/settings.local.json
+.claude/cache/
+.claude/state/
+.claude/temp/
+# but explicitly allow:
+!.claude/commands/
+!.claude/skills/

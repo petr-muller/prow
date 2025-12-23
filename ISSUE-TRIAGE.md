@@ -447,11 +447,65 @@ While the solution is well-defined by PR #563, several factors elevate this to L
 **Alternative Consideration**:
 If PR #563 already implements a complete solution and only needs review, the remaining work (code review, testing verification, deployment) might be Level 2. However, implementing this from scratch is definitively Level 3.
 
+## Proposed Issue Augmentation
+
+### Title Change
+- **No change needed**: Current title "Tide merges PR when retesting GitHub action" is clear and specific
+
+### Proposed GitHub Comment
+
+```
+## Root Cause
+
+This is a race condition in Tide's context checking logic. When a GitHub Action is re-triggered, GitHub temporarily **removes** the old CheckRun from its API before creating the new one. During this brief window (typically a few seconds), the required check is completely missing from GitHub's status API. If Tide's sync loop runs during this window, it sees "no unsuccessful contexts" and incorrectly proceeds with the merge.
+
+## Technical Details
+
+The issue occurs in the context evaluation flow (`pkg/tide/tide.go:865-889`). Tide doesn't currently track which contexts were previously seen for a commit. When a required context disappears, there's no way to distinguish between "context never existed" (might be legitimate) versus "context disappeared" (suspicious, likely a re-trigger). This allows the race window where GitHub has removed the old CheckRun but hasn't created the new one yet.
+
+PR #563 addresses this by maintaining state of previously-seen contexts per PR/commit. When a context that was previously observed disappears, it's treated as PENDING rather than missing, preventing premature merges during the re-trigger window.
+
+/priority important-soon
+```
+
+### Rationale
+
+**What's being added**:
+- **Root cause explanation**: Original issue described the symptoms (Tide merges during re-trigger) but not why it happens (GitHub's API behavior of removing old CheckRun before creating new one)
+- **Technical mechanism**: Explains the specific code flow and why the race occurs (missing context detection can't distinguish between never-existed and disappeared)
+- **Solution reference**: Points to PR #563 which implements the fix via context state tracking
+- **Priority label**: This can cause incorrect merges in production deployments
+
+**Why these labels**:
+- `/area tide`: Already applied - correct, this is Tide's merge logic
+- `/kind bug`: Already applied - correct, this is a race condition bug
+- `/priority important-soon`: **NEW** - Warrants priority because it can cause incorrect merges, affecting production deployments. Not critical-urgent (doesn't break the system) but important enough to prioritize
+- **No difficulty label**: Level 3 issue requiring expertise in concurrency and Tide architecture - not appropriate for good-first-issue or help-wanted
+
+**What's NOT included**:
+- Full code analysis details: Too technical for issue comment, available in PR #563
+- Effort assessment details: Internal triage information, not needed on public issue
+- Multiple solution approaches: PR #563 already has the recommended approach
+- Detailed reproduction steps: Original issue already has example PR demonstrating the problem
+
+### Should This Comment Be Posted?
+
+**Recommendation**: Yes, post this comment.
+
+**Reasons**:
+- Adds valuable context not in original issue (root cause)
+- Explains technical mechanism concisely
+- Points to the fix (PR #563) for anyone wanting to help
+- Priority label is warranted and should be explained
+- Respectful to original reporter (doesn't duplicate their good work)
+- Helps future readers understand the issue quickly
+
 ## Next Steps
 
 1. ✅ **Review PR #563**: Solution tracks previously seen contexts to detect disappearing checks
 2. ✅ **Root cause identified**: GitHub removes old CheckRun before new one starts during re-trigger
 3. ✅ **Effort assessed**: Level 3 - Requires expertise due to concurrency complexity
-4. **Verify PR #563 implementation**: Review code changes to ensure complete solution
-5. **Test coverage**: Ensure PR #563 includes tests for the disappearing context scenario
-6. **Consider monitoring**: Add metrics to track how often contexts disappear to measure bug frequency
+4. ✅ **Augmentation proposed**: Draft comment with root cause and priority label
+5. **Post augmentation comment**: Apply the proposed comment and priority label to the issue
+6. **Verify PR #563 implementation**: Review code changes to ensure complete solution
+7. **Test coverage**: Ensure PR #563 includes tests for the disappearing context scenario

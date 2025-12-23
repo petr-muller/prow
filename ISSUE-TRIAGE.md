@@ -320,6 +320,120 @@ Investigation revealed the culprit was a ProwJob resource (likely manually creat
 - This appears to be a good first issue for diving into Prow codebase
 - Solution approach is clear: add defensive filtering in frontend code
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+This is a straightforward defensive coding fix requiring simple null checks at two locations in prow.ts. The problem is well-understood, the solution is clear, and the scope is minimal (single file, ~5-10 lines of code). Perfect for a new contributor learning the Deck codebase.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: Single file (cmd/deck/static/prow/prow.ts), two locations (~line 49 and ~line 502), estimated 5-10 lines of code to add guard clauses
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Adding `if (!build.status) continue;` guard clauses before destructuring. Straightforward null checking pattern used throughout JavaScript/TypeScript codebases. No algorithmic challenges, no concurrency issues, no complex edge cases beyond the main issue (missing status).
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic TypeScript knowledge and understanding of null/undefined checking. Familiarity with destructuring syntax helpful but can be learned from existing code. Minimal Prow-specific knowledge needed - just understanding that ProwJobs should have a status field. No need to understand Tide, GitHub API, or Prow architecture.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Problem clearly identified (malformed ProwJobs break UI), root cause understood (missing .status field), solution approach agreed upon by maintainers (defensive filtering). No ambiguity about requirements or expected behavior. Maintainer comment explicitly outlines the approach: "filter out garbage Prowjobs".
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Manual testing straightforward - create or find a malformed ProwJob and verify it doesn't appear in state dropdown or break job-bar. Automated testing would be ideal but frontend test infrastructure is minimal (only histogram_test.ts exists). Could add basic TypeScript tests if contributor is motivated, but manual verification sufficient for this fix.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Change only filters out malformed ProwJobs that were already causing UI breakage. No impact on valid ProwJobs. No API changes. No configuration changes. Frontend-only modification. Strictly additive defensive coding - makes system more robust without changing behavior for valid data.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Defensive programming and input validation are standard best practices. Adding null checks before processing untrusted data aligns perfectly with robust software engineering. No new patterns introduced - guard clauses are idiomatic JavaScript/TypeScript. Follows "fail fast" principle.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Pure frontend code change. No external API dependencies. No backend changes needed. No coordination with other systems. Self-contained fix within Deck's TypeScript code.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+Based on this assessment, the current labels are appropriate:
+- [x] `good-first-issue`: Perfect scope and complexity for new contributors
+- [x] `help wanted`: Community contribution welcome (though good-first-issue is more specific)
+- [x] `kind/bug`: Correctly categorized as a bug
+- [x] `area/deck`: Correctly identified component
+
+### Guidance for Contributors
+
+**For Level 1 (Easy)**:
+
+**Prerequisite Knowledge**:
+- Basic TypeScript/JavaScript syntax
+- Understanding of null/undefined in JavaScript
+- Familiarity with object destructuring (or willing to learn)
+- Basic Git workflow
+
+**Getting Started**:
+1. Review the code locations identified in research:
+   - cmd/deck/static/prow/prow.ts lines 49-86 (`optionsForRepo` function)
+   - cmd/deck/static/prow/prow.ts lines 502-683 (main `redraw` loop)
+2. Understand the destructuring pattern currently used
+3. Add guard clause before each destructuring location
+4. Test locally by examining the Prow Status page with the fix applied
+
+**Implementation Approach**:
+```typescript
+// Before each location that destructures build.status, add:
+if (!build.status) {
+  console.warn(`Skipping ProwJob without status: ${build.metadata?.name || 'unknown'}`);
+  continue;
+}
+```
+
+**Testing**:
+- Manual testing: Check that state dropdown doesn't show empty items
+- Visual verification: Ensure job-bar renders without "unknown" entries from malformed data
+- Optional: Add TypeScript test if familiar with test framework
+
+**Mentorship Available**: Yes - maintainers (particularly petr-muller who investigated the issue) can provide guidance if needed
+
+**Related Files to Review**:
+- cmd/deck/static/prow/prow.ts (main file to modify)
+- cmd/deck/static/api/prow.ts (type definitions, for understanding data structure)
+
+**Estimated Time**: 1-2 hours including testing (30 minutes for code changes, 30-90 minutes for testing and PR submission)
+
+### Caveats and Considerations
+
+**Why This Is Good-First-Issue Despite Being Assigned**:
+The issue is already assigned to Qqkyu (as of 2025-12-23), who is approaching it as a learning exercise to "dive into prow code a bit". The assignment doesn't diminish its good-first-issue nature - rather, it confirms that maintainers consider it appropriate for new contributors.
+
+**Testing Limitations**:
+Frontend test coverage for Deck is minimal. While adding proper TypeScript tests would be ideal, it's not strictly required for this fix. Manual testing is acceptable, though contributors interested in improving test coverage are encouraged to add tests.
+
+**Potential Extensions** (not required for this issue):
+- Add similar defensive checks in other Deck pages that process ProwJobs
+- Improve error visibility by logging warnings to console when malformed ProwJobs encountered
+- Add backend validation to prevent malformed ProwJobs from being created
+
+**Alignment with Maintainer Expectations**:
+Maintainer petr-muller commented: "I _think_ this should not be too tricky, seems like what we need is to filter out garbage Prowjobs". This assessment aligns with that expectation - the fix is indeed not tricky and is well-suited for a community contributor.
+
 ## Next Steps
 
 1. Monitor progress on the assigned issue

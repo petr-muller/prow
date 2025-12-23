@@ -1,7 +1,8 @@
 # Triage for Issue #388
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2025-12-23
+**Completed**: 2025-12-23
 
 ## Issue Information
 
@@ -124,6 +125,149 @@ The report mentions "inconsistent results, possibly due to hitting different dec
 - kubernetes/test-infra#34312 - Same issue on k8s.io Prow, closed as "not planned"
 - Both issues describe identical symptoms: job history showing old runs despite newer runs existing
 
+### Effort Assessment
+
+**Complexity Level: 2/5 (Low-Medium)**
+
+This is a well-understood issue with a clear root cause and straightforward solutions.
+
+**Effort Breakdown:**
+
+1. **Code Changes**: Low complexity
+   - Primary change: Modify `getJobHistory()` in `cmd/deck/job_history.go`
+   - Estimated: 5-15 lines of code change
+   - Single file modification
+
+2. **Testing Requirements**: Medium
+   - Unit tests: Need to add/modify tests in `cmd/deck/job_history_test.go`
+   - Integration tests: Should verify behavior with stale latest-build.txt
+   - Manual testing: Test on real Prow instance with live GCS buckets
+
+3. **Risk Assessment**: Low
+   - Change is isolated to job history display logic
+   - No database migrations or config changes needed
+   - Backward compatible
+
+**Estimated Time:**
+- Development: 2-4 hours
+- Testing: 2-3 hours
+- Review/iteration: 1-2 hours
+- **Total: 5-9 hours** (approximately 1 day for an experienced contributor)
+
+## Proposed Solutions
+
+### Solution 1: Add Fallback Logic (RECOMMENDED)
+
+**Description**: When latest-build.txt is stale (older than the actual newest build), use the real maximum build ID instead.
+
+**Implementation** (in `cmd/deck/job_history.go`):
+```go
+// After line 470 (sorting buildIDs)
+sort.Sort(sort.Reverse(uint64slice(buildIDs)))
+
+// Add this logic before line 473
+if len(buildIDs) > 0 && buildIDs[0] > latest {
+    logrus.Warnf("latest-build.txt (%d) is stale, actual latest is %d", latest, buildIDs[0])
+    latest = buildIDs[0]
+}
+if top == emptyID || top > latest {
+    top = latest
+}
+```
+
+**Pros:**
+- Simple, minimal code change
+- Fixes the symptom effectively
+- Makes the system more resilient
+- Backward compatible
+- No breaking changes
+
+**Cons:**
+- Doesn't fix the root cause of stale latest-build.txt
+- latest-build.txt still serves a purpose (optimization), but becomes redundant
+
+**Risk**: Very low - fallback only activates when there's already a problem
+
+### Solution 2: Remove Dependency on latest-build.txt
+
+**Description**: Stop reading latest-build.txt entirely and always use the maximum from listed build IDs.
+
+**Implementation**:
+- Remove `readLatestBuild()` call at line 451
+- Always use `max(buildIDs)` if `top == emptyID`
+
+**Pros:**
+- Completely eliminates the root cause
+- Simplifies the code
+- No dependency on potentially stale files
+
+**Cons:**
+- Changes existing behavior
+- latest-build.txt was originally used as an optimization (to avoid listing when possible)
+- Might have slight performance impact (though 10s timeout already exists)
+
+**Risk**: Low-Medium - changes fundamental assumption
+
+### Solution 3: Improve Upload Reliability
+
+**Description**: Fix the upload side to ensure latest-build.txt is always up-to-date.
+
+**Implementation**:
+- Add retries in `pkg/gcsupload/run.go`
+- Better error handling and logging
+- Investigate GCS consistency guarantees
+
+**Pros:**
+- Fixes root cause on upload side
+- Maintains original design intent
+
+**Cons:**
+- More complex investigation required
+- May not address all causes (caching, consistency)
+- Doesn't help with existing stale files
+
+**Risk**: Medium - requires understanding of all failure modes
+
+## Recommendation
+
+**Implement Solution 1 (Add Fallback Logic)** because:
+1. It's the simplest fix with immediate impact
+2. Low risk and effort
+3. Makes the system resilient without breaking changes
+4. Can be implemented by contributors (issue is labeled "help wanted")
+5. Provides warning logs to help diagnose upload issues
+
+**Optional Follow-up**: After Solution 1 is deployed, investigate upload reliability (Solution 3) to understand why latest-build.txt becomes stale. The warnings added in Solution 1 will help identify affected jobs.
+
 ## Next Steps
 
-(Action items will be added here)
+1. **Immediate**: Assign to a contributor (issue already labeled "help wanted")
+2. **Implementation**:
+   - Modify `cmd/deck/job_history.go` with fallback logic
+   - Add unit tests in `cmd/deck/job_history_test.go`
+   - Test manually with known-affected job (e.g., ci-kubernetes-e2e-gci-gce)
+3. **Testing**:
+   - Create test case with stale latest-build.txt
+   - Verify fallback activates correctly
+   - Verify warning logs appear
+4. **Deployment**:
+   - Deploy to staging Prow first
+   - Monitor for warnings about stale latest-build.txt
+   - Deploy to production
+5. **Follow-up**:
+   - Monitor warning logs to identify jobs with upload issues
+   - Investigate specific jobs to understand why uploads fail
+   - Consider Solution 3 if pattern emerges
+
+## Communication Plan
+
+**For the issue:**
+- Comment with findings and proposed solution
+- Ask for maintainer feedback on approach
+- Mention that this is a good "help wanted" issue for contributors
+- Reference this triage analysis
+
+**For assignee (hector-vido):**
+- Share triage findings
+- Offer to collaborate on implementation
+- Suggest reviewing Solution 1 as the recommended approach

@@ -86,9 +86,216 @@ A fix is already being developed in PR #563, which validates that this is a know
 
 **No comment needed**: Issue is already properly triaged and being actively addressed.
 
+## Code Research
+
+### Current Implementation
+
+**Primary Components**:
+- **Status Checker**: pkg/tide/tide.go:847-858 (`isPassingTests`) - Determines if all required checks have passed
+- **Context Evaluator**: pkg/tide/tide.go:865-889 (`unsuccessfulContexts`) - Identifies failed or missing contexts
+- **GitHub Provider**: pkg/tide/github.go:333-392 (`headContexts`) - Fetches check status from GitHub API
+- **CheckRun Converter**: pkg/tide/tide.go:2200-2216 (`checkRunToContext`) - Converts GitHub CheckRuns to Tide Contexts
+
+**Architecture Overview**:
+Tide periodically evaluates PRs for merge eligibility by fetching their check statuses from GitHub. For GitHub Actions (CheckRuns), the flow is:
+1. Fetch commit status via GraphQL or REST API (`headContexts`)
+2. Convert CheckRuns to Contexts (`checkRunToContext`)
+3. Filter out unsuccessful contexts (`unsuccessfulContexts`)
+4. If no unsuccessful contexts remain, consider PR as passing (`isPassingTests`)
+5. Merge PR if all other requirements met
+
+**Key Code Paths**:
+1. **Merge decision**: pkg/tide/tide.go:847-858 - `isPassingTests` returns `true` only if `len(unsuccessful) == 0`
+2. **Context evaluation**: pkg/tide/tide.go:874 - Contexts are unsuccessful if `ctx.State != githubql.StatusStateSuccess`
+3. **CheckRun conversion**: pkg/tide/tide.go:2204-2206 - Non-completed checks get `StatusStatePending` state
+4. **Missing context detection**: pkg/tide/tide.go:878-880 - Missing required contexts are added to failed list
+
+**Data Flow**:
+```
+1. Tide sync loop triggers
+2. For each PR, call isPassingTests()
+3. isPassingTests() calls provider.headContexts()
+4. headContexts() fetches from GitHub API (checks + status contexts)
+5. CheckRuns converted to Contexts via checkRunToContext()
+6. unsuccessfulContexts() filters for non-Success states
+7. If no unsuccessful contexts, PR is eligible for merge
+```
+
+### Related Code
+
+**Dependencies**:
+- **GitHub GraphQL API**: Fetches CheckRun status and conclusion
+- **Context Checker interface**: Determines which contexts are required vs optional
+- **Branch Protection config**: Defines required contexts per repository
+
+**Callers**:
+- pkg/tide/tide.go:757 - `filterSubpool` calls `isPassingTests` to filter merge candidates
+- pkg/tide/tide.go:912 - `pickHighestPriorityPR` uses `isPassingTests` to select merge-ready PRs
+
+**Similar Functionality**:
+- pkg/tide/tide.go:2162-2181 - `deduplicateContexts` handles multiple runs of same check
+- pkg/tide/tide.go:2183-2198 - `isStateBetter` compares context states to pick best result
+
+### Test Coverage
+
+**Existing Tests**:
+- pkg/tide/tide_test.go - Contains tests for core Tide functionality
+- pkg/tide/github_test.go - Tests GitHub provider implementation
+- PR #563 modifies: pkg/tide/tide_test.go - Adding tests for the fix
+
+**Coverage Assessment**: Partial
+- Basic status checking logic is tested
+- Edge case of re-triggered checks causing context disappearance is **not currently tested**
+- This is the test gap that allowed this bug to exist
+
+**Test Gaps**:
+- Scenario where required context temporarily disappears during re-trigger
+- Race condition between context removal and new check starting
+- Caching behavior when check status changes rapidly
+
+### Documentation Review
+
+**Code Comments**:
+- pkg/tide/github.go:336-342: Documents fallback when commits aren't in logical order
+- pkg/tide/tide.go:2136-2140: Explains empty checkrun per status context behavior
+- pkg/tide/tide.go:2204-2206: Pending state assigned to non-completed checks
+- **No comments** explicitly warning about re-trigger race condition
+
+**Design Documentation**:
+- No ADRs or design docs found specifically addressing check status handling
+- Comments assume check contexts persist once created
+
+**Known Limitations**:
+- pkg/tide/status.go:483-487: Acknowledges status controller could fall behind sync loop
+- However, this refers to tide status context updates, not the re-trigger race
+
+### Root Cause Analysis
+
+**Primary Cause**:
+When a GitHub Action is re-triggered, GitHub **temporarily removes the old CheckRun** before creating the new one. This creates a brief window where:
+1. The old check (with Success conclusion) is deleted from GitHub's API response
+2. The new check hasn't started yet, so it doesn't appear in the API response
+3. The required context is completely **missing** from the contexts list
+4. Tide's `MissingRequiredContexts` check should catch this, BUT there's a race:
+   - If Tide fetches contexts during this window, the check is missing
+   - If the context wasn't previously tracked as required for this specific commit, it may not be detected as missing
+   - Tide may conclude "no unsuccessful contexts" and proceed with merge
+
+**Contributing Factors**:
+1. **No state persistence**: Tide doesn't track what contexts were previously seen for a commit
+2. **Timing window**: The removal-to-creation window can be several seconds
+3. **Sync frequency**: Tide sync loops run periodically, increasing chance of hitting the window
+4. **GitHub API behavior**: Removing old check before creating new one is GitHub's design
+
+**Reproduction Conditions**:
+- Required GitHub Action check exists and has passed
+- User manually re-triggers the check (or re-runs workflow)
+- Tide sync occurs during the window between old check removal and new check creation
+- No other checks are failing
+
+### Proposed Solutions
+
+#### Approach 1: Track Previously Seen Contexts (PR #563's Approach)
+
+**Description**: Maintain state of all contexts previously observed for each PR/commit. When a required context that was previously seen disappears, treat it as PENDING rather than missing/passing.
+
+**Pros**:
+- Directly addresses root cause by detecting disappearing contexts
+- Conservative approach - prevents premature merges
+- Maintains historical context information for better decision making
+- Low risk of false negatives
+
+**Cons**:
+- Requires additional state storage and management
+- Adds complexity to context evaluation logic
+- Need to handle state cleanup for old PRs/commits
+- Slightly increases memory footprint
+
+**Affected Components**:
+- pkg/tide/tide.go: Add context tracking per PR/commit
+- pkg/tide/tide.go: Modify `unsuccessfulContexts` to check for disappeared contexts
+- pkg/tide/tide_test.go: Add tests for disappearing context scenario
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: Fully compatible - only makes merge decisions more conservative
+
+#### Approach 2: Require Fresh Status Before Merge
+
+**Description**: For PRs about to be merged, bypass any caching and fetch fresh status directly from GitHub API immediately before merge decision.
+
+**Pros**:
+- Reduces time window for race condition significantly
+- Simple conceptual model - always use latest data for merge
+- No state persistence needed
+
+**Cons**:
+- Doesn't eliminate race entirely (window still exists, just smaller)
+- Increases GitHub API calls (rate limit considerations)
+- May slow down merge decisions slightly
+- If GitHub's removal-to-creation window is very short, might miss it anyway
+
+**Affected Components**:
+- pkg/tide/tide.go: Add fresh fetch before merge decision
+- pkg/tide/github.go: Ensure no caching for merge-critical fetches
+
+**Complexity**: Low
+
+**Backwards Compatibility**: Fully compatible
+
+#### Approach 3: Detect State Transitions
+
+**Description**: Track context state changes over time. If a context transitions from SUCCESS → (missing) within a short timeframe, treat as PENDING for a grace period.
+
+**Pros**:
+- Handles re-trigger scenario specifically
+- Can detect other anomalous state transitions
+- Provides grace period for check to reappear
+
+**Cons**:
+- More complex state machine
+- Need to tune grace period appropriately
+- Requires timestamp tracking
+- May delay merges unnecessarily if context legitimately removed
+
+**Affected Components**:
+- pkg/tide/tide.go: Add state transition tracking
+- pkg/tide/tide.go: Implement grace period logic
+
+**Complexity**: High
+
+**Backwards Compatibility**: May delay some legitimate merges during grace period
+
+#### Recommendation
+
+**Preferred Approach**: Approach 1 (Track Previously Seen Contexts) - PR #563's solution
+
+This is the approach proposed in PR #563 and addresses the root cause most directly. By tracking previously seen contexts, Tide can distinguish between:
+- A context that never existed (legitimately not required)
+- A context that disappeared (suspicious - likely re-trigger race)
+
+**Key Implementation Considerations**:
+1. **State storage**: Use in-memory map keyed by PR/commit to track seen contexts
+2. **Cleanup**: Implement cleanup for closed/merged PRs to prevent memory growth
+3. **Context identification**: Ensure context names match exactly between observations
+4. **Thread safety**: Protect shared state with appropriate locking
+
+**Testing Requirements**:
+- Test case: Required context present, then disappears, PR should not merge
+- Test case: Required context never present, PR should not merge (existing behavior)
+- Test case: Optional context disappears, PR should still merge
+- Test case: Context returns after disappearing, PR should merge once SUCCESS again
+
+**Migration/Rollout Strategy**:
+- This is a bug fix with no configuration changes required
+- Can be rolled out immediately as it only makes merge decisions more conservative
+- Monitor for any PRs incorrectly blocked (false positives), though unlikely
+- No migration of existing state needed - tracking starts from rollout
+
 ## Next Steps
 
-1. Review PR #563 to understand the proposed fix
-2. Examine the code at pkg/tide/status.go:478-492 to understand the race condition
-3. Verify if the fix in PR #563 adequately addresses the race condition
-4. Consider if additional test coverage is needed to prevent regression
+1. ✅ **Review PR #563**: Solution tracks previously seen contexts to detect disappearing checks
+2. ✅ **Root cause identified**: GitHub removes old CheckRun before new one starts during re-trigger
+3. **Verify PR #563 implementation**: Review code changes to ensure complete solution
+4. **Test coverage**: Ensure PR #563 includes tests for the disappearing context scenario
+5. **Consider monitoring**: Add metrics to track how often contexts disappear to measure bug frequency

@@ -10,6 +10,49 @@
 
 ## Findings
 
+## Initial Validation
+
+**Assessment**: LEGITIMATE
+
+### Analysis
+
+This issue reports a frontend bug in Deck's Prow Status page where malformed ProwJob resources cause visual rendering problems. Specifically:
+
+**Issue Category**: Bug in Prow Component (Deck)
+
+**Repository Scope Check**:
+- Component mentioned: Deck (Prow's web UI)
+- Exists in this repo: Yes
+- Relevant code paths: Deck frontend code (TypeScript/React components handling ProwJob data visualization)
+- Root cause: ProwJob resource without `.status` field breaks job-bar rendering and creates empty state filter entries
+
+**Information Completeness**:
+- Sufficient detail provided: Yes
+  - Screenshots showing good vs broken state
+  - Maintainer investigation identified specific root cause
+  - Technical context well-documented in comments
+  - Solution approach outlined (defensive filtering)
+- Missing information: None - issue is well-documented
+
+**Why This Is Legitimate**:
+1. Describes a real bug in Deck's handling of edge cases
+2. Code robustness issue - frontend should gracefully handle malformed data
+3. Reproducible problem with identified root cause
+4. Belongs in this repository (Deck component)
+5. Not a misconfiguration or user error
+6. Clear technical solution path identified
+
+### Recommendation
+
+**Suggested Action**: Keep open and continue triage
+
+This is a valid bug report that identifies a robustness issue in Deck's frontend. While the root cause is a malformed ProwJob (missing `.status`), the proper fix is to make Deck more defensive in handling such edge cases. The issue is already well-triaged by maintainers, labeled appropriately (kind/bug, area/deck, help wanted), and has an active assignee.
+
+The issue benefits from further research to identify:
+- Exact code location where filtering should be applied
+- Complete set of edge cases to handle
+- Testing strategy for validation
+
 ### Issue Summary
 - **Title**: An unknown state job break job-bar on "Prow Status" page
 - **Reporter**: liangxia

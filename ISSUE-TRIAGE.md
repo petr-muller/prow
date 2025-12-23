@@ -68,7 +68,13 @@ Job history page should display the most recent job runs.
 
 #### Root Cause Identified
 
-**BenTheElder's hypothesis is CORRECT** - The issue is directly related to stale `latest-build.txt` files.
+**REVISED ANALYSIS** - Based on investigation, the actual `latest-build.txt` file in GCS contains the **correct** build ID. The issue is **caching**, not stale files.
+
+**Key Evidence:**
+- When directly checking `latest-build.txt` in browser, it shows the correct recent build ID
+- Opening the file directly in browser "heals" the job history view temporarily
+- Different Deck instances show different stale values (cache inconsistency)
+- This matches a caching problem, not an upload problem
 
 **Code Flow Analysis:**
 
@@ -89,29 +95,41 @@ Job history page should display the most recent job runs.
        }
    }
    ```
-   - The `max` parameter comes from `latest-build.txt`
-   - If `latest-build.txt` contains 1000, but actual builds are [1500, 1400, 1300, 1200, 1100, 1000, ...]
+   - The `max` parameter comes from reading `latest-build.txt`
+   - If Deck reads a **cached** value of 1000, but actual builds are [1500, 1400, 1300, 1200, 1100, 1000, ...]
    - Only builds ≤ 1000 are shown, hiding builds 1100-1500!
 
-3. **Upload Side** (`pkg/gcsupload/run.go:116-122`)
+3. **Upload Side** (`pkg/gcsupload/run.go:116-122`, `pkg/pod-utils/gcs/metadata.go:36-66`)
    - Each job pod uploads `latest-build.txt` with its build ID
-   - This happens via the gcsupload sidecar
-   - If uploads fail or are delayed, the file becomes stale
+   - **CRITICAL**: `WriterOptionsFromFileName()` sets ContentType and ContentEncoding but **NOT CacheControl**
+   - Files are uploaded to GCS **without Cache-Control headers**
+
+4. **Read Side** (`pkg/io/opener.go:225-246`)
+   - Deck uses `pkgio.Opener.Reader()` to read from GCS
+   - For GCS paths (line 226-231), calls `g.NewReader(ctx)` on `*storage.ObjectHandle`
+   - Uses Google Cloud Storage client library directly
+   - **No explicit cache control on reads**
 
 #### Why This Happens
 
-**Potential causes for stale `latest-build.txt`:**
-1. **Upload failures**: GCS write operations may fail silently for latest-build.txt
-2. **Race conditions**: Multiple builds running concurrently might overwrite with older values
-3. **Caching issues**: GCS/CDN caching might serve stale content to deck instances
-4. **Permission issues**: Write failures that aren't properly logged/reported
-5. **Eventual consistency**: GCS eventual consistency means reads might return old values
+**Root cause: Missing Cache-Control headers and client-side caching:**
+
+1. **Upload without Cache-Control**: Files uploaded to GCS without `Cache-Control` headers (pkg/pod-utils/gcs/metadata.go:36-66)
+2. **GCS default caching**: GCS may apply default caching behavior for objects without explicit headers
+3. **Client-side caching**: Google Cloud Storage Go client or HTTP layer may cache file contents
+4. **No cache invalidation**: When new builds write latest-build.txt, old cached values aren't invalidated
+
+**Why opening in browser "heals" it:**
+- Browser HTTP request may use different cache headers or bypass cache
+- Might trigger GCS to refresh its cached response
+- Temporarily makes the correct value available to subsequent Deck reads
 
 #### Inconsistent Results Explained
 
 The report mentions "inconsistent results, possibly due to hitting different deck instances":
-- Each deck instance likely has its own cache of latest-build.txt
-- If deck reads the file at different times, it gets different stale values
+- Each Deck instance has independent caching behavior
+- Different instances may have cached the file at different times
+- Opening in browser affects cache state differently per instance
 - This explains why the same job shows different "latest" dates on different loads
 
 #### Key Files Involved
@@ -156,9 +174,34 @@ This is a well-understood issue with a clear root cause and straightforward solu
 
 ## Proposed Solutions
 
-### Solution 1: Add Fallback Logic (RECOMMENDED)
+### Solution 1: Add Cache-Control Header on Upload (Addresses Root Cause)
 
-**Description**: When latest-build.txt is stale (older than the actual newest build), use the real maximum build ID instead.
+**Description**: Set `Cache-Control: no-cache` when uploading `latest-build.txt` to prevent GCS and clients from caching it.
+
+**Implementation** (in `pkg/pod-utils/gcs/metadata.go` or `pkg/gcsupload/run.go`):
+```go
+// Modify WriterOptionsFromFileName or add special handling for latest-build.txt
+if filename == "latest-build.txt" {
+    attrs.CacheControl = ptr.To("no-cache, no-store, must-revalidate")
+}
+```
+
+**Pros:**
+- Fixes the root cause (caching)
+- Prevents future occurrences
+- Aligns with the file's purpose (frequently changing)
+- Standard HTTP caching solution
+
+**Cons:**
+- Requires understanding of which files need no-cache headers
+- Might slightly increase GCS API calls (no caching)
+- Need to ensure all upload paths set this correctly
+
+**Risk**: Low - only affects latest-build.txt caching behavior
+
+### Solution 2: Add Fallback Logic in Deck (Resilient Workaround)
+
+**Description**: When latest-build.txt value is older than the actual newest build (due to stale cache), use the real maximum build ID instead.
 
 **Implementation** (in `cmd/deck/job_history.go`):
 ```go
@@ -167,7 +210,7 @@ sort.Sort(sort.Reverse(uint64slice(buildIDs)))
 
 // Add this logic before line 473
 if len(buildIDs) > 0 && buildIDs[0] > latest {
-    logrus.Warnf("latest-build.txt (%d) is stale, actual latest is %d", latest, buildIDs[0])
+    logrus.Warnf("latest-build.txt (%d) is cached/stale, actual latest is %d", latest, buildIDs[0])
     latest = buildIDs[0]
 }
 if top == emptyID || top > latest {
@@ -176,19 +219,20 @@ if top == emptyID || top > latest {
 ```
 
 **Pros:**
-- Simple, minimal code change
-- Fixes the symptom effectively
-- Makes the system more resilient
+- Simple, minimal code change (~5-15 lines)
+- Makes the system resilient to cache issues
 - Backward compatible
-- No breaking changes
+- Provides warning logs to diagnose caching problems
+- Works regardless of caching behavior
 
 **Cons:**
-- Doesn't fix the root cause of stale latest-build.txt
-- latest-build.txt still serves a purpose (optimization), but becomes redundant
+- Doesn't fix root cause (caching)
+- Makes latest-build.txt somewhat redundant
+- Symptoms continue (caching) but are hidden
 
 **Risk**: Very low - fallback only activates when there's already a problem
 
-### Solution 2: Remove Dependency on latest-build.txt
+### Solution 3: Remove Dependency on latest-build.txt
 
 **Description**: Stop reading latest-build.txt entirely and always use the maximum from listed build IDs.
 
@@ -197,47 +241,41 @@ if top == emptyID || top > latest {
 - Always use `max(buildIDs)` if `top == emptyID`
 
 **Pros:**
-- Completely eliminates the root cause
+- Completely eliminates the caching problem
 - Simplifies the code
-- No dependency on potentially stale files
+- No dependency on cached files
 
 **Cons:**
 - Changes existing behavior
-- latest-build.txt was originally used as an optimization (to avoid listing when possible)
+- latest-build.txt was originally used as an optimization
 - Might have slight performance impact (though 10s timeout already exists)
 
 **Risk**: Low-Medium - changes fundamental assumption
 
-### Solution 3: Improve Upload Reliability
-
-**Description**: Fix the upload side to ensure latest-build.txt is always up-to-date.
-
-**Implementation**:
-- Add retries in `pkg/gcsupload/run.go`
-- Better error handling and logging
-- Investigate GCS consistency guarantees
-
-**Pros:**
-- Fixes root cause on upload side
-- Maintains original design intent
-
-**Cons:**
-- More complex investigation required
-- May not address all causes (caching, consistency)
-- Doesn't help with existing stale files
-
-**Risk**: Medium - requires understanding of all failure modes
-
 ## Recommendation
 
-**Implement Solution 1 (Add Fallback Logic)** because:
-1. It's the simplest fix with immediate impact
-2. Low risk and effort
-3. Makes the system resilient without breaking changes
-4. Can be implemented by contributors (issue is labeled "help wanted")
-5. Provides warning logs to help diagnose upload issues
+**Implement Solution 1 + Solution 2 (Both)** because:
 
-**Optional Follow-up**: After Solution 1 is deployed, investigate upload reliability (Solution 3) to understand why latest-build.txt becomes stale. The warnings added in Solution 1 will help identify affected jobs.
+**Solution 1 (Cache-Control header):**
+- Fixes the root cause for future uploads
+- Prevents the caching issue from happening
+- Best practice for frequently-changing files
+
+**Solution 2 (Fallback logic):**
+- Provides immediate relief for existing cached files
+- Makes system resilient even if Solution 1 has gaps
+- Adds logging to help diagnose caching issues
+- Simple enough for "help wanted" contributors
+
+**Implementation order:**
+1. Implement Solution 2 first (easier, immediate impact, helps diagnose)
+2. Then implement Solution 1 (prevents recurrence)
+3. Monitor warning logs to see if caching issues decrease
+
+**Why not Solution 3:**
+- More invasive change
+- Loses the optimization benefit of latest-build.txt
+- Solutions 1+2 are sufficient and less risky
 
 ## Next Steps
 
@@ -283,41 +321,51 @@ if top == emptyID || top > latest {
 ```
 ## Root Cause Identified
 
-BenTheElder's hypothesis is correct - this is caused by stale `latest-build.txt` files. The job history code reads `latest-build.txt` to determine the "latest" build, but then uses it to filter results in `cropResults()` (`cmd/deck/job_history.go:404-423`). The filtering logic only shows builds where `buildID <= latest`, which means when `latest-build.txt` is stale, all newer builds get filtered out.
+This is a **caching issue**, not a stale file issue. Investigation shows `latest-build.txt` in GCS contains the correct build ID, but Deck reads cached versions. The filtering logic in `cropResults()` (`cmd/deck/job_history.go:404-423`) only shows builds where `buildID <= latest`, so cached old values hide newer builds.
 
-**Example**: If `latest-build.txt` contains 1000 but actual builds are [1500, 1400, 1300...], only builds ≤ 1000 are shown.
+**Example**: If cached value is 1000 but actual builds are [1500, 1400, 1300...], only builds ≤ 1000 are shown.
+
+**Evidence of caching**: Opening `latest-build.txt` directly in browser shows correct (recent) build ID and temporarily "heals" the job history view.
 
 ## Technical Flow
 
 The issue occurs in `cmd/deck/job_history.go:getJobHistory()`:
-1. Line 451: Reads `latest-build.txt` to get the "latest" build number
+1. Line 451: Reads `latest-build.txt` (gets cached value)
 2. Line 465: Lists ALL actual build IDs from GCS
 3. Line 470: Sorts build IDs in descending order (newest first)
-4. Line 473: **Filters out builds > latest** via `cropResults()`
+4. Line 473: **Filters out builds > cached latest** via `cropResults()`
 
-When `latest-build.txt` is stale due to upload failures, caching, or race conditions, this filtering hides all newer builds.
+**Root cause**: Files uploaded to GCS without `Cache-Control` headers (`pkg/pod-utils/gcs/metadata.go:36-66`), causing GCS/client caching.
 
-## Recommended Fix
+## Recommended Fix (Two-Part)
 
-Add fallback logic in `getJobHistory()` after sorting build IDs (around line 470):
-
+**Part 1 - Immediate workaround** (add fallback logic in `cmd/deck/job_history.go` after line 470):
 ```go
 if len(buildIDs) > 0 && buildIDs[0] > latest {
-    logrus.Warnf("latest-build.txt (%d) is stale, actual latest is %d", latest, buildIDs[0])
+    logrus.Warnf("latest-build.txt (%d) cached, actual latest is %d", latest, buildIDs[0])
     latest = buildIDs[0]
 }
 ```
 
-This simple change (~5-15 lines) makes the system resilient to stale files while adding logging to help diagnose upload issues. It's backwards compatible and low risk.
+**Part 2 - Root cause fix** (set Cache-Control header when uploading `latest-build.txt`):
+```go
+// In pkg/pod-utils/gcs/metadata.go or pkg/gcsupload/run.go
+if filename == "latest-build.txt" {
+    attrs.CacheControl = ptr.To("no-cache, no-store, must-revalidate")
+}
+```
+
+Part 1 provides immediate relief and diagnostic logging. Part 2 prevents future caching issues.
 ```
 
 ### Rationale
 
 **What's being added**:
-- Root cause explanation with specific code references (not in original issue)
-- Technical flow showing how the filtering bug manifests
-- Concrete solution with code snippet and rationale
-- File/line references for contributors
+- **Revised root cause**: Caching issue, not stale files (based on investigation)
+- Evidence that file is correct in GCS but Deck reads cached version
+- Technical flow showing how caching leads to filtering bug
+- Two-part solution: immediate workaround + root cause fix
+- File/line references for both read and write sides
 
 **Why these labels**:
 - Labels are already correct: `area/deck`, `kind/bug`, `help-wanted`
@@ -327,4 +375,4 @@ This simple change (~5-15 lines) makes the system resilient to stale files while
 - Didn't retitle - current title is already clear and specific
 - Didn't add priority label - already has assignee working on it
 - Didn't repeat symptoms/examples already well-documented in issue
-- Kept comment concise (3 paragraphs) focusing on actionable technical insights
+- Kept comment concise (3 sections) focusing on root cause discovery and actionable fixes

@@ -132,6 +132,30 @@ After the triage environment is set up, you can use focused subcommands to analy
 
 **How to invoke**: After the user mentions wanting to research the code or understand the implementation, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/research.md` and follow them.
 
+### Subcommand: assess-effort
+
+**Purpose**: Assess the effort required to address an issue and categorize it into effort levels (1-4).
+
+**When to use**: After research has been completed and the solution approach is understood.
+
+**What it does**:
+- Evaluates scope of changes (files, lines of code, components)
+- Assesses complexity and required expertise
+- Considers backwards compatibility impact
+- Evaluates architectural alignment with Prow
+- Analyzes testing requirements
+- Categorizes effort as Level 1 (easy/good-first-issue), Level 2 (moderate/help-needed), Level 3 (large/expert), or Level 4 (very large/impossible)
+- Recommends appropriate labels
+- Provides guidance for potential contributors
+
+**Effort Levels**:
+- **Level 1**: Easy, well-defined, good for new contributors (good-first-issue)
+- **Level 2**: Moderate, well-defined but involved (help-needed)
+- **Level 3**: Large change or significant uncertainty, requires expertise
+- **Level 4**: Very large or contradicts architecture, near impossible
+
+**How to invoke**: After the user mentions wanting to assess effort or determine appropriate labels, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/assess-effort.md` and follow them.
+
 ### Future Subcommands
 
 Additional focused subcommands may be added to assist with:

@@ -98,6 +98,20 @@ After completing the setup, provide a summary to the user:
 - Mention that all findings will be accumulated in ISSUE-TRIAGE.md
 - Suggest running the `initial` subcommand first to validate the issue
 
+### 5. Workflow Summary
+
+The typical triage workflow is:
+
+1. **Setup**: Initialize triage environment (branch, ISSUE-TRIAGE.md)
+2. **initial**: Validate the issue is legitimate
+3. **research**: Investigate code and identify root cause
+4. **assess-effort**: Determine complexity and effort level
+5. **augment**: Propose improvements to the issue
+6. **brief**: Walk maintainer through findings (optional but recommended)
+7. **wrapup**: Push branches and post augmentation comment
+
+After completing all subcommands, use the `wrapup` subcommand to finalize the triage.
+
 ## Available Subcommands
 
 After the triage environment is set up, you can use focused subcommands to analyze specific aspects of the issue. Each subcommand updates the ISSUE-TRIAGE.md file with its findings.
@@ -202,6 +216,29 @@ After the triage environment is set up, you can use focused subcommands to analy
 7. Recommendations (15s)
 
 **How to invoke**: After the user asks to be briefed, wants a summary, or asks you to walk them through the findings, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/brief.md` and follow them.
+
+### Subcommand: wrapup
+
+**Purpose**: Finalize the triage by pushing branches and posting the augmentation comment to the GitHub issue.
+
+**When to use**: After completing all other triage subcommands (initial, research, assess-effort, augment, and optionally brief).
+
+**What it does**:
+- Verifies all triage steps are complete
+- Pushes claude-maintenance-helpers and issue-triage branches to origin with tracking
+- Retrieves the proposed augmentation comment
+- Adds boilerplate footer with links to triage helper and full triage document
+- Presents complete comment to maintainer for review
+- Posts comment to GitHub issue using `gh` CLI (if confirmed)
+- Updates ISSUE-TRIAGE.md with posting confirmation
+- Provides final summary of triage completion
+
+**Output**:
+- Branches synced to origin
+- GitHub comment posted (if confirmed)
+- Final summary with links to triage document and posted comment
+
+**How to invoke**: After the user says to wrap up, finish, or post the comment, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/wrapup.md` and follow them.
 
 ### Future Subcommands
 

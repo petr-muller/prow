@@ -271,3 +271,60 @@ if top == emptyID || top > latest {
 - Share triage findings
 - Offer to collaborate on implementation
 - Suggest reviewing Solution 1 as the recommended approach
+
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Job history cannot display the latest Runs" is clear and specific
+
+### Proposed GitHub Comment
+
+```
+## Root Cause Identified
+
+BenTheElder's hypothesis is correct - this is caused by stale `latest-build.txt` files. The job history code reads `latest-build.txt` to determine the "latest" build, but then uses it to filter results in `cropResults()` (`cmd/deck/job_history.go:404-423`). The filtering logic only shows builds where `buildID <= latest`, which means when `latest-build.txt` is stale, all newer builds get filtered out.
+
+**Example**: If `latest-build.txt` contains 1000 but actual builds are [1500, 1400, 1300...], only builds ≤ 1000 are shown.
+
+## Technical Flow
+
+The issue occurs in `cmd/deck/job_history.go:getJobHistory()`:
+1. Line 451: Reads `latest-build.txt` to get the "latest" build number
+2. Line 465: Lists ALL actual build IDs from GCS
+3. Line 470: Sorts build IDs in descending order (newest first)
+4. Line 473: **Filters out builds > latest** via `cropResults()`
+
+When `latest-build.txt` is stale due to upload failures, caching, or race conditions, this filtering hides all newer builds.
+
+## Recommended Fix
+
+Add fallback logic in `getJobHistory()` after sorting build IDs (around line 470):
+
+```go
+if len(buildIDs) > 0 && buildIDs[0] > latest {
+    logrus.Warnf("latest-build.txt (%d) is stale, actual latest is %d", latest, buildIDs[0])
+    latest = buildIDs[0]
+}
+```
+
+This simple change (~5-15 lines) makes the system resilient to stale files while adding logging to help diagnose upload issues. It's backwards compatible and low risk.
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation with specific code references (not in original issue)
+- Technical flow showing how the filtering bug manifests
+- Concrete solution with code snippet and rationale
+- File/line references for contributors
+
+**Why these labels**:
+- Labels are already correct: `area/deck`, `kind/bug`, `help-wanted`
+- No changes needed - issue was already properly labeled
+
+**What's NOT included**:
+- Didn't retitle - current title is already clear and specific
+- Didn't add priority label - already has assignee working on it
+- Didn't repeat symptoms/examples already well-documented in issue
+- Kept comment concise (3 paragraphs) focusing on actionable technical insights

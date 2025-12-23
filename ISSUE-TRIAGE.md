@@ -35,6 +35,57 @@ Tide occasionally merges PRs when re-triggering GitHub Actions, even when requir
 ### Related Work
 - PR #563 is working on a fix (mentioned 2025-12-04)
 
+## Initial Validation
+
+**Assessment**: LEGITIMATE
+
+### Analysis
+
+This issue reports a race condition in Tide's merge logic when GitHub Actions are being re-triggered. The issue provides comprehensive information:
+
+1. **Clear Problem Description**: Tide incorrectly merges PRs while required GitHub Action checks are being re-triggered, before those checks have completed
+2. **Concrete Evidence**: Example PR provided (kubernetes-sigs/security-profiles-operator/pull/2595) showing the problematic behavior
+3. **Code Reference**: Author identified suspected code location at pkg/tide/status.go:478-492
+4. **Proper Categorization**: Already labeled as kind/bug and area/tide
+
+**Issue Category**: Bug
+
+**Repository Scope Check**:
+- Component mentioned: Tide
+- Exists in this repo: Yes (verified pkg/tide/status.go exists)
+- Relevant code paths: pkg/tide/status.go:478-492
+- This is a core Prow component maintained in this repository
+
+**Information Completeness**:
+- Sufficient detail provided: Yes
+- Issue includes:
+  - Description of when the problem occurs
+  - Screenshot showing the problematic state
+  - Example PR demonstrating the issue
+  - Reference to suspected race condition in code
+  - Already has kind/bug label
+- Missing information: None critical (reproduction steps could be added but the example PR serves this purpose)
+
+### Recommendation
+
+**Keep open and continue triage.** This is a valid bug report for the Tide component.
+
+The issue clearly describes a race condition bug in Prow's Tide component. The reporter (saschagrunert, a MEMBER) has:
+- Identified the specific problem (race during GitHub Action re-trigger)
+- Provided evidence (screenshot and example PR)
+- Referenced the likely problematic code
+- Demonstrated persistence by preventing the issue from being closed as stale multiple times
+
+A fix is already being developed in PR #563, which validates that this is a known, legitimate issue being actively worked on.
+
+**Suggested Action**:
+- Keep open and continue triage
+- Review PR #563 to understand the proposed solution
+- Examine the suspected code paths to understand the race condition
+- Consider test coverage to prevent regression
+
+**No comment needed**: Issue is already properly triaged and being actively addressed.
+
 ## Next Steps
 
 1. Review PR #563 to understand the proposed fix

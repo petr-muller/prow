@@ -12,25 +12,42 @@ You are helping a project maintainer triage GitHub issue #{issue_number}.
 
 Follow these steps to set up the triage environment:
 
-### 1. Fetch Latest Upstream Development
+### 1. Update claude-maintenance-helpers Branch
 
-First, fetch all upstream changes to ensure you're working with the latest code:
+The `.claude` directory with triage skills exists only in the `claude-maintenance-helpers` branch (not in upstream). First, ensure this branch is up to date from the `origin` remote:
 
 ```bash
+# Fetch all remotes
 git fetch --all
+
+# Switch to claude-maintenance-helpers and update it from origin
+git checkout claude-maintenance-helpers
+git pull --rebase origin claude-maintenance-helpers
 ```
 
-### 2. Create or Switch to Triage Branch
+### 2. Create or Update Triage Branch
 
-Create a new local branch called `issue-triage-{issue_number}` for this triage session.
+Create or update a branch called `issue-triage-{issue_number}` for this triage session. This branch must be based on `claude-maintenance-helpers` to have access to the triage skills.
 
-- If the branch already exists, switch to it (this means triage for this issue is already in progress)
-- If the branch doesn't exist, create it from the current HEAD
+**If the branch doesn't exist (new triage):**
+```bash
+# Check if branch exists
+git rev-parse --verify issue-triage-{issue_number} 2>/dev/null
 
-Use these git commands:
-- Check if branch exists: `git rev-parse --verify issue-triage-{issue_number}`
-- If it exists: `git checkout issue-triage-{issue_number}`
-- If it doesn't exist: `git checkout -b issue-triage-{issue_number}`
+# If it doesn't exist, create it from claude-maintenance-helpers
+git checkout -b issue-triage-{issue_number} claude-maintenance-helpers
+```
+
+**If the branch already exists (triage in progress):**
+```bash
+# Switch to the branch
+git checkout issue-triage-{issue_number}
+
+# Rebase it on top of the updated claude-maintenance-helpers
+git rebase claude-maintenance-helpers
+```
+
+Note: If the rebase encounters conflicts, help the user resolve them before continuing.
 
 ### 3. Initialize or Load Triage Document
 

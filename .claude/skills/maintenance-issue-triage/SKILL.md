@@ -116,10 +116,25 @@ After the triage environment is set up, you can use focused subcommands to analy
 
 **How to invoke**: After the user mentions wanting to run initial validation, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/initial.md` and follow them.
 
+### Subcommand: research
+
+**Purpose**: Conduct in-depth code research to understand the issue and propose high-level architectural solutions.
+
+**When to use**: After initial validation confirms the issue is legitimate.
+
+**What it does**:
+- Explores relevant code paths and components
+- Analyzes architecture and design patterns
+- Examines test coverage and documentation
+- Identifies root causes of the issue
+- Proposes high-level (architectural) approaches to fixing the issue
+- Does NOT write code - focuses on understanding and analysis
+
+**How to invoke**: After the user mentions wanting to research the code or understand the implementation, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/research.md` and follow them.
+
 ### Future Subcommands
 
-Additional focused subcommands will be added to assist with:
-- Code analysis and impact assessment
+Additional focused subcommands may be added to assist with:
 - Reproduction attempt
 - Related issue identification
 - Priority and severity assignment

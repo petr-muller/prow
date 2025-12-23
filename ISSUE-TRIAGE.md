@@ -145,32 +145,41 @@ The report mentions "inconsistent results, possibly due to hitting different dec
 
 ### Effort Assessment
 
-**Complexity Level: 2/5 (Low-Medium)**
+**Complexity Level: 1/5 (Easy) - good-first-issue**
 
-This is a well-understood issue with a clear root cause and straightforward solutions.
+This is a well-understood issue with a clear root cause and a very simple fix.
 
 **Effort Breakdown:**
 
-1. **Code Changes**: Low complexity
-   - Primary change: Modify `getJobHistory()` in `cmd/deck/job_history.go`
-   - Estimated: 5-15 lines of code change
+1. **Code Changes**: Very low complexity
+   - Primary change: Add Cache-Control header in `pkg/pod-utils/gcs/metadata.go:WriterOptionsFromFileName()`
+   - Estimated: ~5 lines of code (single if statement)
    - Single file modification
+   - Pattern already exists (ContentType, ContentEncoding set the same way)
 
-2. **Testing Requirements**: Medium
-   - Unit tests: Need to add/modify tests in `cmd/deck/job_history_test.go`
-   - Integration tests: Should verify behavior with stale latest-build.txt
-   - Manual testing: Test on real Prow instance with live GCS buckets
+2. **Testing Requirements**: Low
+   - Unit tests: Add test case in `pkg/pod-utils/gcs/metadata_test.go` to verify header is set
+   - Can follow existing test patterns in same file
+   - No integration tests needed for this change
 
-3. **Risk Assessment**: Low
-   - Change is isolated to job history display logic
+3. **Risk Assessment**: Very Low
+   - Change is isolated to upload metadata logic
+   - Only affects latest-build.txt caching behavior
    - No database migrations or config changes needed
-   - Backward compatible
+   - Backward compatible (just adds a header)
 
 **Estimated Time:**
-- Development: 2-4 hours
-- Testing: 2-3 hours
-- Review/iteration: 1-2 hours
-- **Total: 5-9 hours** (approximately 1 day for an experienced contributor)
+- Development: 0.5-1 hour (add if statement)
+- Testing: 1-2 hours (add unit test following existing patterns)
+- Review/iteration: 0.5-1 hour
+- **Total: 2-4 hours** (half day for a new contributor)
+
+**Why Level 1**:
+- The fix itself is trivial (~5 lines)
+- Clear location and clear solution provided
+- Follows existing patterns in same function
+- Good learning opportunity: HTTP caching, GCS uploads, testing
+- Well-defined with specific code snippet provided
 
 ## Proposed Solutions
 
@@ -286,20 +295,27 @@ This helps verify the fix works without masking the problem.
 
 ## Next Steps
 
-1. **Immediate**: Assign to a contributor (issue already labeled "help wanted")
-2. **Implementation**:
-   - Modify `pkg/pod-utils/gcs/metadata.go:WriterOptionsFromFileName()` to set Cache-Control for latest-build.txt
-   - Add unit tests in `pkg/pod-utils/gcs/metadata_test.go`
+1. **Immediate**: Good candidate for new contributors (good-first-issue)
+   - Simple fix (~5 lines)
+   - Clear guidance provided
+   - Good learning opportunity
+
+2. **Implementation** (2-4 hours total):
+   - Add ~5 lines in `pkg/pod-utils/gcs/metadata.go:WriterOptionsFromFileName()`
+   - Follow existing pattern (ContentType, ContentEncoding)
+   - Add unit test in `pkg/pod-utils/gcs/metadata_test.go`
    - Optionally add debug logging in `cmd/deck/job_history.go` after line 451
+
 3. **Testing**:
-   - Verify Cache-Control header is set on uploaded latest-build.txt files
-   - Test that job history shows recent builds after fix
-   - Monitor debug logs (if added) to verify caching is resolved
+   - Unit test: Verify Cache-Control header is set for latest-build.txt
+   - Manual test: Verify job history shows recent builds after fix
+   - Monitor for any caching issues post-deployment
+
 4. **Deployment**:
    - Deploy to staging Prow first
    - Verify job history displays recent builds correctly
-   - Check that caching issues no longer occur
    - Deploy to production
+
 5. **Follow-up**:
    - Monitor for any reports of the issue recurring
    - If caching still occurs, investigate client-side caching in GCS reader
@@ -308,14 +324,16 @@ This helps verify the fix works without masking the problem.
 
 **For the issue:**
 - Comment with findings (caching root cause, not stale files)
-- Propose Cache-Control header fix
-- Add area/pod-utils label (upload side fix needed)
-- Mention this is a good "help wanted" issue for contributors familiar with pod-utils
+- Propose Cache-Control header fix (~5 lines of code)
+- Add area/pod-utils and good-first-issue labels
+- Highlight that fix is simple and well-defined for new contributors
+- Provide exact code location and implementation guidance
 
 **For assignee (hector-vido):**
 - Share triage findings and caching discovery
-- Offer to collaborate on implementation
+- Note that fix is simpler than initially thought
 - Recommend fixing root cause (Cache-Control) rather than workaround
+- Mention this could be a great issue for mentoring a new contributor
 
 ## Proposed Issue Augmentation
 
@@ -370,6 +388,7 @@ logrus.WithFields(logrus.Fields{"job": root, "latest": latest}).Debug("Read late
 This fixes the root cause rather than working around it.
 
 /area pod-utils
+/good-first-issue
 ```
 
 ### Rationale
@@ -383,10 +402,11 @@ This fixes the root cause rather than working around it.
 - File/line references for upload side where fix is needed
 
 **Why these labels**:
-- `area/deck` - Already applied (read side issue)
+- `area/deck` - Already applied (affects job history display)
+- `area/pod-utils` - Need to add (fix goes in pod-utils/gcs)
 - `kind/bug` - Already applied
-- `help-wanted` - Already applied (matches Level 2)
-- **Need to add**: `area/pod-utils` - Write side issue (missing Cache-Control in upload code)
+- `good-first-issue` - Need to add (Level 1 - simple fix with clear guidance)
+- `help-wanted` - Already applied (actively seeking contributors)
 
 **What's NOT included**:
 - Didn't retitle - current title is already clear and specific

@@ -94,8 +94,35 @@ After completing the setup, provide a summary to the user:
 
 - Confirm the triage branch is active
 - Show the current state of the ISSUE-TRIAGE.md file
-- Explain that triage subcommands will be available to help analyze different aspects of the issue
+- Explain that triage subcommands are available to help analyze different aspects of the issue
 - Mention that all findings will be accumulated in ISSUE-TRIAGE.md
+- Suggest running the `initial` subcommand first to validate the issue
+
+## Available Subcommands
+
+After the triage environment is set up, you can use focused subcommands to analyze specific aspects of the issue. Each subcommand updates the ISSUE-TRIAGE.md file with its findings.
+
+### Subcommand: initial
+
+**Purpose**: Validate whether the issue constitutes a legitimate record that should be kept.
+
+**When to use**: First step after setting up the triage environment.
+
+**What it does**:
+- Analyzes issue title, description, and context
+- Determines if it's a bug/feature for this repository vs misconfiguration/wrong repo
+- Checks if sufficient information is provided
+- Provides recommendation: LEGITIMATE, NEEDS_INFO, CLOSE, or REDIRECT
+
+**How to invoke**: After the user mentions wanting to run initial validation, read the instructions from `.claude/skills/maintenance-issue-triage/subcommands/initial.md` and follow them.
+
+### Future Subcommands
+
+Additional focused subcommands will be added to assist with:
+- Code analysis and impact assessment
+- Reproduction attempt
+- Related issue identification
+- Priority and severity assignment
 
 ## Important Notes
 
@@ -103,3 +130,4 @@ After completing the setup, provide a summary to the user:
 - All triage findings should be documented in ISSUE-TRIAGE.md
 - The ISSUE-TRIAGE.md file serves as the shared state between different triage subcommands
 - Commits should be made regularly to preserve triage progress
+- Run subcommands in sequence, starting with `initial` validation

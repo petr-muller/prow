@@ -1,3 +1,8 @@
+---
+name: maintenance::issue::triage
+description: Helps maintainers triage GitHub issues by orchestrating focused triage subcommands. Use when triaging issues.
+---
+
 # Issue Triage
 
 Helps maintainers triage GitHub issues by orchestrating focused triage subcommands.

@@ -78,3 +78,11 @@ hugo.linux
 # Folders of common IDEs
 .idea/
 .vscode/
+
+.claude/settings.local.json
+.claude/cache/
+.claude/state/
+.claude/temp/
+# but explicitly allow:
+!.claude/commands/
+!.claude/skills/

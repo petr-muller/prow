@@ -559,6 +559,74 @@ Based on this assessment:
 
 6. **Area label**: Issue is currently labeled `area/tide` but should also (or instead) be labeled `area/deck` since the implementation is in Deck. Tide is not directly involved.
 
+### Proposed Issue Augmentation
+
+#### Title Change
+
+- **Current**: `[feature] Rerun queue discard extra runs`
+- **Proposed**: `Prevent duplicate concurrent job reruns in Deck`
+- **Rationale**:
+  - Remove non-standard `[feature]` prefix (kind label serves this purpose)
+  - "Rerun queue" is confusing - no such thing exists, issue is about preventing duplicates
+  - Add component name (Deck) for clarity
+  - More specific and actionable phrasing
+  - Concise and descriptive
+
+#### Proposed GitHub Comment
+
+```markdown
+/retitle Prevent duplicate concurrent job reruns in Deck
+
+## Root Cause
+
+This issue occurs due to a race condition combined with lack of automatic deduplication. When multiple users click "Rerun" within seconds of each other, Deck's rerun handler (`cmd/deck/rerun.go:245-347`) creates multiple distinct ProwJob objects, each with a unique ID. If these jobs reach Plank's scheduler before the first transitions from TriggeredState to PendingState, all pass the concurrency check and execute simultaneously. While BenTheElder mentioned the existing queue feature (`job_queue_name` with capacity limits), it's opt-in and not configured for most jobs, including the Conformance-GCE job from the incident.
+
+## Recommended Solution
+
+Add duplicate detection in Deck before creating new ProwJobs. When a rerun is requested, query for existing ProwJobs with the same name in SchedulingState, TriggeredState, or PendingState within a recent time window (5-10 minutes). If found, return the existing job instead of creating a duplicate, with UI feedback like "A rerun was already triggered 3 minutes ago by user X." This approach prevents duplicates at the source and provides immediate user feedback.
+
+## Implementation Guidance
+
+The fix should be implemented in `cmd/deck/rerun.go` by adding a helper function to query recent pending reruns before the job creation step at line 326. The implementation can reference `pkg/plank/reconciler.go:1117-1139` for ProwJob state filtering patterns. This is a moderate-complexity change affecting 2-4 files (~200-300 LOC) suitable for contributors familiar with Go and Kubernetes client-go. All triage research and detailed implementation guidance is available in the `issue-triage-436` branch.
+
+/area deck
+/help-wanted
+```
+
+#### Rationale
+
+**What's being added**:
+
+1. **Root cause explanation**: The original issue describes the symptom (3 concurrent runs) but doesn't explain *why* it happens. Added technical explanation of the race condition between Deck creating jobs and Plank checking concurrency, plus clarification that the existing queue feature doesn't solve this because it's opt-in.
+
+2. **Recommended solution**: The issue asks "how can we ensure..." but doesn't specify which approach to take. Based on research, Approach 2 (Deck deduplication) is the best path forward. This paragraph gives clear direction.
+
+3. **Implementation guidance**: Added concrete technical details (file paths, line numbers, patterns to follow) that weren't in the original issue. This helps contributors know where to start and sets expectations for scope.
+
+**Why these labels**:
+
+- `/area deck`: The implementation is in Deck's rerun handler (`cmd/deck/rerun.go`), not in Tide. Issue is currently labeled `area/tide` (probably because of confusion about components), but Deck is the correct component. Tide handles merge automation, not manual reruns.
+
+- `/help-wanted`: Based on Level 2 effort assessment - this is a moderate-complexity, well-defined feature suitable for skilled contributors. Not `good-first-issue` because it requires understanding ProwJob lifecycle, Kubernetes client-go, and Deck's architecture.
+
+- **No `/retitle` reconsideration**: Actually, on second thought, the retitle is warranted because:
+  - `[feature]` prefix is non-standard (use kind label instead)
+  - "Rerun queue" is misleading terminology
+  - Missing component name (Deck)
+  - Current title doesn't clearly state the desired behavior
+
+**What's NOT included**:
+
+- **Detailed triage findings**: All the research (4 solution approaches, root cause analysis, architecture diagrams) is valuable but too much for a GitHub comment. It's preserved in ISSUE-TRIAGE.md for contributors who want deep context.
+
+- **Queue feature details**: Mentioned briefly but didn't elaborate on how it works, since it's not the recommended solution approach and would add complexity without value.
+
+- **Priority label**: Not adding `/priority` because while this is a real issue that wastes resources, it's not critical-urgent. It's a nice-to-have efficiency improvement. Let maintainers decide on priority.
+
+- **Effort assessment details**: Mentioned "moderate-complexity" and "2-4 files" but didn't include the full 8-factor analysis - that level of detail is in the triage doc for contributors who need it.
+
+- **Multiple solution approaches**: Only included the recommended approach (Approach 2) to avoid confusion. Other approaches are documented in triage doc if needed.
+
 ## Next Steps
 
 (Action items will be added here)

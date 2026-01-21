@@ -355,6 +355,210 @@ Add client-side UI locking to disable the rerun button temporarily after click, 
 4. **Phase 4**: Enable globally with opt-out for jobs that need it
 5. **Phase 5**: Add UI improvements (show existing rerun status)
 
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+#### Summary
+
+This is a moderate-complexity feature requiring changes to 2-4 files (~200-300 LOC) with a well-defined solution approach. While the problem and solution are clear, implementation requires understanding ProwJob lifecycle, Kubernetes client usage, and Deck's authorization flow. Suitable for contributors with some Prow experience.
+
+#### Factor Analysis
+
+##### Scope of Changes
+- **Assessment**: Moderate
+- **Details**:
+  - Primary: cmd/deck/rerun.go - Add duplicate detection logic to handleRerun() (~100-150 LOC)
+  - Secondary: cmd/deck/rerun_test.go - Add comprehensive test cases (~100-150 LOC)
+  - Optional: pkg/config/config.go - Add configuration for time window and opt-out behavior (~20-30 LOC)
+  - Total: 2-4 files, approximately 200-300 lines of code
+  - Affects single component (Deck), isolated changes
+- **Level Indication**: 2-3
+
+##### Complexity
+- **Assessment**: Moderate
+- **Details**:
+  - Core logic is straightforward: query existing ProwJobs, filter by state/name/time, return result
+  - Need to handle time window calculation (within last N minutes)
+  - State filtering: include SchedulingState, TriggeredState, PendingState; exclude terminal states
+  - Edge cases: job name matching, handling missing timestamps, concurrent rerun requests
+  - No concurrency primitives needed (Kubernetes API handles that)
+  - No algorithmic challenges
+  - Main complexity is in getting the filtering logic right
+- **Level Indication**: 2
+
+##### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - **Go programming**: Standard Go with Kubernetes client-go
+  - **ProwJob lifecycle**: Understanding of ProwJob states (Scheduling → Triggered → Pending → Terminal)
+  - **Kubernetes client**: Using client to list/filter ProwJobs with field selectors
+  - **Deck internals**: Understanding rerun handler flow and authorization
+  - **Testing**: Writing unit tests with mock Kubernetes clients
+  - Can be learned from existing code patterns in cmd/deck/
+  - Does NOT require: Deep Prow architecture knowledge, concurrency expertise, or distributed systems concepts
+- **Level Indication**: 2-3
+
+##### Clarity and Certainty
+- **Assessment**: Well-defined with minor details to finalize
+- **Details**:
+  - Problem is crystal clear from issue and research
+  - Solution approach (Approach 2) is well-documented and agreed upon
+  - Some implementation details to decide:
+    - Time window threshold (recommend 5-10 minutes, make configurable)
+    - Exact UI feedback message format
+    - Whether to make it opt-in initially vs default-on with opt-out
+  - But these are minor decisions, not fundamental uncertainty
+- **Level Indication**: 1-2
+
+##### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - Unit tests needed:
+    1. Duplicate detection logic: same job, within time window → blocked
+    2. Time window boundaries: just inside window → blocked, just outside → allowed
+    3. Different job names → allowed
+    4. Terminal state jobs → allowed (not considered duplicates)
+    5. Opt-out configuration → allowed even if duplicate
+  - Can follow existing test patterns in cmd/deck/rerun_test.go
+  - Need to mock Kubernetes client for ProwJob queries
+  - No integration tests required for initial implementation
+  - Testing is straightforward, not complex
+- **Level Indication**: 2-3
+
+##### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - Additive feature - doesn't break existing functionality
+  - Only affects behavior when duplicate rerun is attempted
+  - Can be rolled out with feature flag for gradual adoption
+  - Can provide opt-out per job via configuration: `allow_parallel_reruns: true`
+  - No impact on existing jobs or deployments unless enabled
+  - Minimal risk: worst case is blocking a legitimate rerun, easily fixed by waiting or configuration
+  - No API changes, no config format changes (unless adding opt-out option)
+- **Level Indication**: 1-2
+
+##### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**:
+  - Natural extension of Deck's rerun handler responsibilities
+  - Deck already handles authorization, validation, and job creation
+  - Adding duplicate check fits logically before job creation step
+  - Follows pattern: validate → check authorization → **check duplicates** → create job
+  - No new architectural patterns required
+  - Doesn't contradict any existing design decisions
+  - BenTheElder suggested existing queue feature, but rerun deduplication is complementary, not contradictory
+- **Level Indication**: 2-3
+
+##### External Dependencies
+- **Assessment**: Well-supported
+- **Details**:
+  - Uses standard Kubernetes client-go to query ProwJobs
+  - ProwJobs are CRDs stored in Kubernetes API - well-supported, stable
+  - No GitHub API dependencies
+  - No external service dependencies
+  - All required APIs are mature and documented
+- **Level Indication**: 1-3
+
+#### Effort Level Determination
+
+**Factors favoring Level 1**: Clarity (1-2), Backwards compatibility (1-2)
+**Factors favoring Level 2**: Scope (2-3), Complexity (2), Expertise (2-3), Testing (2-3), Architecture (2-3), External deps (1-3)
+**Factors favoring Level 3**: None
+**Factors favoring Level 4**: None
+
+**Overall assessment**: Clear **Level 2** - Most factors point to moderate effort. While the problem is well-defined and clear, the implementation requires moderate understanding of Prow components and moderate code changes across multiple files.
+
+#### Recommended Labels
+
+Based on this assessment:
+- [x] `help-wanted`: Good scope for skilled contributors familiar with Go and Kubernetes
+- [x] `kind/feature`: New feature request (already applied)
+- [x] `area/deck`: Primary component affected (currently labeled area/tide, should also include area/deck)
+- [ ] `good-first-issue`: Requires moderate Prow knowledge and understanding of ProwJob lifecycle, not suitable for complete beginners
+- [ ] `priority/important-soon`: Nice to have but not critical (up to maintainers)
+
+#### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+
+**Suitable for**: Contributors who have:
+- Solid Go programming experience
+- Familiarity with Kubernetes client-go library
+- Understanding of (or willingness to learn) ProwJob CRD lifecycle
+- Experience writing unit tests with mocks
+
+**Preparation steps**:
+1. **Read the code**:
+   - cmd/deck/rerun.go - Understand current rerun handler flow
+   - pkg/apis/prowjobs/v1/types.go - Understand ProwJob states and spec fields
+   - cmd/deck/rerun_test.go - See existing test patterns
+
+2. **Understand ProwJob states**:
+   - SchedulingState: Just created, waiting to be scheduled
+   - TriggeredState: Scheduled, pod being created
+   - PendingState: Pod running
+   - Terminal states: SuccessState, FailureState, AbortedState, ErrorState
+
+3. **Review this triage document**: All research and solution approaches are documented in ISSUE-TRIAGE.md
+
+**Recommended implementation approach**:
+
+1. **Start with the duplicate detection helper function**:
+   ```go
+   func (s *Server) findRecentPendingRerun(ctx context.Context, jobName string, within time.Duration) (*prowv1.ProwJob, error)
+   ```
+   This queries ProwJobs by name, filters by state and creation time.
+
+2. **Modify handleRerun()** to call the helper before creating new ProwJob:
+   - If duplicate found, return HTTP response with informative message
+   - If no duplicate, proceed with existing job creation logic
+
+3. **Add configuration** (optional for initial PR):
+   - Time window configuration (default 5 minutes)
+   - Per-job opt-out flag
+
+4. **Write comprehensive tests**:
+   - Follow patterns in cmd/deck/rerun_test.go
+   - Mock Kubernetes client to return various ProwJob scenarios
+   - Test boundary conditions
+
+**Key implementation considerations**:
+- Use field selectors or client-side filtering to find ProwJobs by name
+- Check CreationTimestamp to enforce time window
+- Handle edge case where job has no CreationTimestamp set
+- Consider using a configurable feature flag for gradual rollout
+- Return user-friendly error message: "A rerun was already triggered 3 minutes ago"
+
+**Questions to ask maintainers**:
+- Preferred time window default (5 min? 10 min?)
+- Should this be opt-in (feature flag) initially or opt-out?
+- Should we add metrics for blocked duplicate reruns?
+- Preferred error message format for UI display
+
+**Related code to review**:
+- pkg/plank/reconciler.go:1117-1139 - Shows how to count/filter ProwJobs by state
+- cmd/deck/rerun.go:151-162 - Shows how to query ProwJob by name
+
+#### Caveats and Considerations
+
+**Important notes**:
+
+1. **Hybrid approach**: Consider implementing both Approach 2 (Deck deduplication) and Approach 3 (global default MaxConcurrency) for defense-in-depth. This would increase scope to Level 2-3 boundary but provide more robust solution.
+
+2. **Edge case - legitimate parallel reruns**: Some jobs may legitimately want multiple concurrent reruns (e.g., flaky test investigation). Ensure opt-out mechanism exists.
+
+3. **Time window trade-off**:
+   - Too short (1-2 min): May not prevent duplicates if first job takes time to transition states
+   - Too long (30+ min): May block legitimate reruns after fixing infrastructure issues
+   - Recommend: Start with 5-10 minutes, make configurable
+
+4. **Feature flag recommendation**: Consider implementing with feature flag disabled by default, then enable for specific jobs (scale tests, conformance tests) to validate before global rollout.
+
+5. **Future enhancement**: Could extend to show "Rerun already in progress" in UI proactively, not just when clicking rerun button. This would be a follow-up enhancement.
+
+6. **Area label**: Issue is currently labeled `area/tide` but should also (or instead) be labeled `area/deck` since the implementation is in Deck. Tide is not directly involved.
+
 ## Next Steps
 
 (Action items will be added here)

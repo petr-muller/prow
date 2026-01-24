@@ -565,10 +565,62 @@ Contributor tsj-30 has already assigned themselves and proposed an approach that
 **Alternative Consideration**:
 If the full scope feels overwhelming, focus on getting PR 1 (infrastructure) solid first. Subsequent PRs are mostly mechanical updates following the pattern established in PR 1.
 
+---
+
+### Proposed Issue Augmentation
+
+#### Title Change
+
+- **No change needed**: Current title "Cannot run prow at a subpath" is clear and specific. While it could be slightly more precise by saying "Deck" instead of "prow", the current title is already reasonably descriptive and the issue body makes it clear this is about Deck.
+
+#### Proposed GitHub Comment
+
+```markdown
+## Root Cause
+
+The issue occurs because Deck uses **hardcoded absolute paths** throughout the codebase that assume deployment at the root path (`/`). While ingress path rewriting can forward the initial request, subsequent browser requests for static assets and API endpoints bypass the ingress rewrite because they use absolute paths. For example, when the browser requests `/static/style.css` or `/prowjobs.js`, these go directly to the root domain instead of `/prow/static/style.css` and `/prow/prowjobs.js`.
+
+## Technical Details
+
+The problem exists across all layers:
+- **HTTP handlers** (`cmd/deck/main.go:312-507`): All routes registered with absolute paths like `mux.Handle("/static/", ...)`, `mux.Handle("/pr", ...)`
+- **HTML templates** (`cmd/deck/template/*.html`): Asset references hardcoded as `href="/static/style.css"`, navigation links as `href="/pr"`
+- **Frontend TypeScript** (`cmd/deck/static/**/*.ts`): URL construction like `` `${location.host}/rerun` `` assumes root path
+- **CSRF middleware** (`cmd/deck/main.go:506`): Configured with `csrf.Path("/")`
+
+There is currently no `--base-path` configuration option or mechanism to prepend a URL prefix. The solution requires adding base path support across all these layers, which can be broken into smaller PRs: handler infrastructure, template updates, frontend updates, and edge cases.
+
+/help-wanted
+```
+
+#### Rationale
+
+**What's being added**:
+- **Root cause explanation**: Why ingress rewrites don't solve the problem (browser makes direct requests)
+- **Technical scope**: Specific file paths and layers affected (handlers, templates, frontend, CSRF)
+- **Solution context**: Mentions the multi-layer nature and that it can be broken into smaller PRs
+
+**Why these labels**:
+- `/area deck`: Already applied - correctly identifies Deck component
+- `/kind bug`: Already applied - correctly categorized as bug/missing feature
+- `/help-wanted`: Based on Level 2 effort assessment - this is a moderate, well-defined issue suitable for a skilled contributor
+
+**What's NOT included**:
+- No `/retitle`: Current title is already clear enough
+- No `/priority`: Work is already in progress, maintainer hasn't indicated urgency
+- No `/good-first-issue`: Too large and multi-layered (10-15 files across Go/templates/TypeScript)
+- Not repeating what the reporter already said (they already mentioned static assets and API issues)
+- Not including the detailed implementation plan (that would be too verbose for a comment; contributor already has approval for their approach)
+
+**Note on posting**:
+Since contributor tsj-30 is already actively working on this with an approved approach, the augmentation comment is **optional**. The technical context could be helpful for the broader community and future contributors, but it's not critical since work is already underway. The `/help-wanted` label would still be appropriate to indicate this is open for community contribution.
+
+**Recommendation**: Consider posting a simplified version that just adds the root cause paragraph and the `/help-wanted` label, acknowledging the active work by tsj-30.
+
 ## Next Steps
 
 1. ✅ Run research subcommand to explore Deck's routing, template rendering, and static asset serving
 2. ✅ Run assess-effort subcommand to evaluate implementation complexity
-3. Run augment subcommand to enhance issue with technical details
+3. ✅ Run augment subcommand to enhance issue with technical details
 4. Run brief subcommand for final review
 5. Run wrapup subcommand to finalize triage

@@ -314,9 +314,71 @@ Small, well-defined fix with clear solution and comprehensive test coverage. Req
 
 **If Assigning to New Contributor**: A maintainer should explain Jenkins matrix build behavior and why the `building` field matters. Once that concept is clear, the implementation is straightforward.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: Wrong prow status during Jenkins parallel pipeline test
+- **Proposed**: Jenkins operator accepts partial results from matrix builds as final status
+- **Rationale**: More specific and clearer. Mentions the component (jenkins-operator), describes the specific problem (accepts partial results), and indicates the impact (treats them as final). The word "wrong" is vague; "accepts partial results as final" is precise.
+
+### Proposed GitHub Comment
+
+```
+/retitle Jenkins operator accepts partial results from matrix builds as final status
+
+## Root Cause
+
+The jenkins-operator doesn't check the `building` field from the Jenkins API when determining build status. In matrix/parallel pipelines, Jenkins can set a partial `result` (e.g., "SUCCESS" or "FAILURE") when one matrix cell completes, while the overall build is still executing (`building: true`). The status checking logic in `pkg/jenkins/jenkins.go:125-132` only examines the `result` field and incorrectly treats the partial result as final, causing Prow to report premature status to GitHub.
+
+## Technical Details
+
+Jenkins matrix builds exhibit this behavior: when one branch finishes before others, the API returns `{"building": true, "result": "SUCCESS"}` simultaneously. The current `IsRunning()` function returns `true` only when `result == nil`, so it returns `false` when a result exists, even though `building` is still `true`. This causes `IsSuccess()` or `IsFailure()` to return `true` prematurely, and Prow marks the ProwJob as complete before all matrix cells finish.
+
+## Fix
+
+PR #598 addresses this by adding the `building` field to the Build struct, including it in the Jenkins API query, and updating `IsRunning()` to check `building` first: `return jb.Building || (jb.Result == nil && !jb.enqueued)`. This ensures Prow correctly waits for all matrix branches to complete before reporting final status.
+
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- **Root cause explanation**: The issue description explains *what* happens but not *why*. The comment adds the technical reason: missing `building` field check in `pkg/jenkins/jenkins.go:125-132`.
+- **Jenkins matrix build behavior**: Explains the specific API response pattern that triggers the bug (`building: true` + `result` set simultaneously), which helps contributors understand the edge case.
+- **Technical implementation details**: Describes how the status checking logic fails (IsRunning returns false when result exists even if building is true).
+- **PR #598 reference**: Points to the fix so contributors know work is in progress and can review the solution.
+
+**Why these labels**:
+- `/retitle`: Current title "Wrong prow status" is vague. New title is more specific and mentions the component.
+- `/good-first-issue`: Based on Level 1 effort assessment. Small scope (2 files, 8 LOC), well-defined problem, clear solution demonstrated in PR #598. Perfect for new contributors to learn about jenkins-operator.
+- **NOT adding** `/area jenkins-operator`: Already applied by petr-muller on April 17, 2025
+- **NOT adding** `/kind bug`: Already applied when issue was created
+
+**What's NOT included**:
+- **Priority label**: While this bug causes incorrect CI status reporting, it has existed for 20+ months without critical impact, and PR #598 is already addressing it. Maintainers can assess priority separately.
+- **Detailed code walkthrough**: Kept technical details concise (3 paragraphs) rather than explaining every code path. The comment provides enough context for contributors to understand the issue and review PR #598.
+- **Repetition of reproduction steps**: Original issue already has excellent reproduction cases with links. No need to repeat.
+- **Test coverage discussion**: Not essential for the issue description. Contributors working on this will naturally review the test additions in PR #598.
+
+### Guidance on Posting
+
+**Recommendation**: Post this augmentation comment.
+
+**Why**: The issue description lacks the root cause explanation and technical details that make it easy for contributors to understand. While this information exists in the comment thread (particularly lentzi90's detailed analysis), the issue description should be self-contained. Adding this context transforms the issue from "here's a problem we're seeing" to "here's exactly what's wrong and how to fix it" - making it much more accessible for potential contributors and future reference.
+
+**Note**: PR #598 is already in progress, but this augmentation still adds value by:
+1. Making the issue more discoverable (better title)
+2. Documenting the root cause in the issue itself
+3. Properly labeling it as a good-first-issue for educational purposes
+4. Creating a clear record of the problem and solution for future similar issues
+
 ## Next Steps
 
 1. ✅ Initial validation complete - Issue is LEGITIMATE
 2. ✅ Research complete - Root cause and fix validated
 3. ✅ Effort assessment complete - Level 1 (good-first-issue)
-4. ⏭️ Augment: Improve issue documentation based on findings
+4. ✅ Augmentation complete - Comment drafted and ready
+5. ⏭️ Brief: Walk through findings (optional)
+6. ⏭️ Wrapup: Push branches and post comment

@@ -3,6 +3,7 @@ import dialogPolyfill from "dialog-polyfill";
 import {Command, Help, PluginHelp} from "../api/help";
 import {getParameterByName} from '../common/urls';
 import {Language, Prettify} from "../common/prettify";
+import {pathURL} from "../common/basepath";
 
 declare const allHelp: Help;
 declare const PR: Prettify;
@@ -89,7 +90,7 @@ function getLinkableCommands(commands: Command[]): HTMLAnchorElement[] {
   commands.forEach((command) => {
     const commandName = extractCommandName(command.Examples[0]);
     const link = document.createElement("a");
-    link.href = `/command-help#${  commandName}`;
+    link.href = pathURL(`/command-help#${  commandName}`);
     link.innerHTML = command.Examples[0];
     link.classList.add("plugin-help-command-link");
     result.push(link);

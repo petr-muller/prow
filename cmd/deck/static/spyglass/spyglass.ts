@@ -3,6 +3,7 @@ import {createAbortProwJobIcon} from "../common/abort";
 import {createRerunProwJobIcon} from "../common/rerun";
 import {getParameterByName} from "../common/urls";
 import {isTransitMessage, serialiseHashes} from "./common";
+import {pathURL} from "../common/basepath";
 
 declare const src: string;
 declare const lensArtifacts: {[index: string]: string[]};
@@ -38,7 +39,7 @@ function queryForLens(lens: string, index: number): string {
 }
 
 function urlForLensRequest(lens: string, index: number, request: string): string {
-  return `/spyglass/lens/${lens}/${request}?${queryForLens(lens, index)}`;
+  return pathURL(`/spyglass/lens/${lens}/${request}?${queryForLens(lens, index)}`);
 }
 
 function frameForMessage(e: MessageEvent): HTMLIFrameElement {

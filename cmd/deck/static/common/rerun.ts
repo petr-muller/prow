@@ -1,5 +1,6 @@
 import {copyToClipboard, icon, showAlert, showToast} from "./common";
 import {relativeURL} from "./urls";
+import {absoluteURL, pathURL} from "./basepath";
 
 export function createRerunProwJobIcon(modal: HTMLElement, parentEl: Element, prowjob: string, showRerunButton: boolean, csrfToken: string): HTMLElement {
   const LATEST_JOB = 'latest';
@@ -24,7 +25,7 @@ export function createRerunProwJobIcon(modal: HTMLElement, parentEl: Element, pr
     }
   };
   const getJobURL = (mode: string): string => {
-    return `${location.protocol}//${location.host}/rerun?mode=${mode}&prowjob=${prowjob}`;
+    return absoluteURL(`/rerun?mode=${mode}&prowjob=${prowjob}`);
   };
   let commandURL = getJobURL(ORIGINAL_JOB);
   const getCommandDescription = (mode: string): string => {
@@ -141,7 +142,7 @@ export function createRerunProwJobIcon(modal: HTMLElement, parentEl: Element, pr
             method: 'post',
           });
           if (result.status === 401) {
-            window.location.href = `${window.location.origin  }/github-login?dest=${relativeURL({rerun: "gh_redirect"})}`;
+            window.location.href = `${window.location.origin}${pathURL(`/github-login?dest=${relativeURL({rerun: "gh_redirect"})}`)}`;
           }
           const data = await result.text();
           if (result.status >= 400) {

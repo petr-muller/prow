@@ -1,9 +1,9 @@
 {{define "title"}}Tide Status{{end}}
 
 {{define "scripts"}}
-<link rel="stylesheet" type="text/css" href="/static/labels.css?v={{deckVersion}}">
-<script type="text/javascript" src="/static/tide_bundle.min.js?v={{deckVersion}}"></script>
-<script type="text/javascript" src="tide.js?var=tideData"></script>
+<link rel="stylesheet" type="text/css" href="{{basePath}}/static/labels.css?v={{deckVersion}}">
+<script type="text/javascript" src="{{basePath}}/static/tide_bundle.min.js?v={{deckVersion}}"></script>
+<script type="text/javascript" src="{{basePath}}/tide.js?var=tideData"></script>
 {{end}}
 
 {{define "content"}}

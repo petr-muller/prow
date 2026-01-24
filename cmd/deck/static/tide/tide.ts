@@ -1,5 +1,6 @@
 import {PullRequest, TideData, TidePool} from '../api/tide';
 import {tidehistory, tooltip} from '../common/common';
+import {pathURL} from '../common/basepath';
 
 declare const tideData: TideData;
 
@@ -304,7 +305,7 @@ function addPRsToElem(elem: HTMLElement, pool: TidePool, prs?: PullRequest[]): v
   if (prs) {
     for (let i = 0; i < prs.length; i++) {
       const a = document.createElement("a");
-      a.href = `/github-link?dest=${pool.Org}/${pool.Repo}/pull/${prs[i].Number}`;
+      a.href = pathURL(`/github-link?dest=${pool.Org}/${pool.Repo}/pull/${prs[i].Number}`);
       a.appendChild(document.createTextNode(`#${  prs[i].Number}`));
       a.id = `pr-${pool.Org}-${pool.Repo}-${prs[i].Number}-${nextID()}`;
       if (prs[i].Title) {

@@ -6,6 +6,7 @@ import {ProwJob, ProwJobList, ProwJobState} from '../api/prow';
 import {Blocker, TideData, TidePool, TideQuery as ITideQuery} from '../api/tide';
 import {getCookieByName, tidehistory} from '../common/common';
 import {parseQuery, relativeURL} from "../common/urls";
+import {pathURL} from "../common/basepath";
 
 declare const tideData: TideData;
 declare const allBuilds: ProwJobList;
@@ -542,7 +543,7 @@ function createPRCardTitle(pr: PullRequest, tidePools: TidePool[], jobStatus: Va
   subtitle.classList.add("mdl-card__subtitle-text");
 
   const link = document.createElement("a");
-  link.href = `/github-link?dest=${pr.Repository.NameWithOwner}/pull/${pr.Number}`;
+  link.href = pathURL(`/github-link?dest=${pr.Repository.NameWithOwner}/pull/${pr.Number}`);
   link.appendChild(title);
 
   const prTitleText = document.createElement("div");

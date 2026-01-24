@@ -1,8 +1,9 @@
 import {ProwJobState} from "../api/prow";
 import {showAlert, showToast, State} from "./common";
+import {absoluteURL} from "./basepath";
 
 export function createAbortProwJobIcon(modal: HTMLElement, parentEl: Element, job: string, state: ProwJobState, prowjob: string, csrfToken: string): HTMLElement {
-  const url = `${location.protocol}//${location.host}/abort?prowjob=${prowjob}`;
+  const url = absoluteURL(`/abort?prowjob=${prowjob}`);
   const abortButton = document.createElement('button');
   abortButton.classList.add('mdl-button', 'mdl-js-button', 'mdl-button--icon');
   abortButton.innerHTML = '<i class="icon-button material-icons" title="Cancel this job" style="color: gray">cancel</i>';

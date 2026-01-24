@@ -140,6 +140,7 @@ type options struct {
 	controllerManager     prowflagutil.ControllerManagerOptions
 	dryRun                bool
 	tenantIDs             prowflagutil.Strings
+	basePath              string
 }
 
 func (o *options) Validate() error {
@@ -161,6 +162,19 @@ func (o *options) Validate() error {
 	if (o.hiddenOnly && o.showHidden) || (o.tenantIDs.Strings() != nil && (o.hiddenOnly || o.showHidden)) {
 		return errors.New("'--hidden-only', '--tenant-id', and '--show-hidden' are mutually exclusive, 'hidden-only' shows only hidden job, '--tenant-id' shows all jobs with matching ID and 'show-hidden' shows both hidden and non-hidden jobs")
 	}
+
+	if o.basePath != "" {
+		if !strings.HasPrefix(o.basePath, "/") {
+			return errors.New("base-path must start with '/'")
+		}
+		if strings.HasSuffix(o.basePath, "/") {
+			return errors.New("base-path must not end with '/'")
+		}
+		if strings.Contains(o.basePath, "//") {
+			return errors.New("base-path must not contain consecutive slashes")
+		}
+	}
+
 	return nil
 }
 
@@ -186,6 +200,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.BoolVar(&o.allowInsecure, "allow-insecure", false, "Allows insecure requests for CSRF and GitHub oauth.")
 	fs.BoolVar(&o.dryRun, "dry-run", false, "Whether or not to make mutating API calls to GitHub.")
 	fs.Var(&o.tenantIDs, "tenant-id", "The tenantID(s) used by the ProwJobs that should be displayed by this instance of Deck. This flag can be repeated.")
+	fs.StringVar(&o.basePath, "base-path", "", "Base path for Deck deployment (e.g., '/prow'). Leave empty for root deployment.")
 	o.config.AddFlags(fs)
 	o.instrumentation.AddFlags(fs)
 	o.controllerManager.TimeoutListingProwJobsDefault = 30 * time.Second
@@ -216,6 +231,30 @@ type authCfgGetter func(*prowapi.ProwJobSpec) *prowapi.RerunAuthConfig
 func init() {
 	prometheus.MustRegister(httpRequestDuration)
 	prometheus.MustRegister(httpResponseSize)
+}
+
+// stripBasePath wraps an http.Handler to strip a base path prefix from all incoming requests.
+// This allows Deck to be deployed at a subpath (e.g., /prow) while maintaining root-relative
+// routing internally.
+func stripBasePath(basePath string, next http.Handler) http.Handler {
+	if basePath == "" {
+		return next
+	}
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasPrefix(r.URL.Path, basePath) {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Strip the base path from the request
+		r.URL.Path = strings.TrimPrefix(r.URL.Path, basePath)
+		if r.URL.Path == "" {
+			r.URL.Path = "/"
+		}
+
+		next.ServeHTTP(w, r)
+	})
 }
 
 var simplifier = simplifypath.NewSimplifier(l("", // shadow element mimicking the root
@@ -502,11 +541,23 @@ func main() {
 	}
 
 	var server *http.Server
+	handler := traceHandler(mux)
+
+	// Apply base path stripping if configured
+	if o.basePath != "" {
+		handler = stripBasePath(o.basePath, handler)
+	}
+
 	if csrfToken != nil {
-		CSRF := csrf.Protect(csrfToken, csrf.Path("/"), csrf.Secure(!o.allowInsecure))
-		server = &http.Server{Addr: ":8080", Handler: CSRF(traceHandler(mux))}
+		// Update CSRF path to include base path
+		csrfPath := "/"
+		if o.basePath != "" {
+			csrfPath = o.basePath + "/"
+		}
+		CSRF := csrf.Protect(csrfToken, csrf.Path(csrfPath), csrf.Secure(!o.allowInsecure))
+		server = &http.Server{Addr: ":8080", Handler: CSRF(handler)}
 	} else {
-		server = &http.Server{Addr: ":8080", Handler: traceHandler(mux)}
+		server = &http.Server{Addr: ":8080", Handler: handler}
 	}
 
 	health.ServeReady()

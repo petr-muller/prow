@@ -1,13 +1,13 @@
 {{define "title"}}Configured Jobs{{end}}
 {{define "scripts"}}
-<link rel="stylesheet" href="/static/dialog-polyfill.css?v={{deckVersion}}">
-<link rel="stylesheet" href="/static/common/prettify.css?v={{deckVersion}}">
+<link rel="stylesheet" href="{{basePath}}/static/dialog-polyfill.css?v={{deckVersion}}">
+<link rel="stylesheet" href="{{basePath}}/static/common/prettify.css?v={{deckVersion}}">
 
 <script type="text/javascript">
     let includedRepos = {{.IncludedRepos}}
     let allRepos = {{.AllRepos}}
 </script>
-<script type="text/javascript" src="/static/configured_jobs_bundle.min.js?v={{deckVersion}}"></script>
+<script type="text/javascript" src="{{basePath}}/static/configured_jobs_bundle.min.js?v={{deckVersion}}"></script>
 {{end}}
 {{define "content"}}
 <aside>

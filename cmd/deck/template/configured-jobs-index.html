@@ -1,17 +1,17 @@
 {{define "title"}}Configured Jobs{{end}}
 {{define "scripts"}}
-<link rel="stylesheet" href="/static/dialog-polyfill.css?v={{deckVersion}}">
+<link rel="stylesheet" href="{{basePath}}/static/dialog-polyfill.css?v={{deckVersion}}">
 {{end}}
 {{define "content"}}
 <ul>
     {{ range $org := .Orgs }}
         {{ if $org.Name }}
             <li>
-                <a href="/configured-jobs/{{$org.Name}}">{{$org.Name}}</a>
+                <a href="{{basePath}}/configured-jobs/{{$org.Name}}">{{$org.Name}}</a>
                 {{ if $org.Repos }}
                     <ul>
                     {{ range $repo := $org.Repos }}
-                        <li><a href="/configured-jobs/{{$org.Name}}/{{$repo}}">{{$repo}}</a></li>
+                        <li><a href="{{basePath}}/configured-jobs/{{$org.Name}}/{{$repo}}">{{$repo}}</a></li>
                     {{ end }}
                     </ul>
                 {{ end }}

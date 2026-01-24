@@ -1,5 +1,6 @@
 import moment from "moment";
 import {ProwJobState, Pull} from "../api/prow";
+import {pathURL} from "./basepath";
 
 // This file likes namespaces, so stick with it for now.
 /* eslint-disable @typescript-eslint/no-namespace */
@@ -106,7 +107,7 @@ export namespace cell {
     const bl = document.createElement("a");
     bl.href = pushCommitLink;
     if (!bl.href) {
-      bl.href = `/github-link?dest=${repo}/commit/${SHA}`;
+      bl.href = pathURL(`/github-link?dest=${repo}/commit/${SHA}`);
     }
     bl.text = `${ref} (${SHA.slice(0, 7)})`;
     c.appendChild(bl);
@@ -132,7 +133,7 @@ export namespace cell {
     if (pull.link) {
       pl.href = pull.link;
     } else {
-      pl.href = `/git-provider-link?target=pr&repo='${repo}'&number=${pull.number}`;
+      pl.href = pathURL(`/git-provider-link?target=pr&repo='${repo}'&number=${pull.number}`);
     }
     pl.text = pull.number.toString();
     if (pull.title) {
@@ -147,7 +148,7 @@ export namespace cell {
       if (pull.commit_link) {
         cl.href = pull.commit_link;
       } else {
-        cl.href = `/git-provider-link?target=prcommit&repo='${repo}'&number=${pull.number}&commit=${pull.sha}`;
+        cl.href = pathURL(`/git-provider-link?target=prcommit&repo='${repo}'&number=${pull.number}&commit=${pull.sha}`);
       }
       cl.text = pull.sha.slice(0, 7);
       elem.appendChild(cl);
@@ -159,7 +160,7 @@ export namespace cell {
       if (pull.author_link) {
         al.href = pull.author_link;
       } else {
-        al.href = `/git-provider-link?target=author&repo='${repo}'&author=${pull.author}`;
+        al.href = pathURL(`/git-provider-link?target=author&repo='${repo}'&author=${pull.author}`);
       }
       al.text = pull.author;
       elem.appendChild(al);
@@ -203,14 +204,14 @@ export namespace tidehistory {
     const link = icon.create("timeline", "Pool History");
     const encodedRepo = encodeURIComponent(`${org}/${repo}`);
     const encodedBranch = encodeURIComponent(branch);
-    link.href = `/tide-history?repo=${encodedRepo}&branch=${encodedBranch}`;
+    link.href = pathURL(`/tide-history?repo=${encodedRepo}&branch=${encodedBranch}`);
     return link;
   }
 
   export function authorIcon(author: string): HTMLAnchorElement {
     const link = icon.create("timeline", "Personal Tide History");
     const encodedAuthor = encodeURIComponent(author);
-    link.href = `/tide-history?author=${encodedAuthor}`;
+    link.href = pathURL(`/tide-history?author=${encodedAuthor}`);
     return link;
   }
 }

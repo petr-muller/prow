@@ -6,6 +6,7 @@ import {createRerunProwJobIcon} from "../common/rerun";
 import {getParameterByName} from "../common/urls";
 import {FuzzySearch} from './fuzzy-search';
 import {JobHistogram, JobSample} from './histogram';
+import {pathURL} from "../common/basepath";
 
 declare const allBuilds: ProwJobList;
 declare const spyglass: boolean;
@@ -775,7 +776,7 @@ function createLogCell(build: ProwJob, buildUrl: string): HTMLTableDataCellEleme
 function createViewJobCell(prowjob: string): HTMLTableDataCellElement {
   const c = document.createElement("td");
   const i = icon.create("pageview", "Show job YAML", () => gtag("event", "view_job_yaml", {event_category: "engagement", transport_type: "beacon"}));
-  i.href = `/prowjob?prowjob=${prowjob}`;
+  i.href = pathURL(`/prowjob?prowjob=${prowjob}`);
   c.appendChild(i);
   return c;
 }

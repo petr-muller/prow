@@ -363,10 +363,212 @@ The contributor (tsj-30) has already proposed an approach similar to this, which
 - Default behavior (empty base path) maintains full backward compatibility
 - Existing deployments require no changes unless adopting subpath deployment
 
+---
+
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-wanted)
+
+#### Summary
+
+This issue requires changes across multiple layers (Go handlers, HTML templates, TypeScript frontend) affecting 10-15 files with an estimated 300-500 lines of code. While the scope is substantial, the solution approach is well-defined and approved, the problem is clear, and it's fully backward compatible. The maintainer's suggestion to break it into smaller PRs makes each increment manageable. This is suitable for a skilled contributor familiar with web development patterns.
+
+#### Factor Analysis
+
+**Scope of Changes**
+- **Assessment**: Moderate to Large
+- **Details**:
+  - Go backend: main.go (handlers, CSRF, flag), templates.go (template function)
+  - Templates: 7-8 HTML template files (base.html, index.html, pr.html, tide.html, etc.)
+  - Frontend: Multiple TypeScript files (rerun.ts, abort.ts, pr.ts, prow.ts, and others)
+  - Estimated: 10-15 files, 300-500 lines of code across multiple layers
+  - Can be broken into smaller PRs (handler setup, templates, frontend, edge cases)
+- **Level Indication**: 2-3
+
+**Complexity**
+- **Assessment**: Moderate
+- **Details**:
+  - Solution approach is clear: add --base-path flag, prepend to all routes
+  - No concurrency issues, race conditions, or algorithmic challenges
+  - Main complexity is ensuring completeness (finding all URL references)
+  - Edge cases to handle: trailing slashes, empty paths, URL encoding
+  - Standard web development pattern, nothing Prow-specific
+- **Level Indication**: 2
+
+**Required Expertise**
+- **Assessment**: Moderate
+- **Details**:
+  - Need understanding of Go HTTP handlers and routing
+  - Need familiarity with Go html/template package
+  - Need TypeScript/JavaScript knowledge for frontend
+  - Should understand web application URL handling patterns
+  - Moderate Prow familiarity helpful but not requiring deep expertise
+  - Can learn from existing code patterns
+- **Level Indication**: 2-3
+
+**Clarity and Certainty**
+- **Assessment**: Well-defined
+- **Details**:
+  - Problem is crystal clear: can't run Deck on a subpath
+  - Solution approach proposed by contributor and approved by maintainer
+  - Requirements are complete and unambiguous
+  - Implementation strategy outlined (incremental PRs)
+  - No open questions about desired behavior
+- **Level Indication**: 1-2
+
+**Testing Requirements**
+- **Assessment**: Moderate
+- **Details**:
+  - Unit tests: Handler path registration with various base paths
+  - Template tests: Verify URLs render correctly with base path
+  - Frontend tests: URL construction with base path
+  - Integration tests: Deploy with base path and verify features work
+  - Can follow existing test patterns in cmd/deck/*_test.go
+  - Edge case tests for trailing slashes, empty paths
+- **Level Indication**: 2-3
+
+**Backwards Compatibility**
+- **Assessment**: Fully compatible
+- **Details**:
+  - Base path defaults to empty string (current behavior)
+  - No changes to existing deployments unless they opt-in via --base-path flag
+  - Additive-only change (new configuration option)
+  - No behavior changes for default configuration
+  - No migration or rollout complexity
+- **Level Indication**: 1-2
+
+**Architectural Alignment**
+- **Assessment**: Good fit
+- **Details**:
+  - Adding deployment flexibility via configuration is appropriate
+  - Follows standard web application patterns for subpath support
+  - Doesn't introduce controversial patterns or abstractions
+  - Works within existing architecture (HTTP mux, templates, frontend)
+  - Similar to how other web apps handle base path configuration
+  - Aligns with Prow's goal of flexible deployment options
+- **Level Indication**: 2-3
+
+**External Dependencies**
+- **Assessment**: None
+- **Details**:
+  - Purely internal refactoring
+  - No external API dependencies
+  - CSRF library (gorilla/csrf) supports configurable paths
+  - No external system constraints
+- **Level Indication**: 1-3
+
+#### Overall Assessment
+
+The effort level is **Level 2 (Moderate)** based on:
+
+**Favoring Level 2**:
+- Well-defined problem and solution with maintainer approval
+- Fully backward compatible (defaults to current behavior)
+- No external dependencies or architectural conflicts
+- Can be broken into smaller, reviewable PRs
+- Clear testing strategy following existing patterns
+
+**Preventing Level 1**:
+- Scope spans 10-15 files across multiple layers (too large for good-first-issue)
+- Requires understanding of both backend and frontend
+- Need to ensure completeness across templates and frontend code
+- Multiple edge cases to handle properly
+
+**Preventing Level 3**:
+- No deep Prow expertise required
+- Solution approach is straightforward and approved
+- No concurrency or race condition complexity
+- Fully backward compatible with no migration needed
+- Breaking into smaller PRs reduces risk and complexity per PR
+
+#### Recommended Labels
+
+Based on this assessment:
+
+- [x] **`help-wanted`**: Perfect scope for a skilled contributor. Well-defined but involved enough to need solid web development experience.
+- [x] **`kind/bug`**: Already applied - issue correctly identifies missing functionality as a bug.
+- [x] **`area/deck`**: Already applied - correctly categorized.
+- [ ] **`good-first-issue`**: Too large and multi-layered for a first contribution. Requires familiarity with both Go and TypeScript, plus understanding of web URL handling across multiple layers.
+
+#### Guidance for Contributors
+
+**Recommended Approach** (as suggested by maintainer):
+
+Break the work into sequential PRs for easier review:
+
+1. **PR 1: Base path infrastructure**
+   - Add `--base-path` CLI flag and configuration
+   - Create handler registration wrapper that prepends base path
+   - Add `basePath` template function
+   - Update CSRF middleware path configuration
+   - Tests: Verify base path normalization and handler registration
+
+2. **PR 2: Update HTML templates**
+   - Update all template files to use `{{basePath "/path"}}` for assets and links
+   - Inject base path as JavaScript variable for frontend
+   - Tests: Template rendering with various base paths
+
+3. **PR 3: Update frontend TypeScript**
+   - Create URL helper functions
+   - Update all TypeScript files to use base path variable
+   - Tests: URL construction in frontend code
+
+4. **PR 4: Edge cases and documentation**
+   - Handle trailing slashes, empty paths, nested scenarios
+   - Update deployment documentation
+   - Integration tests: Full Deck deployment with base path
+
+**Prerequisites for Contributors**:
+- Solid Go experience (HTTP handlers, templates)
+- TypeScript/JavaScript knowledge
+- Understanding of web application URL handling
+- Familiarity with HTML templating
+- Experience with test-driven development
+
+**Key Files to Review**:
+- `cmd/deck/main.go`: Handler registration patterns
+- `cmd/deck/templates.go`: Template function registration
+- `cmd/deck/template/base.html`: Template structure and asset loading
+- `cmd/deck/static/common/*.ts`: Frontend URL construction patterns
+- Existing tests: `cmd/deck/*_test.go` for testing patterns
+
+**Testing Strategy**:
+- Each PR should include relevant tests
+- Test both empty base path (default) and non-empty base path (e.g., "/prow")
+- Verify edge cases: "/prow/", "prow", "/prow/sub", etc.
+- Manual testing with ingress configuration recommended
+
+**Important Considerations**:
+1. **Path normalization**: Ensure base path always starts with "/" and never ends with "/"
+2. **Completeness**: Search codebase for all hardcoded "/" references
+3. **CSRF**: Ensure CSRF middleware path matches base path
+4. **Cache busting**: Maintain version query parameters on assets
+5. **Relative vs absolute**: Keep using absolute paths, just with base path prefix
+
+**Active Work Note**:
+Contributor tsj-30 has already assigned themselves and proposed an approach that was approved by maintainer petr-muller in November 2025. If you're interested in contributing, check the issue for current status or reach out to coordinate.
+
+#### Caveats and Considerations
+
+**Positive Factors**:
+- The maintainer-suggested incremental PR approach significantly reduces the per-PR complexity
+- Each individual PR could be considered simpler than the overall effort level suggests
+- Clear test patterns exist that can be followed
+- No controversial architectural decisions needed
+
+**Watch Out For**:
+- Easy to miss URL references in less-obvious places (error messages, redirects, etc.)
+- Frontend URL construction in dynamic/computed scenarios
+- Need to verify all Spyglass-related paths (lens loading, artifact viewing)
+- Documentation should clearly explain when/why to use --base-path
+
+**Alternative Consideration**:
+If the full scope feels overwhelming, focus on getting PR 1 (infrastructure) solid first. Subsequent PRs are mostly mechanical updates following the pattern established in PR 1.
+
 ## Next Steps
 
-1. Run research subcommand to explore Deck's routing, template rendering, and static asset serving
-2. Run assess-effort subcommand to evaluate implementation complexity
+1. ✅ Run research subcommand to explore Deck's routing, template rendering, and static asset serving
+2. ✅ Run assess-effort subcommand to evaluate implementation complexity
 3. Run augment subcommand to enhance issue with technical details
 4. Run brief subcommand for final review
 5. Run wrapup subcommand to finalize triage

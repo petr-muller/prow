@@ -212,9 +212,111 @@ PR #598 includes comprehensive unit tests:
 - ✅ Good code comments explaining the matrix build edge case
 - ✅ No migration or rollout concerns
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+Small, well-defined fix with clear solution and comprehensive test coverage. Requires understanding Jenkins matrix build behavior but the code change itself is minimal and straightforward. Perfect candidate for a new contributor with some guidance about Jenkins pipelines.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 2 files modified (jenkins.go + jenkins_test.go), 8 lines of production code changed, 162 lines of tests added. Single component affected (jenkins-operator).
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Add one boolean field, update one API query string, modify one conditional check. No complex algorithms, no concurrency issues, no intricate state management. The logic is straightforward: "if Jenkins says it's still building, consider it running."
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go knowledge and understanding of Jenkins matrix/parallel builds. The concept can be explained easily: "Jenkins can set a partial result while still building when one matrix cell finishes before others." No deep Prow architecture knowledge required. New contributors can learn what they need from issue comments and the Jenkins API documentation.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause clearly identified with API data evidence. Solution approach is unambiguous: check the `building` field. No trade-offs or alternative approaches to consider. PR #598 demonstrates the fix works as expected.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Unit tests following standard table-driven test pattern. PR #598 shows exactly how to test this with 18 test cases covering all status methods. No integration tests needed. Test scenarios are clear and reproducible.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: The `building` boolean field defaults to false (Go zero value), preserving existing behavior for non-matrix builds. No configuration changes needed. No deployment impact. Purely additive change that only affects the specific edge case of matrix builds with partial results.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Follows existing patterns exactly. Just adds a field to a struct and updates status checking logic. Aligns with Jenkins API contract by consuming a field that Jenkins already provides. No new patterns or abstractions introduced. Natural extension of existing code.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: Jenkins API already provides the `building` field. No external system changes needed. The field is standard in Jenkins API and documented. No API version constraints or compatibility concerns.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Small scope, well-defined, clear solution, good for learning jenkins-operator
+- [x] `area/jenkins-operator`: Already applied, correct area label
+- [x] `kind/bug`: Already applied, this is indeed a bug fix
+- [ ] `help-needed`: This is simple enough for good-first-issue, not needed
+- [ ] `priority/important-soon`: While the bug causes CI issues, it has existed for 20+ months and PR #598 is already addressing it, so priority labeling is less critical
+
+### Guidance for Contributors
+
+**For Level 1 (Easy)**:
+
+**Prerequisites**:
+- Basic Go programming knowledge
+- Understanding of JSON struct tags and API interactions
+- Familiarity with table-driven testing in Go
+- High-level understanding of Jenkins matrix/parallel builds (can be learned from issue discussion)
+
+**Learning Resources**:
+- Issue #142 comments explain the problem with real API data examples
+- PR #598 shows the complete solution with tests
+- Jenkins API documentation for the `/api/json` endpoint and `building` field
+- Existing test patterns in pkg/jenkins/jenkins_test.go
+
+**Mentorship Available**: Yes - maintainers (lentzi90, tuminoid) are engaged with this issue and can provide guidance
+
+**Implementation Steps** (if PR #598 didn't exist):
+1. Read issue #142 to understand the matrix build edge case
+2. Add `Building bool` field to Build struct in pkg/jenkins/jenkins.go
+3. Update API query string to include `building` in tree parameter
+4. Modify IsRunning() to check `jb.Building` first
+5. Add unit tests for IsRunning, IsSuccess, IsFailure, IsAborted following table-driven pattern
+6. Run tests locally to verify all pass
+7. Submit PR with clear description referencing issue #142
+
+**Why This Is Good First Issue**:
+- Very localized change (only 2 files)
+- Clear problem statement with evidence
+- Unambiguous solution approach
+- Excellent test coverage patterns to follow
+- No architectural decisions needed
+- No backwards compatibility concerns
+- Maintainer engagement and support available
+
+### Caveats and Considerations
+
+**Note on PR #598**: This issue already has a PR that implements the fix (PR #598 by lentzi90). This effort assessment evaluates what level of effort the fix represents, not whether someone should implement it from scratch. For teaching purposes, this would be an excellent good-first-issue, but the actual fix is already in progress.
+
+**Upper End of Level 1**: This is on the upper boundary of Level 1 because it requires understanding a specific domain concept (Jenkins matrix builds). However, the concept is well-explained in the issue, and the code change itself is trivial, keeping it firmly in Level 1 territory.
+
+**If Assigning to New Contributor**: A maintainer should explain Jenkins matrix build behavior and why the `building` field matters. Once that concept is clear, the implementation is straightforward.
+
 ## Next Steps
 
 1. ✅ Initial validation complete - Issue is LEGITIMATE
 2. ✅ Research complete - Root cause and fix validated
-3. ⏭️ Assess effort: Determine effort level and appropriate labels
+3. ✅ Effort assessment complete - Level 1 (good-first-issue)
 4. ⏭️ Augment: Improve issue documentation based on findings

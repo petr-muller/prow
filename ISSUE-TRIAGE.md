@@ -269,6 +269,12 @@ This provides the best user experience by both fixing the root cause and providi
 4. Update notification template to mention label-based requests explicitly
 5. Ensure assignment logic (if enabled) handles requester correctly
 
+**IMPORTANT LIMITATION**:
+This fix only works when labels are added **after** PR merge (which triggers a "labeled" event with `Sender`). If a label is added **before** merge, the plugin processes it during the "closed" event, where only label names are available via `GetIssueLabels()` API - not who added them. The full fix for pre-merge labels would require listening to "labeled" events in real-time and storing state about who added which label. However, the hybrid approach still provides value:
+- Fixes the post-merge labeling workflow
+- Adds notifications for denied requests in all cases
+- Serves as a stepping stone toward full solution with state tracking
+
 **Testing Requirements**:
 - Test: Org member adds label to PR from non-member author (should succeed)
 - Test: Non-member adds label to any PR (should fail with notification)
@@ -431,9 +437,11 @@ The root cause is at cmd/external-plugins/cherrypicker/server.go:402, where labe
 
 Additionally, when permission checking filters out non-org members, comment-based requests receive a notification (server.go:241-243), but label-based requests are silently deleted from the queue (server.go:427) with no user feedback. This creates confusing intermittent failures.
 
-## Recommended Fix
+## Recommended Fix (Partial Solution)
 
-The fix is straightforward: use `pre.Sender.Login` instead of `pr.User.Login` when processing labels, and add notification comments when label-based requests are denied due to permissions. This is a small change (~20-40 lines) affecting server.go and server_test.go, with no architectural changes needed. Implementation should verify `Sender` is always populated and add tests for permission scenarios (currently missing from the test suite).
+Use `pre.Sender.Login` instead of `pr.User.Login` when processing labels, and add notification comments when label-based requests are denied. This is a small change (~20-40 lines) affecting server.go and server_test.go.
+
+**Important limitation**: This only works when labels are added **after** PR merge. Labels added **before** merge are processed during the "closed" event where `Sender` info isn't available. The full solution would require listening to "labeled" events in real-time and storing state. However, this partial fix still provides value by handling post-merge labeling and adding notifications in all cases.
 
 /help-wanted
 ```

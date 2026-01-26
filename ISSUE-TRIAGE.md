@@ -417,9 +417,51 @@ Based on this assessment, recommend the following labels:
 
 **Backwards compatibility note**: While technically a behavior change, this is a **bug fix** - the current behavior is incorrect. Users experiencing the reported issue will see it fixed; users not hitting this scenario will see no change. The main observable difference is in PR assignments when `use-prow-assignments` is enabled.
 
+### Proposed Issue Augmentation
+
+**Title Change**
+- **No change needed**: Current title accurately describes the behavioral difference users observe
+
+**Proposed GitHub Comment**
+
+```markdown
+## Root Cause and Solution
+
+The root cause is at cmd/external-plugins/cherrypicker/server.go:402, where label-initiated cherry-picks are attributed to `pr.User.Login` (the PR author) instead of the person who added the label. While @smg247's comment noted that GitHub's Label API doesn't include user information, the `PullRequestEvent` webhook **does** include a `Sender` field containing the user who performed the labeled action. This field is currently unused.
+
+Additionally, when permission checking filters out non-org members, comment-based requests receive a notification (server.go:241-243), but label-based requests are silently deleted from the queue (server.go:427) with no user feedback. This creates confusing intermittent failures.
+
+## Recommended Fix
+
+The fix is straightforward: use `pre.Sender.Login` instead of `pr.User.Login` when processing labels, and add notification comments when label-based requests are denied due to permissions. This is a small change (~20-40 lines) affecting server.go and server_test.go, with no architectural changes needed. Implementation should verify `Sender` is always populated and add tests for permission scenarios (currently missing from the test suite).
+
+/help-wanted
+```
+
+**Rationale**
+
+**What's being added**:
+- **Key discovery**: The Sender field is available in the webhook, contradicting the assumption that the information isn't accessible
+- **Second issue**: Silent failures for label-based permission denials (not mentioned in original issue)
+- **Solution clarity**: Specific fix approach with file references and scope estimate
+- **Contributor guidance**: Points to what needs to be done and tested
+
+**Why these labels**:
+- `/area plugins`: Already applied correctly
+- `/kind bug`: Already applied correctly
+- `/help-wanted`: Level 2 effort assessment - well-defined bug suitable for skilled contributors. Not good-first-issue because it requires understanding webhook event structures and permission checking flow.
+
+**What's NOT included**:
+- No /retitle: Current title is clear and accurate
+- No priority label: While this causes intermittent failures, it's been present since the plugin's creation and has workarounds (use comments). Let maintainers decide priority.
+- Didn't repeat the problem description or examples (already in original issue)
+- Didn't include all 4 solution approaches (too verbose; just recommended approach)
+- Kept under 3 paragraphs as instructed
+
 ## Next Steps
 
 1. ✓ Initial validation complete - issue is LEGITIMATE
 2. ✓ Code research complete - Root cause identified, solutions proposed
 3. ✓ Effort assessment complete - Level 2 (help-needed)
-4. Next: Augment issue with technical details and implementation guidance
+4. ✓ Augmentation proposed - Ready for maintainer review
+5. Final: Use wrapup subcommand to push branches and post comment

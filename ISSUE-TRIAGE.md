@@ -281,9 +281,145 @@ This provides the best user experience by both fixing the root cause and providi
 - No configuration migration needed
 - Existing deployments benefit automatically
 
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+**Summary**
+
+This is a well-defined bug with a straightforward fix (using `PullRequestEvent.Sender` instead of `pr.User.Login`), but requires understanding webhook event structures, permission checking flow, and careful testing of edge cases. The small scope and clear solution make it accessible, but the backwards compatibility considerations and need for comprehensive testing place it beyond a good-first-issue.
+
+#### Factor Analysis
+
+**Scope of Changes**
+- **Assessment**: Small
+- **Details**:
+  - Approach 1 (minimal): 1 file (server.go), 3-5 lines of code
+  - Approach 3 (recommended): 1-2 files, ~20-40 lines of code
+  - Single component affected (cherrypicker external plugin)
+- **Level Indication**: 1-2
+
+**Complexity**
+- **Assessment**: Simple to Moderate
+- **Details**:
+  - Core fix is simple: change field reference from `pr.User.Login` to `pre.Sender.Login`
+  - Adding notification follows existing patterns
+  - No concurrency, race conditions, or algorithmic challenges
+  - Minor complexity: need to verify `Sender` field is always populated in labeled events
+- **Level Indication**: 1-2
+
+**Required Expertise**
+- **Assessment**: Moderate
+- **Details**:
+  - Understanding of GitHub webhook event structures (PullRequestEvent)
+  - Familiarity with permission checking flow in the plugin
+  - Knowledge of Go testing patterns
+  - Can learn from existing code, but requires some time to understand the flow
+  - No deep Prow architecture knowledge needed
+- **Level Indication**: 2
+
+**Clarity and Certainty**
+- **Assessment**: Well-defined
+- **Details**:
+  - Problem is clearly identified and root cause understood
+  - Solution approach is unambiguous (research revealed Sender field is available)
+  - One minor verification needed: confirm Sender is always populated
+  - Recommended approach (Hybrid) has clear implementation steps
+- **Level Indication**: 1-2
+
+**Testing Requirements**
+- **Assessment**: Moderate
+- **Details**:
+  - Need new test cases for permission denied scenarios
+  - Test: Org member adds label to PR from non-member author (should succeed)
+  - Test: Non-member adds label (should fail with notification)
+  - Test: Verify assignment uses correct requester
+  - Can follow existing test patterns (testCherryPickPRWithLabels)
+  - All unit tests, no complex integration testing required
+- **Level Indication**: 2
+
+**Backwards Compatibility**
+- **Assessment**: Minor impact, backwards compatible
+- **Details**:
+  - Behavior change: label-initiated cherry-picks attributed to label-adder instead of PR author
+  - Impact on assignments: If `use-prow-assignments` enabled, PRs will be assigned differently
+  - Most deployments will benefit from the new behavior (it's more correct)
+  - No configuration changes required
+  - Should be documented in release notes
+  - No breaking changes
+- **Level Indication**: 2
+
+**Architectural Alignment**
+- **Assessment**: Perfect fit
+- **Details**:
+  - Uses existing webhook field that was previously overlooked
+  - Follows existing patterns for permission checking
+  - Notification improvements follow existing createComment patterns
+  - Doesn't introduce new architectural patterns
+  - Aligns with user expectations (person who adds label should be requester)
+- **Level Indication**: 1-2
+
+**External Dependencies**
+- **Assessment**: Well-supported
+- **Details**:
+  - Relies on GitHub webhook's `PullRequestEvent.Sender` field
+  - GitHub webhook API is stable and well-documented
+  - Need to verify field is always populated (low risk)
+  - No changes to external systems required
+- **Level Indication**: 1-3
+
+#### Recommended Labels
+
+Based on this assessment, recommend the following labels:
+
+- [x] `help-needed`: Well-defined issue suitable for skilled contributor
+- [x] `kind/bug`: Fixing incorrect permission attribution
+- [x] `area/plugins`: External plugin (cherrypicker)
+- [ ] `good-first-issue`: Requires understanding webhook flow and permission checking - beyond typical first issue
+
+#### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+
+**Suitable for**: Contributors with Go experience and familiarity with webhooks/REST APIs
+
+**Prerequisites**:
+- Understanding of Go testing
+- Familiarity with GitHub webhook events
+- Ability to read and understand existing code patterns
+
+**Recommended preparation**:
+1. Review the webhook event handling flow in server.go:141-184
+2. Study how comments are processed vs labels (server.go:372-405)
+3. Examine permission checking logic (server.go:415-430)
+4. Review existing tests in server_test.go:876-1058
+5. Read GitHub's webhook documentation for PullRequestEvent
+
+**Implementation approach** (Approach 3 - Hybrid):
+1. Verify `PullRequestEvent.Sender` is always populated for labeled events
+2. Modify label processing (server.go:402) to use `pre.Sender.Login` instead of `pr.User.Login`
+3. When permission check filters out a requester, add notification comment
+4. Update notification templates to clearly indicate label-based vs comment-based requests
+5. Add comprehensive tests for new permission scenarios
+6. Test with `use-prow-assignments` enabled to verify correct assignment
+
+**Key files to modify**:
+- cmd/external-plugins/cherrypicker/server.go (primary changes)
+- cmd/external-plugins/cherrypicker/server_test.go (new tests)
+
+**Estimated effort**: 2-4 hours for implementation + 1-2 hours for testing
+
+#### Caveats and Considerations
+
+**Minor uncertainty**: While the research found that `PullRequestEvent` includes a `Sender` field, the implementation should verify this field is always populated for the `labeled` action. GitHub's webhook documentation should confirm this, and a defensive check (fallback to `pr.User.Login` if `Sender` is nil) could be added if needed.
+
+**Testing note**: The existing test suite doesn't have dedicated permission denied tests. The contributor will be establishing a new test pattern for this scenario, which future contributors can follow.
+
+**Backwards compatibility note**: While technically a behavior change, this is a **bug fix** - the current behavior is incorrect. Users experiencing the reported issue will see it fixed; users not hitting this scenario will see no change. The main observable difference is in PR assignments when `use-prow-assignments` is enabled.
+
 ## Next Steps
 
 1. ✓ Initial validation complete - issue is LEGITIMATE
 2. ✓ Code research complete - Root cause identified, solutions proposed
-3. Next: Assess effort level and recommend appropriate difficulty labels
-4. Then: Augment issue with technical details and implementation guidance
+3. ✓ Effort assessment complete - Level 2 (help-needed)
+4. Next: Augment issue with technical details and implementation guidance

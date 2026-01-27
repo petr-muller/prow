@@ -532,8 +532,63 @@ The feature should be **opt-in via plugin configuration**. Repositories that wan
    - Monitor logs for API errors
    - Have rollback plan (disable plugin)
 
+### Briefing Completed
+
+Briefed maintainer on: 2026-01-27
+
+Maintainer proceeded to augment subcommand.
+
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title is clear and specific, accurately describes the feature request
+
+### Proposed GitHub Comment
+
+```markdown
+## Implementation Approach
+
+To answer your question about opt-in vs default: this should be **opt-in via plugin configuration**. Repositories that want automatic workflow approval would enable an `approve-workflow` plugin in their Prow configuration. This approach is consistent with Prow's plugin architecture, gives clear per-repo control, and avoids any impact on repositories that don't need this functionality.
+
+## Recommended Architecture
+
+The cleanest implementation would be a **standalone plugin** (separate from the trigger plugin) for these reasons: (1) Prow job triggering and GitHub Actions approval are operations on different systems with different lifecycles, (2) repos could enable/disable workflow approval independently of Prow job triggering, and (3) the plugin could evolve to support additional labels or selective approval logic without coupling to trigger plugin complexity. The plugin would watch for `PullRequestActionLabeled` events, verify the user adding the label is trusted (similar to trigger plugin's logic in `pkg/plugins/trigger/pull-request.go:127-151`), list pending workflow runs for the PR's head SHA, and call GitHub's workflow approval API.
+
+## Implementation Guidance
+
+You'll need to add two GitHub API methods to `pkg/github/client.go`: `ApproveWorkflowRun(org, repo string, runID int)` (POST to `/repos/{org}/{repo}/actions/runs/{runID}/approve`) and a method to list pending workflows awaiting approval (similar to `GetFailedActionRunsByHeadBranch` at lines 2080-2120, but filtering for workflows in approval-required state). Create the plugin in `pkg/plugins/approve-workflow/` following patterns from existing label-driven plugins like `pkg/plugins/approve/` or `pkg/plugins/lgtm/`. The plugin registers a `PullRequestHandler` in its `init()` function and gets imported in `pkg/hook/plugin-imports/plugin-imports.go`. Test patterns exist in `pkg/github/client_test.go:384-473` for mocking GitHub API calls.
+
+/area plugins
+```
+
+### Rationale
+
+**What's being added**:
+- **Answer to contributor's question**: The contributor asked today (Jan 27) whether this should be opt-in or default. The comment directly answers this with clear reasoning (opt-in via plugin config).
+- **Architecture recommendation**: Explains the standalone plugin approach (vs extending trigger plugin) with specific technical reasoning about separation of concerns and plugin lifecycle.
+- **Implementation roadmap**: Provides concrete guidance on what needs to be built, which files to modify, what patterns to follow, and where to find reference code.
+- **Specific file references**: Includes line numbers and file paths for all reference code to help the contributor navigate the codebase.
+
+**Why these labels**:
+- `/area plugins`: This is plugin development work. The area label helps categorize the issue and makes it discoverable for contributors interested in plugin development.
+- `/kind feature`: Already applied ✓ - correct categorization
+- `/help-wanted`: Already applied ✓ - matches Level 2 effort assessment (moderate complexity, well-defined, suitable for skilled contributors)
+- No `/good-first-issue`: Not appropriate for Level 2 - requires understanding plugin architecture and multiple components
+
+**What's NOT included**:
+- No `/retitle`: Current title is clear and descriptive
+- No root cause explanation: This is a feature gap, not a bug, so there's no "root cause" to explain
+- No duplicate information: Original issue already explains the problem and references the GitHub API endpoint
+- No overly detailed implementation: Kept to 3 paragraphs focusing on architecture decisions and getting started
+- No priority label: Feature request, not urgent, someone is already assigned and working on it
+
+**Tone and approach**:
+- Directly addresses the contributor's question first (most important)
+- Technical but accessible - explains architectural reasoning
+- Constructive - provides clear path forward with specific references
+- Concise - 3 focused paragraphs, not a wall of text
+
 ## Next Steps
 
-1. Run **augment** to add technical context to the issue for the contributor working on it
-2. Run **brief** to walk through findings (optional)
-3. Run **wrapup** to post augmentation comment and finalize triage
+1. Run **wrapup** to push triage branches and post augmentation comment to GitHub

@@ -466,10 +466,30 @@ Use `pre.Sender.Login` instead of `pr.User.Login` when processing labels, and ad
 - Didn't include all 4 solution approaches (too verbose; just recommended approach)
 - Kept under 3 paragraphs as instructed
 
-## Next Steps
+## Briefing Completed
 
-1. ✓ Initial validation complete - issue is LEGITIMATE
-2. ✓ Code research complete - Root cause identified, solutions proposed
-3. ✓ Effort assessment complete - Level 2 (help-needed)
-4. ✓ Augmentation proposed - Ready for maintainer review
-5. Final: Use wrapup subcommand to push branches and post comment
+Briefed maintainer on: 2026-01-26
+
+**Key questions asked**:
+- What if the label is added while the PR is still open? → Identified critical limitation: fix only works for post-merge labeling. Pre-merge labels still have the issue because "closed" event doesn't include who-added-label information.
+
+**Maintainer decision**:
+- Do NOT post augmentation comment to GitHub issue
+- Commit and push triage branches only
+- Keep findings in triage document for future reference
+
+## Triage Summary
+
+**Status**: COMPLETE (no public comment posted per maintainer request)
+
+**Key Findings**:
+1. ✓ Legitimate bug - incorrect permission attribution for label-based cherry-picks
+2. ✓ Root cause identified - server.go:402 uses pr.User.Login instead of pre.Sender.Login
+3. ✓ Partial solution available - works for post-merge labeling only
+4. ✓ Limitation discovered - pre-merge labels still broken (needs state tracking)
+5. ✓ Effort Level 2 (help-wanted) - moderate complexity
+
+**Recommended labels** (not applied):
+- /help-wanted
+- /area plugins (already applied)
+- /kind bug (already applied)

@@ -589,6 +589,16 @@ You'll need to add two GitHub API methods to `pkg/github/client.go`: `ApproveWor
 - Constructive - provides clear path forward with specific references
 - Concise - 3 focused paragraphs, not a wall of text
 
-## Next Steps
+## Triage Completion
 
-1. Run **wrapup** to push triage branches and post augmentation comment to GitHub
+**Date**: 2026-01-27
+
+**Branches Pushed**:
+- ✓ `claude-maintenance-helpers` - Up to date with origin
+- ✓ `issue-triage-194` - Pushed to origin (new branch)
+
+**Triage Document**: Available at https://github.com/petr-muller/prow/blob/issue-triage-194/ISSUE-TRIAGE.md
+
+**GitHub Comment**: Not posted (per maintainer request)
+
+**Status**: Triage complete. All findings documented in this file. Augmentation comment drafted but not posted to issue.

@@ -58,9 +58,323 @@ This is a valid feature request for a Prow component maintained in this reposito
 3. Design a granular validation approach that accommodates different resource patterns
 4. Assess implementation effort and complexity
 
+### Code Research
+
+**Current Implementation**
+
+**Primary Components**:
+- checkconfig main: cmd/checkconfig/main.go - Validates Prow configuration files
+- validate() function: cmd/checkconfig/main.go:258-472 - Central validation dispatcher
+- JobBase struct: pkg/config/jobs.go:104-154 - Base job structure containing Spec field
+
+**Architecture Overview**:
+checkconfig uses a modular validation pattern where each check is implemented as an independent function that takes config.JobConfig and returns errors. Validations are gated by a warning flag system that allows users to enable/disable specific checks via CLI flags. The strict mode flag converts warnings into fatal errors.
+
+**Key Code Paths**:
+1. Validation dispatcher: cmd/checkconfig/main.go:258-472 - Checks which warnings are enabled and calls corresponding validators
+2. Warning registration: cmd/checkconfig/main.go:102-165 - Constants and lists defining available warnings
+3. Job iteration patterns: cmd/checkconfig/main.go:1568-1600 - Example of iterating PresubmitsStatic, PostsubmitsStatic, Periodics
+4. Resource access: pkg/config/jobs.go:129 - job.Spec *v1.PodSpec contains Containers array
+
+**Data Flow**:
+1. CLI flags parsed to determine enabled warnings
+2. Config files loaded into config.JobConfig structure
+3. For each enabled warning, corresponding validation function is called
+4. Validators iterate over job types (presubmits, postsubmits, periodics)
+5. Each job's Spec field (if present) contains Kubernetes PodSpec with Containers
+6. Container.Resources.Requests and Container.Resources.Limits contain resource definitions
+7. Validation errors aggregated and either logged (warning mode) or fatal (strict mode)
+
+**Related Code**
+
+**Dependencies**:
+- utilerrors.NewAggregate() - Used to combine multiple validation errors
+- v1.KubernetesAgent - Agent type constant for filtering Kubernetes jobs
+- corev1.ResourceCPU, corev1.ResourceMemory - Resource type constants from Kubernetes API
+
+**Existing Validators**:
+- validateRequiredJobAnnotations: cmd/checkconfig/main.go:1568-1600 - Pattern for checking job fields
+- validateDecoratedJobs: cmd/checkconfig/main.go:924-948 - Pattern for simple boolean checks
+- validateJobCluster: cmd/checkconfig/main.go:1236-1250 - Pattern for validating job configuration fields
+
+**Similar Functionality**:
+- pod-utils/decorate/podspec.go - Real-world examples of accessing Container.Resources
+- Checks pattern: `if _, ok := container.Resources.Requests[corev1.ResourceMemory]; ok`
+
+**Test Coverage**
+
+**Existing Tests**:
+- cmd/checkconfig/main_test.go - Comprehensive test suite for all validators
+- TestValidateRequiredJobAnnotations: lines 2537-2634 - Example test pattern for job validators
+- TestValidateClusterField: lines 1752-1927 - Example of more complex validation testing
+
+**Test Pattern**:
+Tests use table-driven approach with structs containing:
+- Test case name
+- Input jobs (presubmits, postsubmits, periodics)
+- Expected error state
+- Expected validation parameters
+
+**Test Gaps**:
+- No existing tests for resource requirements (new feature)
+- Test coverage needed for: requests only, limits only, both, neither, mixed containers
+
+**Documentation Review**
+
+**Code Comments**:
+- Warning constants well-documented at lines 102-130
+- validateJobRequirements has clear purpose: "Prow labels k8s resources with job names. Labels are capped at 63 chars."
+- No specific documentation about resource validation best practices in checkconfig
+
+**Design Documentation**:
+- Warning system allows three tiers: default (always on), expensive (opt-in for performance), optional (explicitly enabled)
+- Strict mode converts all warnings to errors for CI enforcement
+
+**Known Limitations**:
+- Agent filtering required: Only Kubernetes jobs use Spec field, Jenkins and other agents don't
+- Default agent is "kubernetes", so empty agent string should be treated as Kubernetes
+
+**Root Cause Analysis**
+
+**This is a Feature Request, not a Bug**:
+There is no bug to fix - this is a request to add new functionality that doesn't currently exist.
+
+**Current Gap**:
+checkconfig validates many aspects of job configuration (name length, annotations, decoration, cluster fields, etc.) but does NOT validate resource requirements. This means jobs without resource requests/limits can pass validation and cause cluster problems when deployed.
+
+**Use Case**:
+Organizations want to enforce resource requirements for:
+1. **Scheduling efficiency**: Requests help Kubernetes scheduler make informed placement decisions
+2. **Resource management**: Limits prevent jobs from consuming excessive cluster resources
+3. **Cost control**: Prevent unbounded resource usage
+4. **Cluster stability**: Avoid OOM kills and resource contention
+
+**Contributing Factors**:
+1. Resource validation is optional/hygiene rather than strictly required for Prow to function
+2. Different deployment scenarios have different resource requirement needs
+3. Some organizations only use requests (for scheduling) without limits (to avoid throttling)
+
+**Proposed Solutions**
+
+#### Approach 1: Granular Validation with Separate Flags
+
+**Description**: Add three separate warning flags for different resource validation levels:
+- `validate-resource-requests`: Requires CPU and memory requests
+- `validate-resource-limits`: Requires CPU and memory limits
+- `validate-resource-requirements`: Requires both requests AND limits
+
+This allows users to choose their enforcement policy: requests-only, limits-only, or both.
+
+**Pros**:
+- Addresses maintainer feedback about granularity
+- Accommodates different organizational policies
+- Users can evolve from requests-only to full requirements over time
+- Flexible for different deployment scenarios
+
+**Cons**:
+- More flags to maintain
+- More complex documentation
+- Three separate validation functions or complex conditional logic
+- Potential confusion about which flag to use
+
+**Affected Components**:
+- cmd/checkconfig/main.go: Add 3 warning constants, 3 validation functions, 3 warning checks
+- cmd/checkconfig/main_test.go: Add 3 test functions
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: Fully backwards compatible - all new flags are opt-in
+
+#### Approach 2: Single Configurable Validation Flag
+
+**Description**: Add one warning flag `validate-resource-requirements` with a CLI option to configure what to check:
+- `--resource-validation-mode=requests` - Check requests only
+- `--resource-validation-mode=limits` - Check limits only
+- `--resource-validation-mode=both` (default) - Check both
+
+This provides granularity through configuration rather than separate flags.
+
+**Pros**:
+- Single flag to enable/disable feature
+- Cleaner warning flag list
+- Simpler maintenance (one validation function)
+- Still provides needed granularity
+
+**Cons**:
+- Requires new CLI flag pattern (validation mode configuration)
+- Less consistent with existing checkconfig patterns (other warnings don't have modes)
+- Documentation needs to explain the mode options
+
+**Affected Components**:
+- cmd/checkconfig/main.go: Add 1 warning constant, 1 validation function, 1 mode flag, 1 warning check
+- cmd/checkconfig/main_test.go: Add 1 test function with multiple test cases
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: Fully backwards compatible - new flag is opt-in
+
+#### Approach 3: Simple Requests-Only Validation
+
+**Description**: Based on maintainer feedback that "it is quite common to have requests for efficient scheduling but not have limits," implement a single warning that validates ONLY resource requests (not limits).
+
+Add one warning flag `validate-resource-requests` that ensures all Kubernetes jobs have CPU and memory requests defined, but doesn't check limits.
+
+**Pros**:
+- Simplest implementation
+- Addresses the most common use case (scheduling efficiency)
+- Consistent with maintainer's stated preference
+- Follows existing checkconfig patterns exactly
+- Least maintenance burden
+
+**Cons**:
+- Doesn't provide limits validation for organizations that want it
+- Original issue author requested both requests and limits
+- Can't evolve to check limits without adding another flag later
+
+**Affected Components**:
+- cmd/checkconfig/main.go: Add 1 warning constant, 1 validation function, 1 warning check
+- cmd/checkconfig/main_test.go: Add 1 test function
+
+**Complexity**: Low
+
+**Backwards Compatibility**: Fully backwards compatible - new flag is opt-in
+
+#### Approach 4: Layered Warnings (Requests as Default, Limits as Optional)
+
+**Description**: Add two warning flags with different categorizations:
+- `validate-resource-requests` - Added to defaultWarnings (always on)
+- `validate-resource-limits` - Added to optionalWarnings (explicitly enabled)
+
+This reflects the philosophy that requests are important for scheduling (default) while limits are optional policy enforcement.
+
+**Pros**:
+- Balances mandatory hygiene (requests) with optional policy (limits)
+- Makes requests validation the "pit of success" default
+- Still allows limits validation when needed
+- Clearer separation of concerns
+
+**Cons**:
+- Two flags to maintain (though simpler than Approach 1)
+- Making requests default might be too aggressive for existing deployments
+- Would need to be optional warning initially to avoid breaking existing users
+
+**Affected Components**:
+- cmd/checkconfig/main.go: Add 2 warning constants, 2 validation functions, 2 warning checks
+- cmd/checkconfig/main_test.go: Add 2 test functions
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: If both are optional warnings, fully compatible. If requests is default, could break existing configs.
+
+#### Recommendation
+
+**Preferred Approach**: Approach 4 (Layered Warnings) with both as optional warnings initially
+
+**Rationale**:
+1. **Addresses maintainer feedback**: Separates requests from limits, acknowledging they serve different purposes
+2. **Provides flexibility**: Users can enable just requests, just limits, or both
+3. **Simpler than Approach 1**: Only 2 flags instead of 3
+4. **More useful than Approach 3**: Doesn't abandon limits validation entirely
+5. **Follows existing patterns**: Uses optionalWarnings pattern consistently
+6. **Clear semantics**: Each flag has a single, clear purpose
+
+**Key Implementation Considerations**:
+
+1. **Agent Type Filtering**:
+   - Only validate Kubernetes jobs: `if job.Agent == string(v1.KubernetesAgent) || job.Agent == ""`
+   - Skip Jenkins, Tekton, and other agent types
+
+2. **Validation Granularity**:
+   - Check each container independently
+   - Report which container index has missing resources
+   - Check for both CPU and Memory (not just presence of Requests map)
+
+3. **Error Messages**:
+   - Format: `job 'job-name' (org/repo): container 0 is missing CPU resource requests`
+   - Include job name, repo, container index, specific resource type
+
+4. **Null Handling**:
+   - Skip jobs with nil Spec (not Kubernetes jobs or using pod template)
+   - Handle nil Requests/Limits maps gracefully
+
+5. **Warning Registration**:
+```go
+const (
+    validateResourceRequestsWarning = "validate-resource-requests"
+    validateResourceLimitsWarning   = "validate-resource-limits"
+)
+
+var optionalWarnings = []string{
+    // ... existing
+    validateResourceRequestsWarning,
+    validateResourceLimitsWarning,
+}
+```
+
+6. **Validation Function Pattern**:
+```go
+func validateResourceRequests(c config.JobConfig) error {
+    checkResources := func(job config.JobBase, jobType, repo string) error {
+        if job.Agent != string(v1.KubernetesAgent) && job.Agent != "" {
+            return nil // Only Kubernetes jobs
+        }
+        if job.Spec == nil || len(job.Spec.Containers) == 0 {
+            return nil // No spec to validate
+        }
+
+        var errs []error
+        for i, container := range job.Spec.Containers {
+            if container.Resources.Requests == nil {
+                errs = append(errs, fmt.Errorf(
+                    "container %d has no resource requests", i))
+                continue
+            }
+            if _, ok := container.Resources.Requests[corev1.ResourceCPU]; !ok {
+                errs = append(errs, fmt.Errorf(
+                    "container %d is missing CPU resource requests", i))
+            }
+            if _, ok := container.Resources.Requests[corev1.ResourceMemory]; !ok {
+                errs = append(errs, fmt.Errorf(
+                    "container %d is missing memory resource requests", i))
+            }
+        }
+        return utilerrors.NewAggregate(errs)
+    }
+
+    var errs []error
+    for repo, presubmits := range c.PresubmitsStatic {
+        for _, presubmit := range presubmits {
+            if err := checkResources(presubmit.JobBase, "presubmit", repo); err != nil {
+                errs = append(errs, fmt.Errorf("job '%s' (%s): %w",
+                    presubmit.Name, repo, err))
+            }
+        }
+    }
+    // ... repeat for postsubmits and periodics
+    return utilerrors.NewAggregate(errs)
+}
+```
+
+**Testing Requirements**:
+- Test case: Job with no resources
+- Test case: Job with requests only (should pass requests check, fail limits check)
+- Test case: Job with limits only (should fail requests check, pass limits check)
+- Test case: Job with both (should pass both checks)
+- Test case: Job with partial resources (CPU but not memory)
+- Test case: Non-Kubernetes job (should pass both checks - not validated)
+- Test case: Job with no Spec (should pass both checks - not validated)
+- Test case: Multiple containers with mixed resource configs
+
+**Migration/Rollout Strategy**:
+1. Start as optional warnings (user must explicitly enable)
+2. Announce in release notes and documentation
+3. Gather feedback on real-world usage patterns
+4. Consider promoting requests validation to default warnings in future release if widely adopted
+5. Limits validation likely stays optional long-term
+
 ## Next Steps
 
-- Continue with research subcommand to explore the codebase
-- Determine implementation approach
-- Assess effort level
+- Continue with assess-effort subcommand
+- Determine effort level and appropriate labels
 - Propose augmentation to improve issue quality
+- Prepare comment with recommendations

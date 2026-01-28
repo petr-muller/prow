@@ -553,9 +553,88 @@ Based on this assessment, recommend the following labels:
 
 4. **Could become easier**: If maintainer feedback suggests simplifying to a single flag (requests only), this could be reduced to Level 1. Current assessment assumes the recommended two-flag approach.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: "Add Resource Validation to checkconfig Tool in Strict Mode"
+- **Proposed**: "Add resource validation to checkconfig tool"
+- **Rationale**: Simplifies title and removes "Strict Mode" reference, which could be misleading since the recommended approach uses optional warning flags rather than the existing strict mode feature. The shorter title is clearer and more accurate.
+
+### Proposed GitHub Comment
+
+```
+/retitle Add resource validation to checkconfig tool
+
+## Implementation Approach
+
+Based on triage research and @petr-muller's feedback about granularity, the recommended approach is to add **two separate optional warning flags** rather than tying this to strict mode:
+
+1. `--warnings=validate-resource-requests`: Validates that Kubernetes jobs have CPU and memory requests defined
+2. `--warnings=validate-resource-limits`: Validates that Kubernetes jobs have CPU and memory limits defined
+
+This allows users to enforce just requests (common for scheduling), just limits (less common), or both, depending on their organizational policies. Both would be optional warnings that users explicitly enable.
+
+## Integration Points
+
+The implementation follows the established checkconfig validation pattern:
+
+- **Add warning constants** at cmd/checkconfig/main.go:102+ (following pattern of `jobNameLengthWarning`, etc.)
+- **Register in optionalWarnings** list at lines 159-165 (both start as optional, not default)
+- **Add validation functions** following the pattern from `validateRequiredJobAnnotations` (lines 1568-1600):
+  - Iterate over PresubmitsStatic, PostsubmitsStatic, and Periodics
+  - Check only Kubernetes jobs (`job.Agent == string(v1.KubernetesAgent)`)
+  - Access resources via `job.Spec.Containers[i].Resources.Requests/Limits`
+  - Validate both CPU and Memory resources are present
+- **Call validators** in the `validate()` function following the pattern at lines 454-458
+
+Reference code for resource access patterns can be found in pkg/pod-utils/decorate/podspec.go where similar resource checking is done.
+
+## Contributor Guidance
+
+Estimated effort: 2-4 hours for experienced Go developers, 4-8 hours for those new to Prow. The implementation requires:
+- 2 files modified (cmd/checkconfig/main.go and main_test.go)
+- ~200 lines of code total
+- 16 test cases following the table-driven pattern in main_test.go:2537-2634
+
+/area checkconfig
+/kind feature
+/help-wanted
+/remove-lifecycle rotten
+/remove-lifecycle stale
+```
+
+### Rationale
+
+**What's being added**:
+- **Implementation approach clarification**: The original issue proposed using strict mode, but the recommended approach (based on maintainer feedback and checkconfig architecture) is to use two separate optional warnings. This addresses @petr-muller's comment about granularity and provides better flexibility.
+- **Integration points**: Specific file paths, line numbers, and functions to follow as patterns. The original issue included example code but didn't explain where in the codebase it would integrate.
+- **Contributor guidance**: Concrete effort estimate and what files need modification, helping potential contributors understand the scope.
+
+**Why these labels**:
+- `/area checkconfig`: This affects the checkconfig command-line tool component
+- `/kind feature`: Adding new validation capability (not fixing a bug)
+- `/help-wanted`: Based on Level 2 effort assessment - moderate complexity, suitable for contributors willing to learn checkconfig patterns
+- `/remove-lifecycle rotten` and `/remove-lifecycle stale`: Issue is legitimate and now has clear path forward; remove stale bot labels
+
+**Why /retitle**:
+- The reference to "Strict Mode" in the title is slightly misleading given the recommended implementation approach (optional warnings, not strict mode flag)
+- Shorter, clearer title that focuses on what's being added rather than how
+
+**What's NOT included**:
+- **Detailed code examples**: The original issue already includes example code. Rather than providing more code, the comment points to existing reference patterns in the codebase.
+- **Priority label**: This is a nice-to-have feature but not critical for Prow operation. Let maintainers decide on priority.
+- **Extensive technical explanation**: Kept the comment concise (3 paragraphs) rather than dumping all research findings. The key insights are: two-flag approach, where it integrates, and contributor guidance.
+
+**Guidance on posting**:
+This augmentation should be posted because:
+1. The recommended approach differs from what the author proposed (strict mode vs optional warnings)
+2. The issue lacks integration details that would help a contributor get started
+3. The effort assessment and guidance helps match the issue to appropriate contributors
+4. Removing lifecycle labels requires maintainer action via comment
+
 ## Next Steps
 
-- Continue with augment subcommand
-- Propose improvements to the issue based on research findings
-- Prepare comment with solution recommendations and label suggestions
 - Use wrapup subcommand to finalize triage
+- Push triage branches to origin
+- Post the augmentation comment to GitHub issue 154

@@ -372,9 +372,190 @@ func validateResourceRequests(c config.JobConfig) error {
 4. Consider promoting requests validation to default warnings in future release if widely adopted
 5. Limits validation likely stays optional long-term
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+Adding resource validation to checkconfig follows well-established patterns and has a clear solution approach, but requires understanding the warning flag system, proper iteration over job types, and comprehensive test coverage. Suitable for contributors familiar with Go and willing to learn checkconfig patterns.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small to Moderate
+- **Details**:
+  - Primary file: cmd/checkconfig/main.go (~120 lines for 2 validators, 2 constants, 2 warning calls)
+  - Test file: cmd/checkconfig/main_test.go (~80 lines for 2 test functions with 8 test cases each)
+  - Total: 2 files, ~200 lines of code
+  - Localized to checkconfig component
+- **Level Indication**: 2
+
+#### Complexity
+- **Assessment**: Simple to Moderate
+- **Details**:
+  - Straightforward validation logic: check if Resources.Requests/Limits exist and contain CPU and Memory
+  - Similar complexity to existing validateRequiredJobAnnotations (lines 1568-1600)
+  - No concurrency, no race conditions, no complex algorithms
+  - Main complexity: properly iterating over 3 job types (presubmits, postsubmits, periodics)
+  - Need to handle nil Spec and nil Resources maps gracefully
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal to Moderate
+- **Details**:
+  - **Required knowledge**:
+    - Go basics (error handling, iteration, maps)
+    - How to read and follow existing code patterns
+    - Understanding of Kubernetes resource concepts (requests vs limits)
+  - **Can be learned from codebase**:
+    - checkconfig warning flag pattern (clear examples exist)
+    - Job iteration pattern (multiple examples at lines 1568-1600, 924-948)
+    - How to access job.Spec.Containers.Resources (examples in pod-utils)
+  - **NOT required**:
+    - Deep Prow architecture knowledge
+    - Understanding of Tide, GitHub API, or complex subsystems
+    - Concurrency or distributed systems expertise
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Problem clearly stated: validate resource requirements in job configs
+  - Solution approach agreed upon: two separate warning flags (requests and limits)
+  - Maintainer provided specific feedback: make it granular, allow requests without limits
+  - Code research identified exact integration points and patterns to follow
+  - No open questions about requirements or approach
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - Need 2 test functions (one per validator)
+  - Each test function needs ~8 test cases:
+    1. Job with no resources (should fail)
+    2. Job with requests only (pass requests check, fail limits check)
+    3. Job with limits only (fail requests check, pass limits check)
+    4. Job with both (pass both checks)
+    5. Job with partial resources - CPU only (should fail)
+    6. Job with partial resources - Memory only (should fail)
+    7. Non-Kubernetes job (should pass - not validated)
+    8. Job with no Spec (should pass - not validated)
+  - Total: ~16 test cases
+  - Follow existing table-driven test pattern (clear examples exist)
+  - No integration tests needed
+  - No new test infrastructure required
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - Both warnings are optional (added to optionalWarnings list)
+  - Users must explicitly enable via --warnings flag
+  - No default behavior changes
+  - No breaking changes to existing configs
+  - Existing deployments completely unaffected unless they opt-in
+  - No migration strategy needed
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**:
+  - Follows exact pattern established by existing validators:
+    - validateRequiredJobAnnotations (for job iteration pattern)
+    - validateDecoratedJobs (for simple checks)
+    - Warning flag system (well-established pattern)
+  - Uses existing optionalWarnings list (lines 159-165)
+  - Integrates into validate() dispatcher function (pattern at lines 454-458)
+  - No new architectural patterns introduced
+  - No changes to core Prow functionality
+  - Checkconfig is the correct place for this validation
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None (all dependencies already present)
+- **Details**:
+  - Uses corev1.ResourceCPU and corev1.ResourceMemory from Kubernetes core API
+  - These types are already imported and used throughout Prow
+  - No new external libraries needed
+  - No external API calls
+  - No dependency on GitHub API, Kubernetes API, or other external systems
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+Based on this assessment, recommend the following labels:
+- [x] `help-needed`: Moderate scope, suitable for contributors willing to learn checkconfig patterns
+- [x] `kind/feature`: Adding new validation capability
+- [x] `area/checkconfig`: Affects checkconfig component
+- [ ] `good-first-issue`: Slightly too involved due to testing requirements and need to understand warning flag system; better suited for someone with some Go experience
+- [ ] `priority/important-soon`: Nice-to-have feature but not critical
+- [ ] `/remove-lifecycle rotten`: Should remove lifecycle labels when posting augmentation comment
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+
+**Suitable for**: Contributors familiar with Go who want to learn Prow contribution patterns
+
+**Prerequisites**:
+- Comfortable with Go (iteration, maps, error handling, structs)
+- Understanding of Kubernetes resource requests and limits concepts
+- Ability to read and follow existing code patterns
+
+**Should review before starting**:
+1. **Existing validation patterns**:
+   - cmd/checkconfig/main.go:1568-1600 - `validateRequiredJobAnnotations` (best example for this feature)
+   - cmd/checkconfig/main.go:924-948 - `validateDecoratedJobs` (simple pattern)
+   - cmd/checkconfig/main.go:102-165 - Warning flag system
+
+2. **Job structure**:
+   - pkg/config/jobs.go:104-154 - JobBase struct showing Spec field
+   - Understand: Presubmit, Postsubmit, Periodic all embed JobBase
+
+3. **Resource access examples**:
+   - pkg/pod-utils/decorate/podspec.go - Real-world examples of accessing Container.Resources
+
+4. **Test patterns**:
+   - cmd/checkconfig/main_test.go:2537-2634 - `TestValidateRequiredJobAnnotations` (test pattern to follow)
+
+**Recommended approach**:
+1. Start by adding the two warning constants (lines 102+)
+2. Add them to optionalWarnings list (lines 159-165)
+3. Implement `validateResourceRequests` function following `validateRequiredJobAnnotations` pattern
+4. Implement `validateResourceLimits` function (very similar to requests)
+5. Add validation calls in `validate()` function (follow pattern at lines 454-458)
+6. Write tests following the table-driven pattern
+7. Run tests: `go test ./cmd/checkconfig/...`
+8. Run checkconfig against test configs to verify
+
+**Estimated time**: 4-8 hours for someone new to Prow, 2-4 hours for experienced Go developer
+
+**Mentorship**: Maintainers can provide guidance on checkconfig patterns and review approach
+
+### Caveats and Considerations
+
+1. **Author's example code**: The issue includes example code, but the recommended approach differs:
+   - Author proposed all validation in one function with strict mode flag
+   - Recommended: two separate optional warnings (more flexible)
+   - Contributor should follow the recommended approach, not the example
+
+2. **Starting point**: While the code structure is straightforward, a contributor should:
+   - Read existing validators first to understand the pattern
+   - Not copy-paste the author's example code verbatim
+   - Follow checkconfig's established conventions
+
+3. **Not a good-first-issue because**:
+   - Need to implement two related but separate functions
+   - Testing requirements are moderate (16 test cases total)
+   - Need to understand the warning flag system
+   - Better suited for someone with at least basic Prow contribution experience
+
+4. **Could become easier**: If maintainer feedback suggests simplifying to a single flag (requests only), this could be reduced to Level 1. Current assessment assumes the recommended two-flag approach.
+
 ## Next Steps
 
-- Continue with assess-effort subcommand
-- Determine effort level and appropriate labels
-- Propose augmentation to improve issue quality
-- Prepare comment with recommendations
+- Continue with augment subcommand
+- Propose improvements to the issue based on research findings
+- Prepare comment with solution recommendations and label suggestions
+- Use wrapup subcommand to finalize triage

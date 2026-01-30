@@ -191,11 +191,122 @@ This is cleaner and follows the pattern suggested in the issue itself. The patch
 - Test that flag disabled produces unchanged behavior
 - Test with merge commits
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+This is a well-defined feature request with clear requirements and an established implementation pattern to follow. While the scope is moderate and requires understanding the cherrypicker flow, it's fully backwards compatible and follows existing code patterns.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-to-Moderate
+- **Details**: 3-5 files affected (~100-200 lines):
+  - `main.go` - add flag definition (~5 lines)
+  - `server.go` - add struct field and post-Am logic (~30-50 lines)
+  - Possibly `interactor.go` - helper method (~20 lines)
+  - `server_test.go` - new tests (~50-100 lines)
+- **Level Indication**: 2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**:
+  - Single-commit case is straightforward (amend HEAD)
+  - Multi-commit case requires more care (rebase or sequential amendment)
+  - Need to extract original SHA from patch headers
+  - Must preserve author information
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - Understanding of cherrypicker plugin flow
+  - Git knowledge (am, amend, rebase)
+  - Go development experience
+  - Existing code is well-documented with clear patterns to follow
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Feature request is clear (like `git cherry-pick -x`)
+  - Issue author provided concrete examples
+  - Proposed approach already outlined
+  - Reference documentation available
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - Unit tests for new flag
+  - Tests for single-commit and multi-commit cases
+  - Tests for flag-disabled behavior
+  - Can follow existing patterns in server_test.go
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - Fully opt-in via new CLI flag
+  - No changes to existing behavior when flag is not set
+  - No migration required
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**:
+  - Follows existing flag pattern (like `issueOnConflict`)
+  - Clean insertion point after Am() in server.go
+  - Consistent with codebase style and conventions
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**:
+  - Uses standard git commands (am, amend)
+  - No GitHub API changes needed
+  - Git behavior is well-documented and stable
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `help-wanted`: Good scope for skilled contributor familiar with Go and git
+- [ ] `good-first-issue`: Too involved - requires understanding cherrypicker flow and handling multi-commit cases
+- [x] `kind/feature`: Already applied, correct
+- [x] `area/plugins`: Already applied, correct
+- [ ] `lifecycle/stale`: Should be removed - this is a legitimate, actionable issue
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and git operations
+- Should review:
+  - `cmd/external-plugins/cherrypicker/server.go` - main plugin logic
+  - `pkg/git/v2/interactor.go` - git operations
+  - `cmd/external-plugins/cherrypicker/server_test.go` - test patterns
+- Recommended approach:
+  1. Add `--add-original-commit-id` flag following `issueOnConflict` pattern
+  2. After successful `Am()`, if flag enabled, amend commits with original SHA
+  3. Handle both single-commit and multi-commit PRs
+  4. Preserve original author information
+- Key implementation considerations:
+  - Extract original SHA from patch headers (look for `From <SHA>` line)
+  - For multi-commit PRs, use `git filter-branch` or sequential rebase
+  - Add comprehensive tests
+
+### Caveats and Considerations
+
+- **Multi-commit complexity**: The main challenge is handling PRs with multiple commits. The implementation needs to amend each commit, not just HEAD.
+- **Maintainer bandwidth**: Comments on the issue indicate limited maintainer bandwidth for cherrypicker plugin. A clean, well-tested PR would be more likely to be reviewed.
+- **Active users**: While not used by core Kubernetes, the plugin is actively used by Kubernetes subprojects (e.g., KubeVirt).
+
 ## Next Steps
 
 1. ~~Initial validation~~ - Complete (LEGITIMATE)
 2. ~~Research~~ - Complete
-3. Assess effort - Determine complexity
+3. ~~Assess effort~~ - Complete (Level 2 - Moderate)
 4. Augment - Propose improvements to the issue
 5. Brief - Walk through findings (optional)
 6. Wrapup - Post findings to issue

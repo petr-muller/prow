@@ -302,11 +302,51 @@ This is a well-defined feature request with clear requirements and an establishe
 - **Maintainer bandwidth**: Comments on the issue indicate limited maintainer bandwidth for cherrypicker plugin. A clean, well-tested PR would be more likely to be reviewed.
 - **Active users**: While not used by core Kubernetes, the plugin is actively used by Kubernetes subprojects (e.g., KubeVirt).
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: "cherrypicker: add a flag to support `git cherry-pick -x` style commit messages for"
+- **Proposed**: "cherrypicker: add flag to include original commit SHA in cherry-picked commit messages"
+- **Rationale**: Current title is truncated (ends with "for"). Proposed title is complete and clearly describes the feature.
+
+### Proposed GitHub Comment
+
+```
+/retitle cherrypicker: add flag to include original commit SHA in cherry-picked commit messages
+
+## Implementation Notes
+
+The insertion point for this feature is in `cmd/external-plugins/cherrypicker/server.go` between lines 559-578, after `r.Am(localPath)` succeeds but before `p.Push()`. A new CLI flag (e.g., `--add-original-commit-id`) can follow the existing pattern used by `--create-issue-on-conflict` in `main.go:74`.
+
+The main complexity is handling multi-commit PRs correctly. For single-commit PRs, a simple `git commit --amend` suffices, but multi-commit PRs require amending each commit in the series while preserving author information. The original commit SHAs can be extracted from the patch file headers (the `From <SHA>` line).
+
+/remove-lifecycle stale
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- **Implementation details**: Specific file paths and line numbers for insertion point, pattern to follow for the flag
+- **Complexity note**: The multi-commit case is the main implementation challenge, not mentioned in original issue
+- **Stale label removal**: Issue was marked stale due to inactivity, not invalidity
+
+**Why these labels**:
+- `/remove-lifecycle stale`: This is a legitimate, actionable issue that should not be marked stale
+- `/help-wanted`: Level 2 effort assessment - moderate complexity, well-defined, suitable for skilled contributors
+
+**What's NOT included**:
+- `/area plugins` and `/kind feature`: Already applied, no need to repeat
+- Detailed architecture overview: Issue author already provided good context
+- Priority labels: No urgency warranting priority assignment
+- Good-first-issue: Too complex for new contributors (multi-commit handling)
+
 ## Next Steps
 
 1. ~~Initial validation~~ - Complete (LEGITIMATE)
 2. ~~Research~~ - Complete
 3. ~~Assess effort~~ - Complete (Level 2 - Moderate)
-4. Augment - Propose improvements to the issue
+4. ~~Augment~~ - Complete
 5. Brief - Walk through findings (optional)
 6. Wrapup - Post findings to issue

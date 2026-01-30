@@ -168,6 +168,18 @@ deck:
         name: links
       required_files:
         - artifacts/.*\.link\.txt
+    - lens:
+        name: html
+        config:
+          max_size: 500000000  # 500MB
+      required_files:
+        - ^.*/custom-link-.*\.html$
+        - ^.*/test-risk-analysis.*\.html$
+        - ^.*/e2e-intervals_spyglass.*\.html$
+        - ^.*/.*-summary.*\.html$
+        - ^.*/report\.html$
+  bucket_aliases:
+    origin-ci-test: test-platform-results
   tide_update_period: 1s
   hidden_repos:
   - kubernetes-security
@@ -186,6 +198,8 @@ deck:
     - ppc64le-kubernetes
     - k8s-conform-s390x-k8s
     - arm64-k8s-test
+    - test-platform-results
+    - origin-ci-test
 
 prowjob_namespace: default
 pod_namespace: test-pods

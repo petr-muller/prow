@@ -22,3 +22,51 @@ body {
   visibility: collapse;
   display: none;
 }
+
+/* Spinner animation */
+@-moz-keyframes spin {
+  to { -moz-transform: rotate(360deg); }
+}
+@-webkit-keyframes spin {
+  to { -webkit-transform: rotate(360deg); }
+}
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}
+
+.html-loading-container .loading-spinner {
+  animation: spin 1800ms linear infinite;
+  display: block;
+  margin: 0 auto;
+  transform-origin: 50% 50%;
+}
+
+/* Metadata spinner in header row */
+.metadata-spinner {
+  animation: spin 1800ms linear infinite;
+  transform-origin: 50% 50%;
+}
+
+/* Compact table styling */
+.html-lens-table {
+  width: 100%;
+}
+
+.html-lens-table .section-expander {
+  cursor: pointer;
+}
+
+.html-lens-cell {
+  padding: 8px 12px !important;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.html-lens-cell .artifact-title {
+  font-weight: 500;
+}
+
+.html-lens-cell .arrow-icon {
+  font-size: 20px;
+  vertical-align: middle;
+}

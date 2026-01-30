@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"path/filepath"
 	"strings"
 	"text/template"
@@ -33,6 +34,22 @@ import (
 	"sigs.k8s.io/prow/pkg/spyglass/lenses"
 )
 
+// maxMetadataBytes is the maximum number of bytes to read when extracting metadata.
+// 64KB should be enough to capture the <head> section of most HTML files.
+const maxMetadataBytes = 64 * 1024
+
+// callbackRequest represents the JSON request format for callbacks
+type callbackRequest struct {
+	Type  string `json:"type"`  // "metadata" or "content"
+	Index int    `json:"index"` // artifact index
+}
+
+// metadataResponse represents the JSON response for metadata requests
+type metadataResponse struct {
+	Title       string `json:"title"`
+	Description string `json:"description,omitempty"`
+}
+
 func init() {
 	lenses.RegisterLens(Lens{})
 }
@@ -44,6 +61,7 @@ type document struct {
 	ID       string
 	Title    string
 	Content  string
+	Index    int // Index in the artifacts array for lazy loading
 }
 
 // Config returns the lens's configuration.
@@ -69,12 +87,162 @@ func (lens Lens) Header(artifacts []api.Artifact, resourceDir string, config jso
 	return buf.String()
 }
 
-// Callback does nothing.
+// Callback handles lazy loading of individual HTML artifacts.
+// Expects data to be JSON with format: {"type": "metadata"|"content", "index": N}
+// - "metadata": Returns JSON with title and description extracted from HTML head
+// - "content": Returns full HTML content for iframe display
 func (lens Lens) Callback(artifacts []api.Artifact, resourceDir string, data string, config json.RawMessage, spyglassConfig config.Spyglass) string {
-	return ""
+	if data == "" {
+		return ""
+	}
+
+	var req callbackRequest
+	if err := json.Unmarshal([]byte(data), &req); err != nil {
+		logrus.WithError(err).Error("Failed to parse callback request JSON")
+		return ""
+	}
+
+	if req.Index < 0 || req.Index >= len(artifacts) {
+		logrus.Errorf("Invalid artifact index %d, only %d artifacts available", req.Index, len(artifacts))
+		return ""
+	}
+
+	artifact := artifacts[req.Index]
+	name := filepath.Base(artifact.CanonicalLink())
+
+	switch req.Type {
+	case "metadata":
+		return lens.handleMetadataRequest(artifact, name)
+	case "content":
+		return lens.handleContentRequest(artifact, name, req.Index)
+	default:
+		logrus.Errorf("Unknown callback request type: %s", req.Type)
+		return ""
+	}
+}
+
+// handleMetadataRequest extracts title and description from the HTML head section
+// without reading the entire file (limited to first 64KB)
+func (lens Lens) handleMetadataRequest(artifact api.Artifact, name string) string {
+	content, err := readAtMostBytes(artifact, maxMetadataBytes)
+	if err != nil {
+		logrus.WithError(err).WithField("artifact_url", artifact.CanonicalLink()).Warn("failed to read metadata")
+		return ""
+	}
+
+	title, description := extractMetadataOnly(content, name)
+
+	resp := metadataResponse{
+		Title:       title,
+		Description: description,
+	}
+
+	jsonBytes, err := json.Marshal(resp)
+	if err != nil {
+		logrus.WithError(err).Error("Failed to marshal metadata response")
+		return ""
+	}
+
+	return string(jsonBytes)
+}
+
+// handleContentRequest returns the full HTML content for iframe display
+func (lens Lens) handleContentRequest(artifact api.Artifact, name string, index int) string {
+	content, err := artifact.ReadAll()
+	if err != nil {
+		logrus.WithError(err).WithField("artifact_url", artifact.CanonicalLink()).Warn("failed to read content")
+		return ""
+	}
+
+	id := fmt.Sprintf("%s-%d", name, index)
+
+	// For callback (lazy loading via AJAX), we inject the height notifier but don't escape quotes
+	// since the content will be set via JavaScript, not embedded in HTML attributes
+	return injectHeightNotifier(string(content), id)
+}
+
+// readAtMostBytes reads up to n bytes from the artifact
+func readAtMostBytes(artifact api.Artifact, n int64) ([]byte, error) {
+	size, err := artifact.Size()
+	if err != nil {
+		return nil, err
+	}
+
+	readSize := size
+	if readSize > n {
+		readSize = n
+	}
+
+	buf := make([]byte, readSize)
+	_, err = artifact.ReadAt(buf, 0)
+	if err != nil && err != io.EOF {
+		return nil, err
+	}
+
+	return buf, nil
+}
+
+// extractMetadataOnly parses HTML to extract just the title and meta description
+// without processing the entire document
+func extractMetadataOnly(content []byte, defaultTitle string) (title string, description string) {
+	title = defaultTitle
+
+	token := html.NewTokenizer(bytes.NewReader(content))
+	isTitle := false
+	inHead := false
+
+	for {
+		tt := token.Next()
+		switch tt {
+		case html.ErrorToken:
+			// End of document or error - return what we have
+			return title, description
+		case html.StartTagToken, html.SelfClosingTagToken:
+			t := token.Token()
+			switch t.Data {
+			case "head":
+				inHead = true
+			case "body":
+				// Once we hit body, we're done with head section
+				return title, description
+			case "title":
+				isTitle = true
+			case "meta":
+				if inHead || true { // Check meta tags even outside explicit head
+					content := ""
+					isDescription := false
+					for _, attr := range t.Attr {
+						if attr.Key == "name" && attr.Val == "description" {
+							isDescription = true
+						} else if attr.Key == "content" {
+							content = attr.Val
+						}
+					}
+					if isDescription && content != "" {
+						description = content
+					}
+				}
+			}
+		case html.EndTagToken:
+			t := token.Token()
+			if t.Data == "head" {
+				// End of head section
+				return title, description
+			}
+		case html.TextToken:
+			if isTitle {
+				isTitle = false
+				t := token.Token()
+				if t.Data != "" {
+					title = strings.TrimSpace(t.Data)
+				}
+			}
+		}
+	}
 }
 
 // Body renders the <body>
+// For lazy loading, we don't read any content - just use filenames as titles.
 func (lens Lens) Body(artifacts []api.Artifact, resourceDir string, data string, config json.RawMessage, spyglassConfig config.Spyglass) string {
 	if len(artifacts) == 0 {
 		logrus.Error("html Body() called with no artifacts, which should never happen.")
@@ -83,13 +251,16 @@ func (lens Lens) Body(artifacts []api.Artifact, resourceDir string, data string,
 
 	documents := make([]document, 0)
 	for i, artifact := range artifacts {
-		content, err := artifact.ReadAll()
-		if err != nil {
-			logrus.WithError(err).WithField("artifact_url", artifact.CanonicalLink()).Warn("failed to read content")
-			continue
-		}
 		name := filepath.Base(artifact.CanonicalLink())
-		documents = append(documents, extractDocumentDetails(name, i, content))
+		// For lazy loading, don't read content - just use filename
+		doc := document{
+			Filename: name,
+			ID:       fmt.Sprintf("%s-%d", name, i),
+			Title:    name, // Use filename as title initially
+			Content:  "",   // Empty - will be fetched via callback
+			Index:    i,
+		}
+		documents = append(documents, doc)
 	}
 
 	template, err := template.ParseFiles(filepath.Join(resourceDir, "template.html"))

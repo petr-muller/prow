@@ -4,16 +4,22 @@
 {{end}}
 
 {{define "body"}}
-  <table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp">
+  <table class="mdl-data-table mdl-js-data-table mdl-shadow--2dp html-lens-table">
     {{ range $documents:= . }}
-    <tr class="header section-expander">
-      <td class="mdl-data-table__cell--non-numeric expander failed" colspan="1"><h6>{{.Title}}</h6></td>
-      <td class="mdl-data-table__cell--non-numeric expander"><i class="icon-button material-icons arrow-icon noselect">expand_less</i></td>
+    <tr class="header section-expander" data-artifact-index="{{.Index}}">
+      <td class="mdl-data-table__cell--non-numeric expander failed html-lens-cell" colspan="1">
+        <span class="artifact-title">{{.Title}}</span>
+        <img src="/static/kubernetes-wheel.svg" alt="loading" class="metadata-spinner" style="width: 14px; height: 14px; margin-left: 6px; vertical-align: middle;">
+      </td>
+      <td class="mdl-data-table__cell--non-numeric expander html-lens-cell"><i class="icon-button material-icons arrow-icon noselect">expand_more</i></td>
     </tr>
-    {{/* Do _not_ hide this by default, that will break inner javascript that dynamically resizes. Hiding post-render is ok, so we hide on first resize request */}}
-    <tr class="initial" id="{{.ID}}-tr">
+    {{/* Content will be fetched via callback using the artifact index */}}
+    <tr class="hidden-data" id="{{.ID}}-tr" data-index="{{.Index}}">
       <td colspan="2" style="border: 0px; padding: 0px;">
-        <iframe srcdoc="{{.Content}}" title="{{.Filename}}" sandbox="allow-scripts allow-popups allow-same-origin" id="{{.ID}}" width="100%" scrolling="no"></iframe>
+        <div class="html-loading-container" style="display: none; text-align: center; padding: 20px 0;">
+          <img src="/static/kubernetes-wheel.svg" alt="loading spinner" class="loading-spinner" style="width: 50px; height: 50px;">
+        </div>
+        <iframe srcdoc="" title="{{.Filename}}" sandbox="allow-scripts allow-popups allow-same-origin" id="{{.ID}}" width="100%" scrolling="no"></iframe>
       </td>
     </tr>
     {{end}}

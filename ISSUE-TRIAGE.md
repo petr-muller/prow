@@ -321,6 +321,10 @@ The insertion point for this feature is in `cmd/external-plugins/cherrypicker/se
 
 The main complexity is handling multi-commit PRs correctly. For single-commit PRs, a simple `git commit --amend` suffices, but multi-commit PRs require amending each commit in the series while preserving author information. The original commit SHAs can be extracted from the patch file headers (the `From <SHA>` line).
 
+## Default Behavior Consideration
+
+Worth considering: should this be the default behavior rather than opt-in? The `git cherry-pick -x` behavior is widely considered best practice for traceability, and the extra line in commit messages is purely additive. If there are no strong objections, making this the default (with a flag to disable) might be preferable to requiring every deployment to opt-in. Either approach works for implementation.
+
 /remove-lifecycle stale
 /help-wanted
 ```
@@ -342,11 +346,21 @@ The main complexity is handling multi-commit PRs correctly. For single-commit PR
 - Priority labels: No urgency warranting priority assignment
 - Good-first-issue: Too complex for new contributors (multi-commit handling)
 
+## Briefing Completed
+
+Briefed maintainer on: 2026-01-30
+
+Key questions asked:
+- "Is there a good reason to not just make the behavior default?" - Valid point. The `git cherry-pick -x` behavior is best practice, and making it default (with opt-out) might be preferable. Added note to augmentation comment suggesting this for discussion.
+
+Maintainer decision:
+Added consideration about default behavior to proposed comment.
+
 ## Next Steps
 
 1. ~~Initial validation~~ - Complete (LEGITIMATE)
 2. ~~Research~~ - Complete
 3. ~~Assess effort~~ - Complete (Level 2 - Moderate)
 4. ~~Augment~~ - Complete
-5. Brief - Walk through findings (optional)
+5. ~~Brief~~ - Complete
 6. Wrapup - Post findings to issue

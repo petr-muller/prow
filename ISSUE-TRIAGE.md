@@ -357,6 +357,55 @@ Based on this assessment:
 - **Merge strategy limitation**: The simple approach only works reliably for repositories using the `merge` strategy. For `squash`/`rebase` repos, the original commit status is lost. This is an acceptable limitation per maintainer discussion - "best effort warning" is sufficient.
 - **Rate limits**: Each push event triggers a status API call. For high-volume repos, this could add up, but should be negligible for the rare case of CLA failures.
 
+---
+
+### Proposed Issue Augmentation
+
+#### Title Change
+
+- **Current**: "alert prow plugin for no cla PR merges"
+- **Proposed**: "slackevents: Add alert for PRs merged without valid CLA status"
+- **Rationale**: The current title has awkward phrasing and doesn't specify which plugin. The new title follows Prow conventions (component prefix), is grammatically correct, and clearly describes the feature.
+
+#### Proposed GitHub Comment
+
+```
+/retitle slackevents: Add alert for PRs merged without valid CLA status
+
+## Implementation Guide
+
+The existing `MergeWarning` feature in slackevents (`pkg/plugins/slackevents/slackevents.go`) provides a pattern to follow. On push events, it checks repo/branch configuration and sends Slack alerts. A CLA status check would work similarly:
+
+1. Add a new config struct (e.g., `StatusContextAlert`) in `pkg/plugins/config.go` following the `MergeWarning` pattern - with repos, channels, and a configurable context name (defaulting to "EasyCLA")
+2. In the push handler, call `GetCombinedStatus(org, repo, pe.After)` to retrieve commit statuses
+3. Search for the CLA context in the returned statuses; if state is not "success", send an alert
+
+The `pkg/plugins/cla/cla.go` plugin shows how to check for the "EasyCLA" status context. For repos using the `merge` strategy, the merged commit inherits the PR's status contexts directly. For `squash`/`rebase` repos, statuses are not inherited - this is an acceptable limitation given this is a "best effort" warning.
+
+/area plugins
+```
+
+#### Rationale
+
+**What's being added**:
+- Specific implementation guidance: which files to modify, which patterns to follow
+- API to use: `GetCombinedStatus()`
+- Configuration approach: follow MergeWarning pattern
+- Acknowledgment of the merge strategy limitation with reasoning
+
+**Why these labels**:
+- `/retitle`: Current title is awkward and doesn't specify the plugin; new title follows Prow conventions
+- `/area plugins`: This is a plugins area change (slackevents is a plugin)
+- No `/kind feature`: Already applied
+- No `/help-wanted`: Already applied (appropriate for Level 2)
+
+**What's NOT included**:
+- Root cause analysis: Not applicable (this is a feature request, not a bug)
+- Detailed code snippets: Too verbose for an issue comment; the patterns are learnable from the codebase
+- Workarounds: Not applicable
+- Priority label: Not warranted - this is a nice-to-have feature for rare compliance events
+
 ## Next Steps
 
-(Action items will be added here)
+1. Post the augmentation comment to the issue (via wrapup)
+2. Monitor for contributor interest given the `help wanted` label

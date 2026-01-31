@@ -326,10 +326,56 @@ The effort level 3 rating is driven primarily by **design disagreement**, not te
 
 The author's clarified use case (matching .yaml files except in docs/) is valid but may still be achievable through documented workaround patterns without feature changes.
 
+---
+
+### Proposed Issue Augmentation
+
+#### Title Change
+
+- **No change needed**: Current title "Enhancement: Allow combining `run_if_changed` and `skip_if_only_changed` for more flexible job triggering" is already clear, specific, and accurately describes the request.
+
+#### Proposed GitHub Comment
+
+```
+## Technical Context
+
+The mutual exclusivity is deeply embedded in the current architecture. The `RegexpChangeMatcher` struct (`pkg/config/jobs.go:373-385`) stores only a single compiled regex in the `reChanges` field, with a code comment explicitly stating it holds data "from RunIfChanged xor SkipIfOnlyChanged." The `RunsAgainstChanges()` function uses an `else if` chain that would only evaluate `RunIfChanged` if both were set.
+
+Interestingly, Prow already has a precedent for non-exclusive include/exclude patterns: the `Branches` and `SkipBranches` fields in the `Brancher` struct are NOT mutually exclusive and can be used together, with `SkipBranches` taking precedence. This pattern could potentially inform the semantics if this feature were reconsidered.
+
+## RE2 Limitation Context
+
+The core driver for this request is that Go's RE2 regex engine (used by Prow) doesn't support negative lookahead (`(?!...)`), making it impossible to express "match X but not Y" in a single regex. The workaround patterns (explicit directory listing or complex alternation) are indeed unwieldy as @kaovilai noted.
+
+/area prow/config
+```
+
+#### Rationale
+
+**What's being added**:
+- **XOR architecture detail**: The issue mentions the validation check but not that the struct itself is designed for XOR semantics (single `reChanges` field)
+- **Branches/SkipBranches precedent**: This is a notable architectural precedent within Prow that supports the feature request's viability, not mentioned in the original discussion
+- **RE2 limitation acknowledgment**: Validates the author's point about regex limitations
+
+**Why these labels**:
+- `/area prow/config`: More specific than the existing `area/plugins` - this is about config validation, not plugins themselves. Adding this provides better categorization.
+- No `/kind` change: Already correctly labeled as `kind/feature`
+- No difficulty label: Level 3 issue - requires design discussion and maintainer consensus, not suitable for `good-first-issue` or `help-wanted`
+
+**What's NOT included**:
+- No `/retitle`: Title is already good
+- No implementation guidance: Maintainers have expressed opposition; providing implementation details would be premature
+- No priority label: Feature request without urgent need
+- No recommendation to close: Despite maintainer opposition, the issue has value as a design discussion record and the author's clarified use case deserves consideration
+
+#### Posting Recommendation
+
+**Recommend posting**: The comment adds useful technical context that strengthens the discussion. It doesn't advocate for or against the feature but provides information that could help future decision-making. The `Branches`/`SkipBranches` precedent is particularly valuable context that hasn't been mentioned.
+
 ## Next Steps
 
 - [x] Initial validation complete
 - [x] Code research complete
 - [x] Assess effort level
-- [ ] Prepare augmentation comment
+- [x] Prepare augmentation comment
 - [ ] Brief maintainer on findings

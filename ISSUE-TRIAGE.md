@@ -245,10 +245,91 @@ Two maintainers (petr-muller and BenTheElder) have already expressed concerns ab
 2. Document workaround patterns in official docs
 3. Consider reopening if compelling new use cases emerge with broader support
 
+---
+
+### Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise / design discussion)
+
+#### Summary
+
+While technically a medium-complexity code change, this feature has been rejected by two maintainers who consider it a "footgun." The effort assessment reflects the design disagreement more than implementation difficulty - achieving consensus would require extensive discussion and potentially an RFC.
+
+#### Factor Analysis
+
+##### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: ~5-7 files (config.go validation, jobs.go struct + logic, config_test.go, jobs_test.go, documentation), ~200-300 lines
+- **Level Indication**: 2-3
+
+##### Complexity
+- **Assessment**: Moderate
+- **Details**: Need to define combined evaluation semantics (AND vs OR), update regex compilation to handle two patterns, modify triggering logic. Not algorithmically hard but requires careful semantic design.
+- **Level Indication**: 2-3
+
+##### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Understanding of job triggering flow, regex compilation, configuration validation patterns. Existing code provides clear examples.
+- **Level Indication**: 2-3
+
+##### Clarity and Certainty
+- **Assessment**: Significant Uncertainty
+- **Details**: The implementation is clear, but maintainers have explicitly opposed the feature. The semantic behavior of combined fields is not agreed upon. Would require design consensus that doesn't exist.
+- **Level Indication**: 3-4
+
+##### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Need tests for combined field behavior across various edge cases (both match, neither match, one matches, etc.). Existing test patterns provide good templates.
+- **Level Indication**: 2-3
+
+##### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Only enables previously invalid configurations. Existing configs continue to work unchanged.
+- **Level Indication**: 1-2
+
+##### Architectural Alignment
+- **Assessment**: Questionable - Removes Intentional Guardrail
+- **Details**: The mutual exclusivity is a deliberate design choice to prevent misconfiguration. Maintainers view it as a safety feature, not a limitation. Removing it contradicts their design philosophy.
+- **Level Indication**: 3-4 (this is the critical factor)
+
+##### External Dependencies
+- **Assessment**: None
+- **Details**: No external system constraints. The RE2 regex limitation is the driver but doesn't block implementation.
+- **Level Indication**: 1-2
+
+#### Recommended Labels
+
+Based on this assessment:
+- [x] `kind/feature`: Feature request for new capability
+- [x] `area/prow/config`: Relates to Prow configuration validation
+- [ ] `good-first-issue`: Not appropriate - contentious feature with maintainer opposition
+- [ ] `help-needed`: Not appropriate - unlikely to be accepted without design consensus
+
+#### Guidance for Contributors
+
+**For Level 3 (Design Discussion Required)**:
+- This feature has been tentatively rejected by maintainers
+- Before implementing, a contributor would need to:
+  1. Build broader community consensus
+  2. Present more compelling use cases
+  3. Address maintainer concerns about footgun potential
+  4. Potentially write an RFC or design proposal
+- Simply submitting a PR implementing this would likely be rejected
+- Consider alternative approaches:
+  - Document workaround regex patterns in official docs
+  - Propose a linting tool to detect regex patterns that could be simplified
+  - Suggest config validation warnings instead of errors
+
+#### Caveats and Considerations
+
+The effort level 3 rating is driven primarily by **design disagreement**, not technical complexity. If maintainers reversed their position, this would be a Level 2 (moderate) implementation. However, since consensus-building is required before any implementation could be accepted, the effective effort is significantly higher.
+
+The author's clarified use case (matching .yaml files except in docs/) is valid but may still be achievable through documented workaround patterns without feature changes.
+
 ## Next Steps
 
 - [x] Initial validation complete
 - [x] Code research complete
-- [ ] Assess effort level
+- [x] Assess effort level
 - [ ] Prepare augmentation comment
 - [ ] Brief maintainer on findings

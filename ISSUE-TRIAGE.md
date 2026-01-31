@@ -242,6 +242,121 @@ This is the simplest solution that addresses the core use case. Per @BenTheElder
 - Test cases: CLA success (no alert), CLA failure (alert), CLA missing (configurable)
 - Test exemption logic if added
 
+---
+
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+#### Summary
+
+Well-defined feature request with clear solution approach, following existing plugin patterns. Moderate scope (3-4 files, ~150-200 LOC) with some edge cases around merge strategies. Suitable for contributors familiar with Prow plugins.
+
+#### Factor Analysis
+
+##### Scope of Changes
+- **Assessment**: Moderate
+- **Details**:
+  - `pkg/plugins/slackevents/slackevents.go` - Add CLA check logic (~50-80 LOC)
+  - `pkg/plugins/config.go` - Add configuration struct (~20-30 LOC)
+  - `pkg/plugins/slackevents/slackevents_test.go` - Add test cases (~50-80 LOC)
+  - Total: 3-4 files, ~150-200 lines of code
+- **Level Indication**: 2
+
+##### Complexity
+- **Assessment**: Simple to Moderate
+- **Details**:
+  - Follows existing MergeWarning pattern closely
+  - Simple logic: query status API, check for CLA context, send alert
+  - No concurrency concerns
+  - Edge case: handling different merge strategies (documented limitation acceptable)
+- **Level Indication**: 1-2
+
+##### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - Need to understand Prow plugin framework (can learn from slackevents code)
+  - Need to understand GitHub status API (well documented, existing examples)
+  - No deep Prow architectural knowledge required
+- **Level Indication**: 2
+
+##### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Problem clearly stated
+  - Solution approach agreed upon by maintainers
+  - Implementation pattern exists (MergeWarning)
+  - Minor limitation accepted: squash/rebase handling deferred
+- **Level Indication**: 1-2
+
+##### Testing Requirements
+- **Assessment**: Simple to Moderate
+- **Details**:
+  - Follow existing test patterns in `slackevents_test.go`
+  - Mock GitHub client with `fakegithub.NewFakeClient()`
+  - Test cases: CLA success (no alert), CLA failure (alert), CLA missing
+- **Level Indication**: 1-2
+
+##### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - Additive change only
+  - New feature requires explicit configuration to enable
+  - No impact on existing deployments without new config
+- **Level Indication**: 1
+
+##### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**:
+  - Extends existing slackevents plugin (maintainer recommendation)
+  - Follows established MergeWarning configuration pattern
+  - Uses existing plugin infrastructure and APIs
+- **Level Indication**: 1-2
+
+##### External Dependencies
+- **Assessment**: Well-supported
+- **Details**:
+  - GitHub status API is stable and well-documented
+  - `GetCombinedStatus()` already used elsewhere in Prow
+  - Slack API already integrated
+- **Level Indication**: 1-2
+
+#### Recommended Labels
+
+Based on this assessment:
+- [x] `help wanted` (already applied): Moderate complexity, suitable for skilled contributors
+- [x] `kind/feature` (already applied): New functionality
+- [ ] `good-first-issue`: Not appropriate - requires understanding plugin patterns and multiple components
+
+#### Guidance for Contributors
+
+**Prerequisites**:
+- Familiarity with Go
+- Basic understanding of Prow plugin architecture
+- Review `pkg/plugins/slackevents/slackevents.go` for existing patterns
+
+**Suggested Approach**:
+1. Study the existing `MergeWarning` implementation in slackevents
+2. Review how `GetCombinedStatus()` is used in `pkg/plugins/cla/cla.go`
+3. Add new config struct similar to `MergeWarning` in `pkg/plugins/config.go`
+4. Add handler logic to check CLA status on push events
+5. Write tests following existing patterns
+
+**Key Files to Review**:
+- `pkg/plugins/slackevents/slackevents.go` - Main plugin logic
+- `pkg/plugins/config.go` - Configuration patterns
+- `pkg/plugins/cla/cla.go` - CLA status checking example
+- `pkg/github/client.go:2814` - `GetCombinedStatus` API
+
+**Open Questions for Contributor**:
+1. Should missing CLA status context trigger an alert? (Likely no - may indicate non-CLA repo)
+2. Should specific branches be configurable? (Probably yes, follow MergeWarning pattern)
+
+#### Caveats and Considerations
+
+- **Merge strategy limitation**: The simple approach only works reliably for repositories using the `merge` strategy. For `squash`/`rebase` repos, the original commit status is lost. This is an acceptable limitation per maintainer discussion - "best effort warning" is sufficient.
+- **Rate limits**: Each push event triggers a status API call. For high-volume repos, this could add up, but should be negligible for the rare case of CLA failures.
+
 ## Next Steps
 
 (Action items will be added here)

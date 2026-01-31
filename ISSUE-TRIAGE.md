@@ -54,6 +54,201 @@ The author (kaovilai) provided a more concrete use case: needing to match `.yaml
 
 **Suggested Action**: Continue triage to fully understand the technical implications, then document the maintainer decision rationale for future reference.
 
+---
+
+### Code Research
+
+#### Current Implementation
+
+**Primary Components**:
+- **RegexpChangeMatcher**: `pkg/config/jobs.go:373-385` - Struct holding `RunIfChanged` and `SkipIfOnlyChanged` fields plus compiled regex
+- **validateTriggering**: `pkg/config/config.go:3115-3133` - Enforces mutual exclusivity for presubmits
+- **validateAlwaysRun**: `pkg/config/config.go:3100-3113` - Enforces mutual exclusivity for postsubmits
+- **RunsAgainstChanges**: `pkg/config/jobs.go:465-476` - Core triggering logic that evaluates whether job should run
+
+**Architecture Overview**:
+The `RegexpChangeMatcher` struct is embedded in both `Presubmit` and `Postsubmit` job types. It stores one of two mutually exclusive regex patterns. The current design uses **XOR semantics** - only ONE regex can be compiled and stored in the `reChanges` field.
+
+**Key Code Paths**:
+
+1. **Validation** (config.go:3124-3126):
+```go
+if job.RunIfChanged != "" && job.SkipIfOnlyChanged != "" {
+    return fmt.Errorf("job %s declares run_if_changed and skip_if_only_changed, which are mutually exclusive", job.Name)
+}
+```
+
+2. **Regex Compilation** (config.go:3306-3321 - `setChangeRegexes`):
+   - Uses if/else-if chain - only ONE regex compiled into `reChanges`
+   - Comment on jobs.go:384 explicitly states: "from RunIfChanged xor SkipIfOnlyChanged"
+
+3. **Triggering Evaluation** (jobs.go:465-476):
+```go
+func (cm RegexpChangeMatcher) RunsAgainstChanges(changes []string) bool {
+    for _, change := range changes {
+        if cm.RunIfChanged != "" && cm.reChanges.MatchString(change) {
+            return true
+        } else if cm.SkipIfOnlyChanged != "" && !cm.reChanges.MatchString(change) {
+            return true
+        }
+    }
+    return false
+}
+```
+Uses `else if` - if both fields were set, only `RunIfChanged` would be evaluated.
+
+**Data Flow**:
+1. Job YAML parsed → `RegexpChangeMatcher` fields populated
+2. Validation runs → checks mutual exclusivity (rejects if both set)
+3. Regex compiled → `setChangeRegexes()` compiles exactly one regex
+4. On PR/push event → `RunsAgainstChanges()` evaluates file changes
+5. Returns true/false → determines if job triggers
+
+#### Related Code
+
+**Validation Call Sites**:
+- Presubmits: `config.go:2327` (in `validatePresubmits`)
+- Postsubmits: `config.go:2390` (in `validatePostsubmits`)
+
+**Job Structs Affected**:
+- `Presubmit`: jobs.go:195-232 (embeds `RegexpChangeMatcher` at line 223)
+- `Postsubmit`: jobs.go:259-281 (embeds `RegexpChangeMatcher` at line 273)
+
+**Similar Pattern - Brancher** (jobs.go:360-369):
+The `Branches` and `SkipBranches` fields are NOT mutually exclusive - both can be set together. `SkipBranches` takes precedence. This is a complementary pattern that could inform the feature design.
+
+#### Test Coverage
+
+**Existing Tests**:
+- `config_test.go:8052-8062`: `TestValidatePresubmits` - tests mutual exclusivity error
+- `config_test.go:8139-8149`: `TestValidatePostsubmits` - tests mutual exclusivity error
+- `config_test.go:4979`: `TestValidateAlwaysRunPostsubmit` - tests postsubmit validation
+- `jobs_test.go:29-59`: `TestRunIfChangedPresubmits` - 6 test cases for matching
+- `jobs_test.go:94-131`: `TestSkipIfOnlyChangedPresubmits` - 6 test cases for skipping
+- `jobs_test.go:679-819`: Comprehensive `Presubmit.ShouldRun` tests
+
+**Coverage Assessment**: STRONG for individual field behavior, NO coverage for combined usage (rejected at validation)
+
+**Test Gaps**:
+- No tests for combined `run_if_changed` + `skip_if_only_changed` (would be needed if feature implemented)
+- No tests for semantic edge cases of combined logic
+
+#### Documentation Review
+
+**Code Comments** (jobs.go:375-382):
+```go
+// RunIfChanged defines a regex used to select which subset of file changes should trigger this job.
+// If any file in the changeset matches this regex, the job will be triggered
+// Additionally AlwaysRun is mutually exclusive with RunIfChanged.
+
+// SkipIfOnlyChanged defines a regex used to select which subset of file changes should trigger this job.
+// If all files in the changeset match this regex, the job will be skipped.
+// In other words, this is the negation of RunIfChanged.
+// Additionally AlwaysRun is mutually exclusive with SkipIfOnlyChanged.
+```
+
+**User Documentation**: `site/content/en/docs/jobs.md:230` states fields are mutually exclusive
+
+**Known Limitations**:
+- Go's RE2 regex engine (used by Prow) does NOT support negative lookahead (`(?!...)`)
+- This is the core limitation driving the feature request - users cannot construct complex exclusion patterns in a single regex
+
+#### Root Cause Analysis
+
+**Primary Cause**:
+This is a **design decision**, not a bug. The mutual exclusivity was intentionally implemented as a "guardrail" to prevent misconfiguration. The validation check (config.go:3124-3126) explicitly prevents both fields from being set together.
+
+**Rationale for Current Design**:
+1. Simplicity: Only one regex compiled/evaluated
+2. Safety: Prevents confusing interactions between two regex patterns
+3. Predictability: Job triggering behavior is easier to reason about
+4. Error Prevention: Catches likely user mistakes (setting both when they meant one)
+
+**Contributing Factors to the Feature Request**:
+1. RE2's lack of negative lookahead makes complex exclusion patterns unwieldy
+2. Real use cases exist where users want to match files in many directories but exclude specific subdirectories
+3. The `Branches` / `SkipBranches` pattern shows combined usage can work
+
+#### Proposed Solutions
+
+##### Approach 1: Remove Constraint and Implement AND Logic
+
+**Description**: Remove validation constraint; if both fields set, job runs only when:
+- At least one file matches `run_if_changed` AND
+- NOT all files match `skip_if_only_changed`
+
+**Pros**:
+- Addresses the author's use case directly
+- Backward compatible (existing configs unchanged)
+- Follows semantic precedent of `Branches`/`SkipBranches`
+
+**Cons**:
+- Increased configuration complexity
+- Potential for subtle misconfiguration (maintainer concern)
+- Requires storing/compiling two separate regexes
+- `RunsAgainstChanges()` logic becomes more complex
+
+**Affected Components**:
+- `validateTriggering`: Remove lines 3124-3126
+- `validateAlwaysRun`: Remove lines 3109-3111
+- `RegexpChangeMatcher`: Add second compiled regex field
+- `setChangeRegexes`: Compile both regexes
+- `RunsAgainstChanges`: Implement combined evaluation logic
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: Fully compatible - only enables previously invalid configurations
+
+##### Approach 2: Maintain Status Quo (Document Workarounds)
+
+**Description**: Keep the mutual exclusivity constraint. Document recommended workarounds:
+1. List specific directories explicitly in `run_if_changed`
+2. Use alternation patterns in single regex
+3. Use `skip_if_only_changed` alone (safer approach per maintainers)
+
+**Pros**:
+- No code changes required
+- Maintains simplicity and safety guarantees
+- Aligns with maintainer feedback
+
+**Cons**:
+- Workaround regexes are complex and hard to maintain
+- Doesn't fully address the user's pain point
+- May lead to repeated feature requests
+
+**Affected Components**: Documentation only
+
+**Complexity**: Low
+
+**Backwards Compatibility**: N/A
+
+#### Recommendation
+
+**Preferred Approach**: Approach 2 (Maintain Status Quo)
+
+**Rationale**:
+Two maintainers (petr-muller and BenTheElder) have already expressed concerns about this feature. The core arguments are:
+1. The added complexity creates a "footgun" - subtle misconfigurations are hard to debug
+2. `skip_if_only_changed` alone is the safer paradigm
+3. The benefit is limited to niche use cases
+
+**Key Implementation Considerations** (if Approach 1 were reconsidered):
+1. Define clear AND/OR semantics for combining the conditions
+2. Ensure `SkipIfOnlyChanged` takes precedence (like `SkipBranches`)
+3. Compile two separate regex objects
+4. Update `RunsAgainstChanges()` with clear, documented logic
+5. Add comprehensive tests for edge cases
+6. Update documentation with examples
+
+**Suggested Next Steps**:
+1. Close the issue with explanation of maintainer concerns
+2. Document workaround patterns in official docs
+3. Consider reopening if compelling new use cases emerge with broader support
+
 ## Next Steps
 
-(Action items will be added here)
+- [x] Initial validation complete
+- [x] Code research complete
+- [ ] Assess effort level
+- [ ] Prepare augmentation comment
+- [ ] Brief maintainer on findings

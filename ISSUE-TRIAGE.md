@@ -412,8 +412,173 @@ This approach addresses the fundamental architectural issue: Tide should respect
 
 This phased approach allows monitoring impact and catching edge cases before full enforcement.
 
+### Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+#### Summary
+
+This issue requires implementing GitHub branch protection awareness in Tide's merge eligibility logic - a well-defined architectural enhancement affecting core merge code paths. While the solution approach is clear, it requires deep Tide expertise, careful API integration (REST + GraphQL), caching strategy, and thorough testing of edge cases. Not suitable for new contributors.
+
+#### Factor Analysis
+
+##### Scope of Changes
+- **Assessment**: Moderate
+- **Details**:
+  - Files affected: 3-5 core files (tide.go PullRequest struct, github.go isAllowedToMerge, status.go requirementDiff, possibly new cache layer)
+  - Estimated LOC: 200-400 lines (GraphQL query extension, REST API integration, review counting logic, caching, error handling)
+  - Components: Tide controller, GitHub provider, status controller
+  - Touches critical merge decision code paths
+- **Level Indication**: 2-3
+
+##### Complexity
+- **Assessment**: High
+- **Details**:
+  - Multiple API integrations (GraphQL for review data, REST for branch protection)
+  - Review counting logic with edge cases (APPROVED vs DISMISSED vs CHANGES_REQUESTED states)
+  - Caching strategy to manage API rate limits (TTL, conditional requests, invalidation)
+  - CODEOWNERS requirement handling (GitHub API complexity)
+  - Error handling for API failures (must fail closed for safety)
+  - Performance optimization (parallel API calls, minimize sync loop impact)
+- **Level Indication**: 3-4
+
+##### Required Expertise
+- **Assessment**: Deep
+- **Details**:
+  - Tide architecture: Understanding merge eligibility pipeline, filterPR flow, status validation
+  - GitHub API expertise: GraphQL query structure, REST API branch protection endpoint, rate limiting, conditional requests
+  - Branch protection model: Review requirements, CODEOWNERS, dismiss stale reviews, review states
+  - Go patterns: Caching, concurrent API calls, error handling
+  - Testing: Mocking GitHub API responses, race conditions in cache
+- **Level Indication**: 3-4
+
+##### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Root cause clearly identified through triage
+  - Recommended solution approach documented (Approach 1: Query branch protection at merge time)
+  - GitHub API endpoints identified and available
+  - Implementation steps outlined in research
+  - Phased rollout strategy defined
+- **Level Indication**: 1-2
+
+##### Testing Requirements
+- **Assessment**: Moderate-Complex
+- **Details**:
+  - Unit tests: Mock branch protection responses with various approval counts, review counting logic (approved/dismissed/changes requested), caching behavior and TTL
+  - Integration tests: Real GitHub API interactions (if feasible), end-to-end merge eligibility with branch protection
+  - Edge case tests: CODEOWNERS requirements, dismissed reviews, stale review dismissal, branch protection disabled, API failures (rate limits, timeouts, errors)
+  - Regression tests: Ensure existing behavior unchanged when branch protection not configured
+- **Level Indication**: 2-3
+
+##### Backwards Compatibility
+- **Assessment**: Fully compatible with important caveat
+- **Details**:
+  - Additive change: No config changes required, no API changes
+  - Behavior change: Will block PRs that currently merge incorrectly (this is desired but technically a behavior change)
+  - Impact: Deployments relying on current (broken) behavior will need to ensure PRs have required approvals
+  - Migration: Phased rollout (log-only → opt-in → default-on → mandatory) mitigates risk
+  - No breaking changes to Prow API or configuration schema
+- **Level Indication**: 2 (mostly compatible, behavior change is a fix not a regression)
+
+##### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**:
+  - Extends existing merge eligibility checking pattern (isAllowedToMerge, requirementDiff)
+  - Follows Tide's provider abstraction (GitHub-specific logic in github.go)
+  - Aligns with Tide's goal: respect repository merge policies
+  - Uses established patterns: GraphQL queries for PR data, status validation in requirementDiff
+  - Introduces new pattern: Querying GitHub for authoritative branch protection (currently only synced TO GitHub, not read FROM)
+  - Does not contradict architecture - enhances it to be more GitHub-native
+- **Level Indication**: 2-3
+
+##### External Dependencies
+- **Assessment**: Well-supported
+- **Details**:
+  - GitHub GraphQL API: Review data available via reviews field on PullRequest (well-documented, stable)
+  - GitHub REST API: Branch protection endpoint (GET /repos/{owner}/{repo}/branches/{branch}/protection) exists and is stable
+  - Rate limiting: Need to manage API quota carefully, use caching and conditional requests
+  - API limitations: None blocking - all required data is available
+  - Future-proof: GitHub continues to enhance branch protection features
+- **Level Indication**: 1-3 (APIs available and stable, rate limiting manageable)
+
+#### Recommended Labels
+
+Based on this assessment:
+
+- [x] `area/tide`: Core Tide merge eligibility functionality
+- [x] `kind/bug`: Tide incorrectly merges PRs with insufficient approvals
+- [ ] `good-first-issue`: **Not recommended** - Requires deep Tide and GitHub API expertise, touches critical merge logic
+- [ ] `help-wanted`: **Not recommended** - Complexity and expertise requirements exceed typical help-wanted scope
+- [x] `priority/important-longstanding`: Affects merge correctness, open for 22+ months with community interest
+
+**Rationale for no contributor labels**: This is Level 3 work requiring experienced Prow contributors who understand Tide architecture, GitHub API intricacies, and the implications of changes to merge eligibility logic. The risk of incorrect implementation (e.g., blocking valid merges or missing edge cases) is too high for less experienced contributors.
+
+#### Guidance for Contributors
+
+**For Level 3 (Large) - Requires Expertise**:
+
+This issue is suitable only for contributors with significant Prow/Tide experience. Before attempting:
+
+**Prerequisites**:
+- Deep familiarity with Tide architecture (have contributed to pkg/tide before)
+- Experience with GitHub API (both GraphQL and REST)
+- Understanding of GitHub branch protection model (review requirements, CODEOWNERS, states)
+- Strong Go skills (caching, error handling, concurrent API calls)
+
+**Required Reading**:
+- pkg/tide/tide.go: PR filtering and merge eligibility pipeline (filterPR, sync loop)
+- pkg/tide/github.go: GitHub provider, isAllowedToMerge implementation (lines 605-636)
+- pkg/tide/status.go: requirementDiff for requirement validation (lines 128-262)
+- site/content/en/docs/components/core/tide/: Tide documentation
+- GitHub API docs: Branch protection REST API, PullRequest GraphQL schema
+
+**Key Architectural Considerations**:
+1. **API Rate Limits**: Tide syncs frequently - must implement caching (5-10 min TTL) and conditional requests (If-None-Match)
+2. **Performance**: Add branch protection query only for PRs passing other checks (optimization), fetch in parallel with existing GraphQL query
+3. **Fail Closed**: If branch protection query fails, must block merge (don't assume safe)
+4. **Review Counting**: Count only APPROVED reviews excluding DISMISSED, handle CODEOWNERS separately
+5. **Edge Cases**: Branch protection disabled, API errors, CODEOWNERS requirements, stale review dismissal
+
+**Recommended Approach**:
+- Start by reading the detailed solution in the Code Research section (Approach 1)
+- Review the phased rollout strategy (log-only → opt-in → mandatory)
+- Discuss implementation plan with Tide maintainers before starting (required for Level 3)
+- Consider prototyping the branch protection query and review counting logic separately before integrating into Tide
+
+**Mentorship**:
+- **Required**: Must coordinate with Tide maintainers throughout implementation
+- This is not a solo effort - architectural decisions will need review
+- Consider proposing a design doc for the implementation approach
+
+#### Caveats and Considerations
+
+**Why Level 3, not Level 2?**
+
+While the scope is moderate (3-5 files, 200-400 LOC), several factors elevate this to Level 3:
+- **Critical code path**: Errors in merge eligibility logic can cause incorrect merges or block valid merges
+- **API complexity**: Integrating two GitHub APIs (GraphQL + REST) with rate limit management
+- **Deep expertise**: Requires understanding Tide internals, GitHub API nuances, and branch protection model
+- **Edge case handling**: CODEOWNERS, dismissed reviews, stale dismissal, API failures - each needs careful consideration
+- **Testing complexity**: Need to test multiple API interaction scenarios and edge cases
+
+**Why not Level 4?**
+
+This is NOT Level 4 because:
+- Solution approach is viable and documented
+- GitHub APIs provide required data (no external blockers)
+- Architecturally aligned (extends existing patterns)
+- Backwards compatible (additive change)
+- No fundamental Prow limitations
+
+**Alternative Perspective - Could this be Level 2?**
+
+An experienced Tide contributor who has worked on merge eligibility logic before might view this as high Level 2. However, the guidance is to "err on the side of higher effort level if uncertain," and the risk/complexity factors push this into Level 3 territory for most contributors.
+
+**Conclusion**: This is important, well-defined work that requires the right expertise. Not a good-first-issue or help-wanted, but absolutely feasible for experienced Prow contributors.
+
 ## Next Steps
 
-- Proceed to effort assessment to categorize complexity level
-- Determine appropriate labels (good-first-issue, help-wanted, or neither)
-- Create augmentation proposal for issue
+- Proceed to augmentation phase to propose issue improvements
+- Create comprehensive comment with context and labels
+- Brief maintainer on findings

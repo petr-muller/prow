@@ -577,8 +577,75 @@ An experienced Tide contributor who has worked on merge eligibility logic before
 
 **Conclusion**: This is important, well-defined work that requires the right expertise. Not a good-first-issue or help-wanted, but absolutely feasible for experienced Prow contributors.
 
+### Proposed Issue Augmentation
+
+#### Title Change
+
+- **No change needed**: Current title clearly describes the issue (Tide not honoring GitHub's multiple reviewer requirement from branch protection). While minor wording improvements are possible, the title accurately reflects the problem.
+
+#### Proposed GitHub Comment
+
+```
+## Root Cause
+
+This issue stems from an architectural limitation in how Tide evaluates merge eligibility. Tide uses GitHub's `ReviewDecision` field from the GraphQL API, which is a binary state (approved/not approved) indicating whether a PR has **at least one** approving review. Tide doesn't query or validate the **count** of approving reviews against GitHub branch protection's `required_approving_review_count` setting.
+
+Additionally, Tide requires admin permissions to perform certain operations (e.g., override failed required checks), and GitHub branch protection rules don't apply to repository admins by default. This means even if Tide did check approval counts, it could still bypass the requirement unless "Apply rules to administrators" is enabled in branch protection - but enabling that breaks Tide's ability to override required checks.
+
+## Technical Details
+
+The gap exists in several places:
+
+- **GraphQL Query** (pkg/tide/tide.go:1934): The `PullRequest` struct only includes `ReviewDecision` field, not detailed review count information
+- **Merge Eligibility** (pkg/tide/github.go:605-636): `isAllowedToMerge()` checks mergeable state and conflicts, but doesn't validate approval counts
+- **Status Validation** (pkg/tide/status.go:257-262): `requirementDiff()` checks if `ReviewDecision == Approved` when `ReviewApprovedRequired: true`, but this only ensures ≥1 approval, not N approvals
+- **Branch Protection**: Tide doesn't query GitHub's branch protection REST API to determine required approval count; it relies solely on Prow configuration
+
+The fix would require: (1) extending the GraphQL query to fetch review details, (2) querying GitHub's branch protection REST API for required approval count, (3) counting APPROVED reviews (excluding DISMISSED), and (4) implementing caching to manage API rate limits.
+
+## Recommended Solution
+
+The recommended approach is to query GitHub branch protection at merge time (see detailed analysis in Code Research section of triage). This would make Tide respect GitHub's authoritative branch protection settings regardless of whether they're configured via branchprotector or GitHub UI. A phased rollout (log-only → opt-in → default) would minimize risk.
+
+/priority important-longstanding
+```
+
+#### Rationale
+
+**What's being added**:
+
+1. **Root Cause Explanation**: The original issue describes the symptom (Tide merges with insufficient reviews) but doesn't explain WHY this happens. The comment adds the architectural explanation: Tide uses binary ReviewDecision (not a count) and has admin permissions that bypass branch protection.
+
+2. **Technical Details**: Identifies the specific code paths where the gap exists (GraphQL struct, isAllowedToMerge, requirementDiff) with file and line references. This wasn't in the original issue and helps contributors understand where changes would be needed.
+
+3. **Recommended Solution**: Points to the detailed solution analysis in triage research and suggests a phased rollout strategy. The original issue asked about `reviewApprovedRequired` but didn't have a clear solution approach.
+
+**Why these labels**:
+
+- `/area tide`: Already applied ✓
+- `/kind bug`: Already applied ✓
+- `/priority important-longstanding`: This issue has been open for 22+ months with sustained community interest (multiple users removing stale labels). It affects merge correctness - PRs are being merged with insufficient approvals, which violates repository policies. The "longstanding" variant is appropriate because it's not urgent/blocking but is important and has been unresolved for a long time.
+- **NO** `/good-first-issue`: Level 3 effort assessment - requires deep Tide expertise, GitHub API knowledge, and careful handling of critical merge logic
+- **NO** `/help-wanted`: Level 3 complexity exceeds typical help-wanted scope; needs experienced Prow contributor
+
+**What's NOT included**:
+
+- **No /retitle**: Current title is adequately clear and specific
+- **No code snippets**: Keep comment concise; detailed code analysis is in triage document
+- **No PR references**: No existing PR implements this solution
+- **Brevity**: Kept to 3 paragraphs as per guidelines, focusing on key insights not in original issue
+
+**Posting guidance**:
+
+This augmentation should be posted as it adds significant value:
+- Explains the architectural root cause
+- Provides specific code references for contributors
+- Points to the recommended solution approach
+- Clarifies why `enforce_admins` workaround has limitations
+
+The original issue is well-written but lacks the technical depth discovered during triage. This comment transforms it into an expert-level issue report.
+
 ## Next Steps
 
-- Proceed to augmentation phase to propose issue improvements
-- Create comprehensive comment with context and labels
-- Brief maintainer on findings
+- Proceed to brief subcommand to walk maintainer through findings
+- After brief, proceed to wrapup to push branches and post comment

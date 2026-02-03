@@ -372,9 +372,195 @@ This allows:
 
 3. **Phase 3** (future): Consider Approach 1 (strict verification) as opt-in for high-security repos
 
+---
+
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+**Summary**:
+
+Well-defined feature with clear implementation approach. Moderate scope affecting 2-4 files (~150-250 LOC). Requires understanding of Tide's architecture and existing baseSHA verification patterns, but solution is straightforward and builds on existing infrastructure. Suitable for contributors with Prow familiarity.
+
+#### Factor Analysis
+
+##### Scope of Changes
+- **Assessment**: Moderate
+- **Details**:
+  - Primary: pkg/tide/tide.go - enhance `accumulate()` function (~100 LOC)
+  - Secondary: Override detection (if not currently accessible in accumulate) (~50 LOC)
+  - Tests: pkg/tide/tide_test.go - add test cases for verification scenarios (~100 LOC)
+  - Total: 2-4 files, estimated 150-250 lines modified/added
+  - Localized to Tide component, doesn't spread across codebase
+- **Level Indication**: 2-3
+
+##### Complexity
+- **Assessment**: Moderate
+- **Details**:
+  - Leverages existing baseSHA verification infrastructure (`BaseSHAFromContextDescription()`)
+  - Extends existing ProwJob matching logic (already in `prowJobsFromContexts()`)
+  - Need to add override detection capability
+  - No concurrency issues (accumulate runs in sync loop)
+  - Main challenge: understanding the filtering vs accumulation split in Tide
+  - Edge cases: external CI, override handling, baseSHA format variations
+- **Level Indication**: 2-3
+
+##### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - Need to understand Tide's two-phase architecture (filtering → accumulation)
+  - Need to understand baseSHA encoding mechanism (pkg/config/config.go)
+  - Need to understand ProwJob data structures and matching
+  - Should be familiar with Go testing patterns
+  - Can learn from existing code - patterns are established
+  - Don't need deep Kubernetes or GitHub API expertise
+- **Level Indication**: 2-3
+
+##### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Root cause clearly identified in research
+  - Solution approach (Approach 2) is well-specified
+  - Implementation location identified (accumulate function)
+  - Existing infrastructure documented
+  - One minor uncertainty: how to access override data during accumulation
+  - Acceptance criteria clear from issue and research
+- **Level Indication**: 1-2
+
+##### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - Need unit tests for new verification logic in accumulate()
+  - Test scenarios identified in research:
+    - Passing context without backing ProwJob → marked missing
+    - Passing context with valid baseSHA → accepted
+    - Passing context with override → accepted
+    - Retest triggered for unverified context
+  - Can follow existing test patterns in tide_test.go
+  - Existing mock infrastructure can be reused
+  - No complex integration test setup needed
+- **Level Indication**: 2-3
+
+##### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - No breaking changes to configuration or APIs
+  - PRs that currently merge will still merge (after retest if needed)
+  - Only adds retests, doesn't block anything permanently
+  - May increase test volume/compute costs (operational impact, not compatibility)
+  - No migration needed
+  - Safe to roll out incrementally (Phase 1-3 plan exists)
+- **Level Indication**: 1-2
+
+##### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**:
+  - Builds directly on existing baseSHA verification infrastructure
+  - Extends `accumulate()` naturally (already marks tests as missing)
+  - Follows established pattern: "no backing ProwJob → missing test"
+  - Aligns with Tide's security model (verify before merge)
+  - Doesn't introduce new concepts or patterns
+  - Research identified this as the architecturally clean approach
+- **Level Indication**: 1-2
+
+##### External Dependencies
+- **Assessment**: None blocking
+- **Details**:
+  - Uses existing GitHub API (headContexts)
+  - Uses existing ProwJob data structures
+  - Uses existing baseSHA encoding (already in context descriptions)
+  - Override mechanism exists (may need to wire it into accumulation)
+  - No new external APIs or features required
+- **Level Indication**: 1-3
+
+#### Overall Assessment Rationale
+
+Most factors indicate Level 2-3, with clarity and architectural alignment favoring the lower end. The key discriminators:
+
+**Why not Level 1 (Easy)?**
+- Requires understanding of Tide's internal architecture
+- Moderate scope (2-4 files)
+- Need to understand baseSHA mechanism and ProwJob matching
+- Too involved for a new contributor
+
+**Why Level 2 (Moderate)?**
+- Solution approach is clear and well-researched
+- Builds on existing patterns and infrastructure
+- Well-defined scope and acceptance criteria
+- Fully backwards compatible
+- Suitable for a contributor with Prow familiarity
+- No deep expertise required (not concurrent, not algorithmic)
+
+**Why not Level 3 (Large)?**
+- Scope is moderate, not large (2-4 files, not 10+)
+- Complexity is moderate, not high (no race conditions, no fundamental algorithm changes)
+- Architectural approach is clear (extends existing logic)
+- Testing is straightforward (existing patterns)
+- Research has already identified the solution
+
+#### Recommended Labels
+
+Based on this assessment, recommend the following labels:
+
+- [x] **`help-needed`**: Appropriate scope and complexity for skilled contributors familiar with Prow
+- [x] **`area/tide`**: Core Tide functionality (already applied)
+- [x] **`kind/feature`**: Requesting new capability (already applied)
+- [x] **`priority/important-soon`**: Security/reliability feature protecting against bugs like #540
+- [ ] **`good-first-issue`**: Too complex - requires understanding Tide architecture and baseSHA mechanism
+
+#### Guidance for Contributors
+
+**For Level 2 (Moderate) - help-needed**:
+
+**Prerequisites**:
+- Familiarity with Prow architecture, especially Tide
+- Understanding of Go and basic testing patterns
+- Comfortable reading and extending existing code
+
+**Recommended preparation**:
+1. Review the complete research section in this triage document
+2. Read through these key files:
+   - pkg/tide/tide.go - focus on `accumulate()` (lines 1075-1135) and `prowJobsFromContexts()` (lines 1040-1073)
+   - pkg/config/config.go - understand `BaseSHAFromContextDescription()` (lines 3432-3446)
+   - pkg/tide/tide_test.go - review existing test patterns
+3. Understand the recommended solution (Approach 2 in research section)
+4. Review issue #540 for context on why this feature is needed
+
+**Implementation approach**:
+1. Start by adding logging (Phase 1) to identify unverified passing contexts
+2. Add helper function to verify context source (baseSHA, ProwJob, or override)
+3. Enhance `accumulate()` to call verification and mark unverified as missing
+4. Add comprehensive unit tests
+5. Test manually or with staging deployment
+
+**Questions to resolve during implementation**:
+- How to access override data during the accumulation phase?
+- Should verification be a separate helper function or inline?
+- What logging level for unverified contexts (info vs warning)?
+
+**Support available**:
+- This triage document provides detailed analysis
+- Research section documents all relevant code paths
+- Maintainers can provide guidance (consult before starting)
+- Consider discussing approach in GitHub issue before implementation
+
+**Estimated effort**: 2-4 days for an experienced Prow contributor (including testing and review cycles)
+
+#### Caveats and Considerations
+
+1. **Override detection complexity**: The research didn't fully explore how overrides are stored and accessed. Implementation may need to wire override data into the accumulation phase, which could add complexity.
+
+2. **External CI systems**: Organizations using external CI (non-Prow) that doesn't support baseSHA encoding may see increased test runs. This is intentional (defense in depth) but should be documented.
+
+3. **Test volume impact**: This will trigger more retests, increasing compute costs. Maintainers should monitor test volume after deployment and consider whether Phase 3 (opt-in strict mode) is needed.
+
+4. **Phased rollout important**: The proposed 3-phase rollout (logging → retest → strict) is critical for safe deployment and should not be skipped.
+
+5. **Alternative approach available**: If Approach 2 proves more complex than expected (e.g., override detection is difficult), could consider Approach 1 (strict verification) or Approach 3 (hybrid with config flag). Research section documents all approaches.
+
 ## Next Steps
 
 - [x] Initial validation completed - LEGITIMATE
 - [x] Research Tide's current status validation logic
-- [ ] Assess implementation effort
+- [x] Assess implementation effort - Level 2 (Moderate)
 - [ ] Propose improvements to issue (if needed)

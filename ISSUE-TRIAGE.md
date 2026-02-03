@@ -83,13 +83,14 @@ Next steps:
 
 Tide uses a two-phase approach for handling PRs:
 
-1. **Filtering Phase** (`filterPR()` at line 755): Decides if a PR is eligible for the merge pool by checking if all required contexts have `State=SUCCESS`. **This phase does NOT verify the source of passing statuses.**
+1. **Filtering Phase** (`filterPR()` at line 755): Decides if a PR is eligible for the merge pool by checking if all required contexts have `State=SUCCESS`. This is correct behavior - PRs should enter the pool even with unverified passing contexts.
 
 2. **Accumulation Phase** (`accumulate()` at line 1075): Determines which jobs need (re)testing by:
    - Building a list of real ProwJobs matching the current baseSHA
    - Synthesizing ProwJobs from context descriptions that contain baseSHA encoding
    - Marking jobs as "missing" if they lack a corresponding ProwJob
    - Triggering retests for missing jobs
+   - **Gap**: Currently only checks for missing/failing jobs, doesn't validate already-passing contexts
 
 **Key Code Paths**:
 
@@ -107,13 +108,14 @@ Tide uses a two-phase approach for handling PRs:
    ├─> filterPR()
    │   ├─> headContexts() - fetches ALL contexts from GitHub
    │   ├─> unsuccessfulContexts() - filters by State == SUCCESS
-   │   └─> VULNERABILITY: Accepts ANY passing status regardless of source
+   │   └─> Accepts PRs with passing contexts (correct - don't filter out)
    │
    ├─> accumulate()
    │   ├─> prowJobsFromContexts()
    │   │   └─> BaseSHAFromContextDescription() - validates source via baseSHA
    │   ├─> Filters to ProwJobs matching current baseSHA
-   │   └─> Marks jobs as missing if no matching ProwJob found
+   │   ├─> Marks jobs as missing if no matching ProwJob found
+   │   └─> VULNERABILITY: Only checks for missing jobs, doesn't validate passing contexts
    │
    └─> takeAction()
        └─> Triggers retests for missing jobs
@@ -165,83 +167,51 @@ Tide uses a two-phase approach for handling PRs:
 
 **Primary Cause**:
 
-**Tide's filtering logic trusts ANY GitHub context with `State=SUCCESS`, regardless of source.**
+**`accumulate()` doesn't verify that passing contexts come from legitimate sources.**
 
-In `filterPR()` (pkg/tide/tide.go:755-793), the decision to include a PR in the merge pool is based solely on whether required contexts have `State == githubql.StatusStateSuccess`. There is **no verification** that these passing statuses came from:
+In `accumulate()` (pkg/tide/tide.go:1075-1135), Tide determines which jobs need retesting by checking for missing or failing jobs. However, it doesn't validate that already-passing contexts are backed by:
 - Actual passing ProwJobs
 - Valid `/override` invocations
-- Or any legitimate source
+- Or any legitimate source (baseSHA encoding)
 
-The source verification logic exists in `prowJobsFromContexts()` and `accumulate()`, but these only affect **retest decisions**, not **merge pool filtering decisions**.
+The logic builds a list of ProwJobs matching the current baseSHA and marks jobs as "missing" if no matching ProwJob exists. **But this only applies to jobs that aren't already showing as passing** - it doesn't re-validate passing contexts.
 
 **Contributing Factors**:
 
-1. **Architectural split**: Filtering happens before accumulation, so source verification (which happens during accumulation) doesn't affect pool membership
-2. **BaseSHA encoding is optional**: While Tide encodes baseSHA in context descriptions it reports, it doesn't require this encoding when reading contexts
-3. **GitHub's API doesn't expose source**: GitHub's combined status API returns states but not provenance information
-4. **Trust boundary**: Tide implicitly trusts GitHub's status API, which can be updated by any component with write access (like a buggy status-reconciler)
+1. **Incomplete verification**: `accumulate()` only checks for missing jobs, not suspicious passing jobs
+2. **Filtering is correct**: `filterPR()` correctly allows PRs with passing contexts into the pool - filtering them out would cause PRs to get stuck (nothing would ever reconsider them)
+3. **BaseSHA encoding is optional**: While Tide encodes baseSHA in context descriptions it reports, it doesn't require this encoding when reading contexts
+4. **GitHub's API doesn't expose source**: GitHub's combined status API returns states but not provenance information
+5. **Trust boundary**: Tide implicitly trusts GitHub's status API, which can be updated by any component with write access (like a buggy status-reconciler)
 
 **Reproduction Conditions**:
 
 For the vulnerability to manifest (as in #540):
 1. A required context must show `State=SUCCESS` on GitHub
-2. This status must NOT come from an actual passing ProwJob (or be backed by baseSHA encoding)
-3. The PR must otherwise be merge-eligible (labels, approvals, etc.)
-4. Tide's sync loop must run while this state exists
+2. This context matches a required job for the PR
+3. This status does NOT come from an actual passing ProwJob (no baseSHA encoding, no backing ProwJob)
+4. The PR is otherwise merge-eligible (labels, approvals, etc.)
+5. Tide's sync loop runs while this state exists
 
 When these conditions are met, Tide will:
-- Allow the PR into the merge pool (filterPR passes)
-- Eventually notice the missing ProwJob (during accumulate)
-- But may have already merged if it was at the front of the queue
+- Allow the PR into the merge pool (filterPR passes - correct)
+- NOT mark the job for retesting (accumulate doesn't validate passing contexts - bug)
+- May merge the PR based on unverified status
 
 #### Proposed Solutions
 
-#### Approach 1: Strict Source Verification During Filtering
+#### Approach 1: Strict Source Verification During Filtering (INCORRECT)
 
-**Description**:
+**❌ This approach is architecturally flawed.**
 
-Enhance `filterPR()` to perform the same source verification that `prowJobsFromContexts()` does. For each required context showing `State=SUCCESS`:
-1. Check if the context description contains a valid baseSHA encoding
-2. If not, query the ProwJob cache to verify a real ProwJob exists
-3. Also check for valid `/override` invocations
-4. Only accept the passing status if one of these conditions is met
-5. Otherwise, treat the context as "suspiciously passing" and exclude the PR from the pool
+Filtering PRs out of the merge pool based on unverified contexts would cause PRs to get stuck indefinitely:
+- Tide would never reconsider them
+- Nothing would update the suspicious context
+- PR would be permanently excluded from consideration
 
-**Implementation**:
-- Modify `filterPR()` around line 768-790
-- Add helper function `verifyContextSource()` that checks:
-  - `BaseSHAFromContextDescription()` returns valid baseSHA matching current base
-  - OR backing ProwJob exists in the pool
-  - OR override exists for this context
-- Filter out PRs with unverified passing contexts
+**The filtering phase should remain as-is** - it correctly allows PRs with passing contexts into the pool.
 
-**Pros**:
-- **Addresses root cause directly**: Prevents unverified statuses from affecting merge decisions
-- **Defense in depth**: Protects against bugs like #540 and potentially malicious status updates
-- **Reuses existing infrastructure**: BaseSHA encoding already exists
-- **Clear semantics**: "Suspicious" statuses are treated as unverified and blocked
-
-**Cons**:
-- **May block legitimate PRs**: If a context legitimately passes but lacks baseSHA encoding (e.g., external CI systems)
-- **Increased complexity**: Filtering becomes more involved
-- **ProwJob cache dependency**: Filtering now needs access to ProwJob data
-- **Potential performance impact**: Additional queries/checks per PR per sync
-
-**Affected Components**:
-- pkg/tide/tide.go - `filterPR()` function needs enhancement
-- May need to pass ProwJob cache data to filtering phase
-- Override detection logic may need to be accessible during filtering
-
-**Complexity**: Medium
-
-**Backwards Compatibility**:
-
-**POTENTIALLY BREAKING** - Could reject PRs that currently merge if:
-- They use external CI systems that don't support baseSHA encoding
-- They use override mechanisms that aren't properly tracked
-- Migration path: Add a configuration option to enable/disable strict verification
-
-#### Approach 2: Mandatory Baseling Retest for Unverified Contexts
+#### Approach 2: Mandatory Retest for Unverified Contexts (CORRECT)
 
 **Description**:
 
@@ -281,53 +251,23 @@ Instead of blocking PRs with unverified contexts, force an immediate retest of a
 
 **Fully backwards compatible** - Only adds retests, doesn't block anything that currently merges
 
-#### Approach 3: Hybrid - Verify with Configurable Fallback
-
-**Description**:
-
-Combine aspects of both approaches with repository-level configuration:
-- By default: Use Approach 2 (mandatory retest)
-- Opt-in: Strict verification (Approach 1) via Tide config flag `strict_context_verification: true`
-
-This allows:
-- Conservative rollout to catch issues without breaking existing workflows
-- High-security repositories can opt into strict mode
-- Migration path from current behavior to fully verified behavior
-
-**Implementation**:
-- Add config field to Tide settings
-- Implement both verification strategies
-- Route based on config flag
-
-**Pros**:
-- **Flexible**: Repository owners choose their trade-off
-- **Safe rollout**: Can deploy without breaking anyone
-- **Clear migration path**: Mandatory retest → strict verification
-- **Best of both**: Security when needed, compatibility when required
-
-**Cons**:
-- **More code**: Need to implement and maintain both strategies
-- **Configuration complexity**: Another knob to document and support
-- **Testing burden**: Need tests for both modes
-
-**Complexity**: Medium-High
-
 #### Recommendation
 
-**Preferred Approach**: **Approach 2 (Mandatory Retest for Unverified Contexts)**
+**This is the correct approach** - the only architecturally sound solution.
 
 **Rationale**:
 
-1. **Minimal disruption**: Doesn't break existing workflows or require configuration changes
-2. **Addresses the security concern**: Prevents merges of PRs with unverified passing contexts (with small race window)
-3. **Leverages existing code**: The retest infrastructure already exists and works well
-4. **Simple implementation**: Primarily a change to `accumulate()` logic
-5. **Self-documenting**: When Tide triggers a retest, logs will show "context lacks verification"
+1. **Architecturally correct**: PRs must enter the pool (filtering) then get retested (accumulation), not filtered out
+2. **Minimal disruption**: Doesn't break existing workflows or require configuration changes
+3. **Addresses the security concern**: Prevents merges of PRs with unverified passing contexts
+4. **Leverages existing code**: The retest infrastructure already exists and works well
+5. **Simple implementation**: Primarily a change to `accumulate()` logic
+6. **Self-documenting**: When Tide triggers a retest, logs will show "context lacks verification"
 
-**The race window is acceptable because**:
-- Tide typically processes PRs in order; unverified PR unlikely to be first
-- The window is one sync interval (30s typical)
-- Issue #540 suggests the buggy statuses persisted, so would be caught on next sync anyway
+**Why filtering PRs out would be wrong**:
+- PRs would get stuck - Tide never reconsiders them
+- Nothing would update the suspicious context
+- PR permanently excluded from merge consideration
 
 **Key Implementation Considerations**:
 
@@ -370,7 +310,7 @@ This allows:
    - Monitor for increased test volume
    - Watch for any PRs stuck in retest loops
 
-3. **Phase 3** (future): Consider Approach 1 (strict verification) as opt-in for high-security repos
+3. **Phase 3** (future, if needed): Consider additional strictness options based on operational experience
 
 ---
 
@@ -556,7 +496,7 @@ Based on this assessment, recommend the following labels:
 
 4. **Phased rollout important**: The proposed 3-phase rollout (logging → retest → strict) is critical for safe deployment and should not be skipped.
 
-5. **Alternative approach available**: If Approach 2 proves more complex than expected (e.g., override detection is difficult), could consider Approach 1 (strict verification) or Approach 3 (hybrid with config flag). Research section documents all approaches.
+5. **This is the only architecturally sound approach**: Filtering PRs out (initially considered as Approach 1) would cause them to get stuck. The mandatory retest approach is both correct and straightforward to implement.
 
 ---
 
@@ -571,15 +511,15 @@ Based on this assessment, recommend the following labels:
 ```markdown
 ## Root Cause and Current Behavior
 
-Tide's `filterPR()` function (pkg/tide/tide.go:755-793) currently trusts any GitHub context with `State=SUCCESS` when deciding if a PR can enter the merge pool, regardless of source. This includes contexts from actual passing ProwJobs, `/override` invocations, or external sources like the buggy status-reconciler in #540. While source verification infrastructure exists (baseSHA encoding in context descriptions via `BaseSHAFromContextDescription()` in pkg/config/config.go), it's only used during accumulation to decide which jobs need retesting - not during filtering that controls merge pool membership.
+Tide's `accumulate()` function (pkg/tide/tide.go:1075-1135) determines which jobs need retesting but doesn't verify that already-passing contexts come from legitimate sources. It checks for missing or failing jobs and triggers retests accordingly, but trusts passing contexts without validation - whether they come from actual passing ProwJobs, `/override` invocations, or external sources like the buggy status-reconciler in #540. Source verification infrastructure exists (baseSHA encoding via `BaseSHAFromContextDescription()` in pkg/config/config.go and `prowJobsFromContexts()` at lines 1040-1073), but it's only used to identify missing jobs, not to validate suspicious passing jobs.
 
 ## Recommended Implementation
 
-The cleanest solution is to enhance `accumulate()` (pkg/tide/tide.go:1075-1135) to mark passing contexts as "missing" if they lack verification. For each required context showing SUCCESS, verify: (1) context description contains valid baseSHA encoding, (2) backing ProwJob exists in the pool, or (3) valid `/override` exists. If none match, mark as missing to trigger immediate retest. This is fully backwards compatible (only adds retests, doesn't block PRs) and leverages existing infrastructure - similar verification already exists in `prowJobsFromContexts()` at lines 1040-1073.
+Enhance `accumulate()` to inspect passing contexts for required jobs. For each required context showing SUCCESS: verify (1) context description contains valid baseSHA encoding, (2) backing ProwJob exists in the pool, or (3) valid `/override` exists. If none match, mark as "missing" to trigger retest - treating unverified passing contexts like stale tests. This is fully backwards compatible (PRs still enter the pool via `filterPR()`, just get retested) and leverages existing verification patterns already in `prowJobsFromContexts()`.
 
 ## Implementation Notes
 
-This is a moderate-complexity feature (Level 2) affecting 2-4 files with ~150-250 LOC. Builds on existing baseSHA verification patterns. Recommended phased rollout: (1) add logging to identify unverified contexts, (2) enable mandatory retests, (3) consider opt-in strict mode. Well-suited for contributors familiar with Tide's architecture.
+This is a moderate-complexity feature (Level 2) affecting 2-4 files with ~150-250 LOC. Builds on existing baseSHA verification patterns. Recommended phased rollout: (1) add logging to identify unverified contexts, (2) enable mandatory retests. Well-suited for contributors familiar with Tide's architecture.
 
 /area tide
 /kind feature
@@ -590,19 +530,19 @@ This is a moderate-complexity feature (Level 2) affecting 2-4 files with ~150-25
 #### Rationale
 
 **What's being added**:
-- **Root cause explanation**: The original issue mentions the desired behavior but not why the vulnerability exists. Added explanation that filterPR() trusts all SUCCESS statuses without verification, and that verification infrastructure exists but isn't used during filtering.
-- **Technical implementation details**: Specific code locations (filterPR, accumulate, prowJobsFromContexts), file paths, and line numbers. Explains that solution builds on existing baseSHA verification.
-- **Recommended approach**: From three researched approaches, Approach 2 (mandatory retest) is the cleanest. Explained why (backwards compatible, leverages existing code).
+- **Root cause explanation**: The original issue mentions the desired behavior but not why the vulnerability exists. Added explanation that accumulate() doesn't validate passing contexts, only checks for missing/failing jobs. Verification infrastructure exists but isn't used to validate suspicious passing jobs.
+- **Technical implementation details**: Specific code locations (accumulate, prowJobsFromContexts), file paths, and line numbers. Explains that solution builds on existing baseSHA verification and treats unverified contexts like stale tests.
+- **Architectural clarity**: Explains that PRs correctly enter the pool (filterPR), then get retested (accumulate). Filtering them out would cause them to get stuck permanently.
 - **Complexity assessment**: Level 2 effort, suitable for help-wanted. Provides scope estimate and notes about phased rollout.
 
 **Why these labels**:
-- `/area tide`: Already applied, but included for completeness. Issue affects Tide's merge decision logic.
+- `/area tide`: Already applied, but included for completeness. Issue affects Tide's accumulation/retest logic.
 - `/kind feature`: Already applied. This is a security/reliability enhancement, not a bug fix.
 - `/help-wanted`: Based on Level 2 effort assessment. Well-defined problem with clear solution, suitable for contributors familiar with Prow. Implementation approach is documented.
 - `/priority important-soon`: This is a security/reliability feature that protects against bugs like #540 (haywire components falsely marking jobs as passing). Important for merge safety but not critical-urgent since workarounds exist (manual verification, fixing buggy components).
 
 **What's NOT included**:
-- **Detailed alternative approaches**: Research documented three approaches with trade-offs, but comment only mentions the recommended one to avoid overwhelming readers. Full analysis is in triage document for interested contributors.
+- **Incorrect filtering approach**: Initially considered filtering PRs out, but this is architecturally wrong (PRs get stuck). Comment focuses on the correct approach only.
 - **All technical details**: Research found extensive details about data flow, architecture, test coverage, etc. Comment distills to essential information needed to understand and implement.
 - **/retitle**: Current title is clear and specific. "Suspiciously passing" effectively conveys the concept.
 - **good-first-issue**: This is Level 2 (moderate), requires Tide architecture knowledge. Not appropriate for newcomers despite clear solution.

@@ -558,9 +558,59 @@ Based on this assessment, recommend the following labels:
 
 5. **Alternative approach available**: If Approach 2 proves more complex than expected (e.g., override detection is difficult), could consider Approach 1 (strict verification) or Approach 3 (hybrid with config flag). Research section documents all approaches.
 
+---
+
+### Proposed Issue Augmentation
+
+#### Title Change
+
+- **No change needed**: Current title is clear, specific, and accurately describes the feature request
+
+#### Proposed GitHub Comment
+
+```markdown
+## Root Cause and Current Behavior
+
+Tide's `filterPR()` function (pkg/tide/tide.go:755-793) currently trusts any GitHub context with `State=SUCCESS` when deciding if a PR can enter the merge pool, regardless of source. This includes contexts from actual passing ProwJobs, `/override` invocations, or external sources like the buggy status-reconciler in #540. While source verification infrastructure exists (baseSHA encoding in context descriptions via `BaseSHAFromContextDescription()` in pkg/config/config.go), it's only used during accumulation to decide which jobs need retesting - not during filtering that controls merge pool membership.
+
+## Recommended Implementation
+
+The cleanest solution is to enhance `accumulate()` (pkg/tide/tide.go:1075-1135) to mark passing contexts as "missing" if they lack verification. For each required context showing SUCCESS, verify: (1) context description contains valid baseSHA encoding, (2) backing ProwJob exists in the pool, or (3) valid `/override` exists. If none match, mark as missing to trigger immediate retest. This is fully backwards compatible (only adds retests, doesn't block PRs) and leverages existing infrastructure - similar verification already exists in `prowJobsFromContexts()` at lines 1040-1073.
+
+## Implementation Notes
+
+This is a moderate-complexity feature (Level 2) affecting 2-4 files with ~150-250 LOC. Builds on existing baseSHA verification patterns. Recommended phased rollout: (1) add logging to identify unverified contexts, (2) enable mandatory retests, (3) consider opt-in strict mode. Well-suited for contributors familiar with Tide's architecture.
+
+/area tide
+/kind feature
+/help-wanted
+/priority important-soon
+```
+
+#### Rationale
+
+**What's being added**:
+- **Root cause explanation**: The original issue mentions the desired behavior but not why the vulnerability exists. Added explanation that filterPR() trusts all SUCCESS statuses without verification, and that verification infrastructure exists but isn't used during filtering.
+- **Technical implementation details**: Specific code locations (filterPR, accumulate, prowJobsFromContexts), file paths, and line numbers. Explains that solution builds on existing baseSHA verification.
+- **Recommended approach**: From three researched approaches, Approach 2 (mandatory retest) is the cleanest. Explained why (backwards compatible, leverages existing code).
+- **Complexity assessment**: Level 2 effort, suitable for help-wanted. Provides scope estimate and notes about phased rollout.
+
+**Why these labels**:
+- `/area tide`: Already applied, but included for completeness. Issue affects Tide's merge decision logic.
+- `/kind feature`: Already applied. This is a security/reliability enhancement, not a bug fix.
+- `/help-wanted`: Based on Level 2 effort assessment. Well-defined problem with clear solution, suitable for contributors familiar with Prow. Implementation approach is documented.
+- `/priority important-soon`: This is a security/reliability feature that protects against bugs like #540 (haywire components falsely marking jobs as passing). Important for merge safety but not critical-urgent since workarounds exist (manual verification, fixing buggy components).
+
+**What's NOT included**:
+- **Detailed alternative approaches**: Research documented three approaches with trade-offs, but comment only mentions the recommended one to avoid overwhelming readers. Full analysis is in triage document for interested contributors.
+- **All technical details**: Research found extensive details about data flow, architecture, test coverage, etc. Comment distills to essential information needed to understand and implement.
+- **/retitle**: Current title is clear and specific. "Suspiciously passing" effectively conveys the concept.
+- **good-first-issue**: This is Level 2 (moderate), requires Tide architecture knowledge. Not appropriate for newcomers despite clear solution.
+
 ## Next Steps
 
 - [x] Initial validation completed - LEGITIMATE
 - [x] Research Tide's current status validation logic
 - [x] Assess implementation effort - Level 2 (Moderate)
-- [ ] Propose improvements to issue (if needed)
+- [x] Propose improvements to issue
+- [ ] Brief maintainer on findings

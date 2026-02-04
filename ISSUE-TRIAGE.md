@@ -676,6 +676,31 @@ Without Part 1, Tide would need special logic to detect "Overridden by" pattern 
 
 - [x] Initial validation completed - LEGITIMATE
 - [x] Research Tide's current status validation logic
-- [x] Assess implementation effort - Level 2 (Moderate)
+- [x] Assess implementation effort - Mixed (Part 1: Level 1, Part 2: Level 2)
 - [x] Propose improvements to issue
-- [ ] Brief maintainer on findings
+- [x] Brief maintainer on findings
+- [ ] Wrap up triage (push branches, post comment)
+
+---
+
+### Briefing Completed
+
+**Briefed maintainer on**: 2026-02-04
+
+**Key discussion points**:
+- Corrected initial analysis: vulnerability is in `accumulate()` not `filterPR()`
+- PRs must stay in pool (filtering them out would cause them to get stuck)
+- Discovered override plugin doesn't encode baseSHA in status descriptions
+- Identified cleaner two-part solution: fix override plugin first, then enhance Tide
+- Two-part approach avoids special-case logic in Tide for detecting override pattern
+
+**Maintainer feedback**:
+- Confirmed architectural understanding: PRs enter pool, then get retested (not filtered out)
+- Suggested encoding baseSHA in override contexts for consistency
+- Agreed this is cleaner than special-casing override detection in Tide
+
+**Final approach**:
+- Part 1: Fix override.go:521 to encode baseSHA (good-first-issue)
+- Part 2: Enhance accumulate() to validate passing contexts (help-wanted)
+- Both parts fully backwards compatible
+- Can be separate PRs or combined

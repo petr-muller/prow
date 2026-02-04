@@ -180,7 +180,10 @@ The logic builds a list of ProwJobs matching the current baseSHA and marks jobs 
 
 1. **Incomplete verification**: `accumulate()` only checks for missing jobs, not suspicious passing jobs
 2. **Filtering is correct**: `filterPR()` correctly allows PRs with passing contexts into the pool - filtering them out would cause PRs to get stuck (nothing would ever reconsider them)
-3. **BaseSHA encoding is optional**: While Tide encodes baseSHA in context descriptions it reports, it doesn't require this encoding when reading contexts
+3. **BaseSHA encoding gaps**:
+   - Normal Prow job results encode baseSHA in descriptions (via `config.ContextDescriptionWithBaseSha()`)
+   - Override plugin does NOT encode baseSHA - uses `"Overridden by {user}"` description (pkg/plugins/override/override.go:521)
+   - External status updates have no baseSHA encoding
 4. **GitHub's API doesn't expose source**: GitHub's combined status API returns states but not provenance information
 5. **Trust boundary**: Tide implicitly trusts GitHub's status API, which can be updated by any component with write access (like a buggy status-reconciler)
 
@@ -211,106 +214,166 @@ Filtering PRs out of the merge pool based on unverified contexts would cause PRs
 
 **The filtering phase should remain as-is** - it correctly allows PRs with passing contexts into the pool.
 
-#### Approach 2: Mandatory Retest for Unverified Contexts (CORRECT)
+#### Recommended Solution: Two-Part Fix
 
-**Description**:
+**This is the cleanest, most architecturally consistent approach.**
 
-Instead of blocking PRs with unverified contexts, force an immediate retest of any required context that passes but lacks proper source verification. The flow:
-1. `filterPR()` allows PRs with passing contexts into the pool (current behavior)
-2. `accumulate()` identifies unverified passing contexts (enhancement)
-3. These are marked as "missing" even though they show SUCCESS
-4. Tide immediately triggers retests for these jobs
-5. PRs remain in pool but can't merge until verified passing contexts exist
+#### Part 1: Fix Override Plugin to Encode BaseSHA (Prerequisite)
+
+**Current problem**: Override plugin creates statuses with description `"Overridden by {user}"` (pkg/plugins/override/override.go:521), lacking baseSHA encoding that normal Prow results have.
+
+**Fix**:
+- Line 521: Change `status.Description = description(user)`
+- To: `status.Description = config.ContextDescriptionWithBaseSha(description(user), baseSHA)`
+- BaseSHA is already available (line 495) and used for ProwJob creation (line 502)
+
+**Benefit**: Override-created contexts become verifiable the same way as normal Prow contexts.
+
+**Affected file**: pkg/plugins/override/override.go (1 line change)
+**Complexity**: Trivial
+**Backwards compatible**: Yes - only adds information to description
+
+#### Part 2: Enhance Tide to Validate Passing Contexts
 
 **Implementation**:
-- Keep `filterPR()` unchanged
-- Enhance `accumulate()` to also check passing contexts (not just look for ProwJobs)
-- Add logic: "if context.State == SUCCESS but no backing ProwJob → mark as missing"
-- Existing retest infrastructure handles triggering
+
+After Part 1 is deployed, enhance `accumulate()` to validate passing contexts for required jobs. The flow:
+1. `filterPR()` allows PRs with passing contexts into the pool (unchanged)
+2. `accumulate()` inspects passing contexts for required jobs (enhancement)
+3. For each required context showing SUCCESS:
+   - Check if baseSHA is encoded in description (`BaseSHAFromContextDescription()`)
+   - OR check if backing ProwJob exists in the pool
+4. If neither condition met, mark as "missing" to trigger retest
+5. PRs remain in pool but can't merge until verified passing contexts exist
+
+**Key insight**: After Part 1, the verification is simple:
+- **Contexts with baseSHA in description**: Normal Prow results + overrides (after Part 1 fix)
+- **Contexts with backing ProwJob**: All legitimate Prow results (normal + override)
+- **No special cases needed**: No need to detect "Overridden by" pattern
 
 **Pros**:
-- **Less invasive**: Doesn't change pool membership logic
-- **Graceful degradation**: PRs stay in pool, just get retested
-- **No configuration needed**: Works automatically for all PRs
-- **Leverages existing retest logic**: Minimal new code
+- **Architecturally consistent**: All legitimate contexts (Prow + override) use same verification pattern
+- **Simple Tide logic**: Check baseSHA OR backing ProwJob - no special cases
+- **Minimal disruption**: Doesn't break existing workflows
+- **Leverages existing code**: Retest infrastructure already exists
 - **Self-healing**: Unverified statuses get replaced with verified ones
+- **Defense in depth**: Two independent verification methods
 
 **Cons**:
-- **Delayed protection**: PRs briefly eligible for merge before retest triggered
-- **Extra test runs**: Forces retests even if status was legitimate
-- **Cost**: Increased compute for redundant test runs
-- **Race window**: If PR is at front of queue, might merge before retest completes
+- **Requires Part 1 first**: Override plugin fix must be deployed before Tide enhancement
+- **Extra test runs**: Forces retests for unverified contexts (increased compute)
+- **Small race window**: If PR is first in queue, might merge before retest completes
 
 **Affected Components**:
-- pkg/tide/tide.go - `accumulate()` function needs enhancement
-- Logic to identify "suspiciously passing" contexts and mark as missing
+- **Part 1**: pkg/plugins/override/override.go - 1 line change to encode baseSHA
+- **Part 2**: pkg/tide/tide.go - `accumulate()` function enhancement (~50-100 LOC)
 
-**Complexity**: Low
+**Complexity**:
+- Part 1: Trivial (Level 1 - single line change)
+- Part 2: Low-Moderate (Level 2 - extends existing logic)
 
 **Backwards Compatibility**:
 
-**Fully backwards compatible** - Only adds retests, doesn't block anything that currently merges
+**Fully backwards compatible** for both parts:
+- Part 1: Only adds information to override descriptions
+- Part 2: Only adds retests, doesn't block anything that currently merges
 
-#### Recommendation
+#### Implementation Rationale
 
-**This is the correct approach** - the only architecturally sound solution.
+**Why this is cleaner than special-casing overrides in Tide**:
 
-**Rationale**:
+Alternative considered: Check for "Overridden by" pattern in Tide
+- ❌ Creates special case logic in Tide
+- ❌ Tight coupling between override plugin and Tide
+- ❌ Fragile (breaks if description format changes)
+- ❌ Doesn't follow existing patterns
 
-1. **Architecturally correct**: PRs must enter the pool (filtering) then get retested (accumulation), not filtered out
-2. **Minimal disruption**: Doesn't break existing workflows or require configuration changes
-3. **Addresses the security concern**: Prevents merges of PRs with unverified passing contexts
-4. **Leverages existing code**: The retest infrastructure already exists and works well
-5. **Simple implementation**: Primarily a change to `accumulate()` logic
-6. **Self-documenting**: When Tide triggers a retest, logs will show "context lacks verification"
+Recommended approach: Fix override to use baseSHA encoding
+- ✅ Consistent with existing Prow patterns
+- ✅ Single verification mechanism in Tide
+- ✅ Loose coupling between components
+- ✅ Robust and maintainable
 
-**Why filtering PRs out would be wrong**:
+**Why PRs must stay in pool (not filtered out)**:
 - PRs would get stuck - Tide never reconsiders them
 - Nothing would update the suspicious context
 - PR permanently excluded from merge consideration
 
 **Key Implementation Considerations**:
 
-1. **Modify `accumulate()` function** (pkg/tide/tide.go:1075-1135):
-   - After line 1082 (prowJobsFromContexts), also check passing contexts
-   - For each required context with State=SUCCESS:
-     - Check if it has baseSHA encoding via `BaseSHAFromContextDescription()`
-     - Check if it has backing ProwJob in `psStates` map
-     - Check if override exists for this context
-   - If none of these, add to `missingTests` even though status shows SUCCESS
+#### Part 1 Implementation (Override Plugin):
 
-2. **Add clear logging**:
-   - When marking a passing context as "missing due to lack of verification"
-   - Include context name, current state, and reason
+**File**: pkg/plugins/override/override.go
 
-3. **Preserve override behavior**:
-   - Ensure `/override` invocations are properly detected and honored
-   - May need to query override data during accumulation
+**Change at line 521**:
+```go
+// Before:
+status.Description = description(user)  // "Overridden by {user}"
 
-4. **Handle external CI**:
-   - Document that external CI systems should support baseSHA encoding
-   - Or provide alternative verification mechanism (e.g., webhook registration)
+// After:
+status.Description = config.ContextDescriptionWithBaseSha(description(user), baseSHA)
+```
+
+**Notes**:
+- `baseSHA` is already available from line 495: `baseSHA, err := baseSHAGetter()`
+- `config.ContextDescriptionWithBaseSha()` is already used by normal Prow reporting
+- This makes override contexts verifiable the same way as normal Prow contexts
+
+#### Part 2 Implementation (Tide):
+
+**File**: pkg/tide/tide.go
+
+**Enhance `accumulate()` function** (lines 1075-1135):
+1. After line 1082 (`prowJobsFromContexts`), add validation for passing contexts
+2. For each required context with `State=SUCCESS`:
+   - Check if baseSHA is encoded in description via `BaseSHAFromContextDescription()`
+   - OR check if backing ProwJob exists in `psStates` map
+3. If neither condition met, add to `missingTests` even though status shows SUCCESS
+
+**Add clear logging**:
+- When marking a passing context as "missing due to lack of verification"
+- Include context name, current state, and reason (no baseSHA, no ProwJob)
+
+**Handle external CI**:
+- Document that external CI systems should support baseSHA encoding
+- Or provide alternative verification mechanism (e.g., webhook registration)
 
 **Testing Requirements**:
 
-- Test: Context shows SUCCESS but no backing ProwJob → marked as missing
-- Test: Context shows SUCCESS with valid baseSHA → accepted
-- Test: Context shows SUCCESS with override → accepted
-- Test: External context shows SUCCESS without verification → forced retest
+#### Part 1 Tests (Override Plugin):
+- Test: Override-created status includes baseSHA in description
+- Test: Override-created ProwJob has correct baseSHA in Spec
+- Test: BaseSHA survives description truncation (140 char limit)
+- Test: Existing override functionality still works
+
+#### Part 2 Tests (Tide):
+- Test: Context with valid baseSHA in description → accepted (no retest)
+- Test: Context with backing ProwJob → accepted (no retest)
+- Test: Context with SUCCESS but no baseSHA and no ProwJob → marked as missing, retest triggered
+- Test: Override-created context (after Part 1 fix) → accepted via baseSHA
+- Test: External context without verification → forced retest
 - Test: Retest produces verified result → PR can merge
 
 **Migration/Rollout Strategy**:
 
-1. **Phase 1**: Deploy with comprehensive logging (but no behavior change)
-   - Log instances of unverified passing contexts
-   - Gather data on how often this occurs
-   - Identify any external CI systems that would be affected
+1. **Phase 1**: Deploy Part 1 (Override Plugin Fix)
+   - Simple 1-line change, low risk
+   - Deploy to production
+   - Verify override-created contexts now have baseSHA in descriptions
+   - No behavior change to Tide yet
 
-2. **Phase 2**: Enable mandatory retest behavior
+2. **Phase 2**: Deploy Part 2 with logging only (Tide Enhancement - Logging Mode)
+   - Add verification logic to accumulate() but only log unverified contexts
+   - Don't mark as missing yet
+   - Gather data on how often unverified contexts occur
+   - Identify any external CI systems that would be affected
+   - Verify override contexts (from Part 1) are correctly identified as verified
+
+3. **Phase 3**: Enable mandatory retest behavior (Tide Enhancement - Active Mode)
+   - Change logging to actual marking as missing
    - Monitor for increased test volume
    - Watch for any PRs stuck in retest loops
-
-3. **Phase 3** (future, if needed): Consider additional strictness options based on operational experience
+   - Confirm system is working as expected
 
 ---
 
@@ -320,30 +383,42 @@ Instead of blocking PRs with unverified contexts, force an immediate retest of a
 
 **Summary**:
 
-Well-defined feature with clear implementation approach. Moderate scope affecting 2-4 files (~150-250 LOC). Requires understanding of Tide's architecture and existing baseSHA verification patterns, but solution is straightforward and builds on existing infrastructure. Suitable for contributors with Prow familiarity.
+Well-defined feature with clear two-part implementation approach. Overall moderate scope but can be split into two separate contributions: Part 1 is trivial (1-line change to override plugin), Part 2 is moderate (Tide enhancement). Solution builds on existing baseSHA verification infrastructure. Part 1 suitable for any contributor; Part 2 requires Tide familiarity.
 
 #### Factor Analysis
 
 ##### Scope of Changes
-- **Assessment**: Moderate
+- **Assessment**: Small for Part 1, Moderate for Part 2
 - **Details**:
-  - Primary: pkg/tide/tide.go - enhance `accumulate()` function (~100 LOC)
-  - Secondary: Override detection (if not currently accessible in accumulate) (~50 LOC)
-  - Tests: pkg/tide/tide_test.go - add test cases for verification scenarios (~100 LOC)
-  - Total: 2-4 files, estimated 150-250 lines modified/added
-  - Localized to Tide component, doesn't spread across codebase
-- **Level Indication**: 2-3
+  - **Part 1** (Override Plugin):
+    - pkg/plugins/override/override.go - 1 line change
+    - pkg/plugins/override/override_test.go - add baseSHA verification test (~20 LOC)
+    - Total: 1 file modified, ~21 lines
+  - **Part 2** (Tide Enhancement):
+    - pkg/tide/tide.go - enhance `accumulate()` function (~50-100 LOC)
+    - pkg/tide/tide_test.go - add test cases for verification scenarios (~100 LOC)
+    - Total: 2 files modified, ~150-200 lines
+  - **Combined**: 3 files, estimated ~170-220 lines total
+  - Can be split into two separate PRs (Part 1 first, Part 2 after Part 1 deploys)
+- **Level Indication**: Part 1: Level 1, Part 2: Level 2-3, Combined: Level 2
 
 ##### Complexity
-- **Assessment**: Moderate
+- **Assessment**: Simple for Part 1, Moderate for Part 2
 - **Details**:
-  - Leverages existing baseSHA verification infrastructure (`BaseSHAFromContextDescription()`)
-  - Extends existing ProwJob matching logic (already in `prowJobsFromContexts()`)
-  - Need to add override detection capability
-  - No concurrency issues (accumulate runs in sync loop)
-  - Main challenge: understanding the filtering vs accumulation split in Tide
-  - Edge cases: external CI, override handling, baseSHA format variations
-- **Level Indication**: 2-3
+  - **Part 1** (Override Plugin):
+    - Trivial code change: use existing `config.ContextDescriptionWithBaseSha()` function
+    - BaseSHA already available in the function
+    - No new logic, just using existing utility function
+    - Simple test: verify description contains baseSHA
+  - **Part 2** (Tide Enhancement):
+    - Leverages existing baseSHA verification infrastructure (`BaseSHAFromContextDescription()`)
+    - Extends existing ProwJob matching logic (already in `prowJobsFromContexts()`)
+    - No special override detection needed (Part 1 makes overrides look like normal contexts)
+    - No concurrency issues (accumulate runs in sync loop)
+    - Main challenge: understanding the filtering vs accumulation split in Tide
+    - Edge cases: external CI, baseSHA format variations
+  - **Two-part approach simplifies Part 2**: No need for special override detection logic
+- **Level Indication**: Part 1: Level 1 (simple), Part 2: Level 2 (moderate)
 
 ##### Required Expertise
 - **Assessment**: Moderate
@@ -357,15 +432,17 @@ Well-defined feature with clear implementation approach. Moderate scope affectin
 - **Level Indication**: 2-3
 
 ##### Clarity and Certainty
-- **Assessment**: Well-defined
+- **Assessment**: Very well-defined
 - **Details**:
   - Root cause clearly identified in research
-  - Solution approach (Approach 2) is well-specified
-  - Implementation location identified (accumulate function)
+  - Two-part solution is well-specified with exact implementation details
+  - Part 1: Exact line to change identified (override.go:521)
+  - Part 2: Implementation location identified (accumulate function)
   - Existing infrastructure documented
-  - One minor uncertainty: how to access override data during accumulation
+  - All uncertainties resolved: no special override detection needed (Part 1 solves it)
   - Acceptance criteria clear from issue and research
-- **Level Indication**: 1-2
+  - Clear rollout strategy: Part 1 first, then Part 2
+- **Level Indication**: 1 (very clear)
 
 ##### Testing Requirements
 - **Assessment**: Moderate
@@ -442,20 +519,44 @@ Most factors indicate Level 2-3, with clarity and architectural alignment favori
 
 Based on this assessment, recommend the following labels:
 
-- [x] **`help-needed`**: Appropriate scope and complexity for skilled contributors familiar with Prow
+- [x] **`help-wanted`**: Appropriate scope and complexity for skilled contributors familiar with Prow. Part 1 is simple but Part 2 requires understanding.
 - [x] **`area/tide`**: Core Tide functionality (already applied)
+- [x] **`area/plugins`**: Part 1 affects override plugin
 - [x] **`kind/feature`**: Requesting new capability (already applied)
 - [x] **`priority/important-soon`**: Security/reliability feature protecting against bugs like #540
-- [ ] **`good-first-issue`**: Too complex - requires understanding Tide architecture and baseSHA mechanism
+- [x] **`good-first-issue`**: Part 1 (override plugin fix) is suitable for newcomers - single line change with clear pattern to follow
+- [ ] **Apply both `good-first-issue` and `help-wanted`**: Part 1 is easy, Part 2 needs expertise
 
 #### Guidance for Contributors
 
-**For Level 2 (Moderate) - help-needed**:
+**This feature can be split into two separate contributions:**
+
+#### Part 1: Override Plugin Fix (Level 1 - good-first-issue)
+
+**Prerequisites**:
+- Basic Go knowledge
+- Familiarity with how to run tests
+
+**Recommended preparation**:
+1. Read pkg/plugins/override/override.go to understand the override command
+2. Look at pkg/config/config.go:3414-3429 to see how `ContextDescriptionWithBaseSha()` works
+3. Review issue #540 for context on why this is needed
+
+**Implementation approach**:
+1. Change line 521 in pkg/plugins/override/override.go
+2. From: `status.Description = description(user)`
+3. To: `status.Description = config.ContextDescriptionWithBaseSha(description(user), baseSHA)`
+4. Add test in override_test.go to verify baseSHA appears in description
+5. Submit PR with clear description linking to this issue
+
+**Estimated effort**: 1-2 hours for a newcomer
+
+#### Part 2: Tide Enhancement (Level 2 - help-wanted)
 
 **Prerequisites**:
 - Familiarity with Prow architecture, especially Tide
-- Understanding of Go and basic testing patterns
-- Comfortable reading and extending existing code
+- Understanding of Go and testing patterns
+- Part 1 must be deployed first (or include Part 1 in same PR)
 
 **Recommended preparation**:
 1. Review the complete research section in this triage document
@@ -463,13 +564,15 @@ Based on this assessment, recommend the following labels:
    - pkg/tide/tide.go - focus on `accumulate()` (lines 1075-1135) and `prowJobsFromContexts()` (lines 1040-1073)
    - pkg/config/config.go - understand `BaseSHAFromContextDescription()` (lines 3432-3446)
    - pkg/tide/tide_test.go - review existing test patterns
-3. Understand the recommended solution (Approach 2 in research section)
+3. Understand the two-part solution in research section
 4. Review issue #540 for context on why this feature is needed
 
 **Implementation approach**:
-1. Start by adding logging (Phase 1) to identify unverified passing contexts
-2. Add helper function to verify context source (baseSHA, ProwJob, or override)
-3. Enhance `accumulate()` to call verification and mark unverified as missing
+1. Start with logging-only mode: detect unverified contexts but don't mark as missing yet
+2. Enhance `accumulate()` to validate passing contexts
+3. For each passing required context, check: baseSHA in description OR backing ProwJob
+4. Add comprehensive unit tests
+5. After testing in production (logging mode), enable actual retest triggering
 4. Add comprehensive unit tests
 5. Test manually or with staging deployment
 
@@ -484,19 +587,24 @@ Based on this assessment, recommend the following labels:
 - Maintainers can provide guidance (consult before starting)
 - Consider discussing approach in GitHub issue before implementation
 
-**Estimated effort**: 2-4 days for an experienced Prow contributor (including testing and review cycles)
+**Estimated effort**:
+- Part 1: 1-2 hours for a newcomer contributor
+- Part 2: 2-3 days for an experienced Prow contributor (including testing and review cycles)
+- Can be done by different contributors or same contributor in two separate PRs
 
 #### Caveats and Considerations
 
-1. **Override detection complexity**: The research didn't fully explore how overrides are stored and accessed. Implementation may need to wire override data into the accumulation phase, which could add complexity.
+1. **Two-part approach**: Part 1 (override plugin fix) should be deployed before Part 2 (Tide enhancement) for cleanest implementation. Alternatively, both can be in a single PR.
 
-2. **External CI systems**: Organizations using external CI (non-Prow) that doesn't support baseSHA encoding may see increased test runs. This is intentional (defense in depth) but should be documented.
+2. **Override plugin fix is prerequisite**: Without Part 1, Tide would need special logic to detect "Overridden by" pattern. Part 1 makes the solution architecturally cleaner.
 
-3. **Test volume impact**: This will trigger more retests, increasing compute costs. Maintainers should monitor test volume after deployment and consider whether Phase 3 (opt-in strict mode) is needed.
+3. **External CI systems**: Organizations using external CI (non-Prow) that doesn't support baseSHA encoding may see increased test runs. This is intentional (defense in depth) but should be documented.
 
-4. **Phased rollout important**: The proposed 3-phase rollout (logging → retest → strict) is critical for safe deployment and should not be skipped.
+4. **Test volume impact**: This will trigger more retests, increasing compute costs. Maintainers should monitor test volume after deployment.
 
-5. **This is the only architecturally sound approach**: Filtering PRs out (initially considered as Approach 1) would cause them to get stuck. The mandatory retest approach is both correct and straightforward to implement.
+5. **Phased rollout important**: The proposed 3-phase rollout (Part 1 deployment → Part 2 logging mode → Part 2 active mode) is critical for safe deployment and should not be skipped.
+
+6. **This is the only architecturally sound approach**: Filtering PRs out would cause them to get stuck. The mandatory retest approach is both correct and straightforward to implement.
 
 ---
 
@@ -511,18 +619,33 @@ Based on this assessment, recommend the following labels:
 ```markdown
 ## Root Cause and Current Behavior
 
-Tide's `accumulate()` function (pkg/tide/tide.go:1075-1135) determines which jobs need retesting but doesn't verify that already-passing contexts come from legitimate sources. It checks for missing or failing jobs and triggers retests accordingly, but trusts passing contexts without validation - whether they come from actual passing ProwJobs, `/override` invocations, or external sources like the buggy status-reconciler in #540. Source verification infrastructure exists (baseSHA encoding via `BaseSHAFromContextDescription()` in pkg/config/config.go and `prowJobsFromContexts()` at lines 1040-1073), but it's only used to identify missing jobs, not to validate suspicious passing jobs.
+Tide's `accumulate()` function (pkg/tide/tide.go:1075-1135) determines which jobs need retesting but doesn't verify that already-passing contexts come from legitimate sources. It checks for missing or failing jobs and triggers retests accordingly, but trusts passing contexts without validation - whether they come from actual passing ProwJobs, `/override` invocations, or external sources like the buggy status-reconciler in #540.
 
-## Recommended Implementation
+Additionally, the override plugin (pkg/plugins/override/override.go:521) creates status contexts with description `"Overridden by {user}"` instead of encoding baseSHA like normal Prow results do. This makes override contexts indistinguishable from suspicious external updates.
 
-Enhance `accumulate()` to inspect passing contexts for required jobs. For each required context showing SUCCESS: verify (1) context description contains valid baseSHA encoding, (2) backing ProwJob exists in the pool, or (3) valid `/override` exists. If none match, mark as "missing" to trigger retest - treating unverified passing contexts like stale tests. This is fully backwards compatible (PRs still enter the pool via `filterPR()`, just get retested) and leverages existing verification patterns already in `prowJobsFromContexts()`.
+## Recommended Implementation: Two-Part Fix
+
+**Part 1: Fix Override Plugin (Simple - good-first-issue)**
+Change override.go:521 to encode baseSHA in status descriptions using `config.ContextDescriptionWithBaseSha()`. This makes override contexts verifiable the same way as normal Prow contexts. (1-line change + test)
+
+**Part 2: Enhance Tide Validation (Moderate - help-wanted)**
+Enhance `accumulate()` to inspect passing contexts for required jobs. For each required context showing SUCCESS, verify: (1) baseSHA encoded in description, OR (2) backing ProwJob exists. If neither, mark as "missing" to trigger retest. This is fully backwards compatible (PRs stay in pool, just get retested) and leverages existing patterns in `prowJobsFromContexts()`.
+
+## Why Two Parts?
+
+Without Part 1, Tide would need special logic to detect "Overridden by" pattern (fragile, tight coupling). Part 1 makes all legitimate contexts (Prow + override) follow the same verification pattern, keeping Tide's logic simple and maintainable.
 
 ## Implementation Notes
 
-This is a moderate-complexity feature (Level 2) affecting 2-4 files with ~150-250 LOC. Builds on existing baseSHA verification patterns. Recommended phased rollout: (1) add logging to identify unverified contexts, (2) enable mandatory retests. Well-suited for contributors familiar with Tide's architecture.
+- Part 1: Trivial (1 file, 1 line) - suitable for newcomers
+- Part 2: Moderate (2 files, ~150 LOC) - requires Tide knowledge
+- Can be separate PRs or single PR
+- Phased rollout: Part 1 → Part 2 logging → Part 2 active
 
 /area tide
+/area plugins
 /kind feature
+/good-first-issue
 /help-wanted
 /priority important-soon
 ```
@@ -530,22 +653,24 @@ This is a moderate-complexity feature (Level 2) affecting 2-4 files with ~150-25
 #### Rationale
 
 **What's being added**:
-- **Root cause explanation**: The original issue mentions the desired behavior but not why the vulnerability exists. Added explanation that accumulate() doesn't validate passing contexts, only checks for missing/failing jobs. Verification infrastructure exists but isn't used to validate suspicious passing jobs.
-- **Technical implementation details**: Specific code locations (accumulate, prowJobsFromContexts), file paths, and line numbers. Explains that solution builds on existing baseSHA verification and treats unverified contexts like stale tests.
-- **Architectural clarity**: Explains that PRs correctly enter the pool (filterPR), then get retested (accumulate). Filtering them out would cause them to get stuck permanently.
-- **Complexity assessment**: Level 2 effort, suitable for help-wanted. Provides scope estimate and notes about phased rollout.
+- **Root cause explanation**: The original issue mentions the desired behavior but not why the vulnerability exists. Added explanation that: (1) accumulate() doesn't validate passing contexts, only checks for missing/failing jobs, and (2) override plugin doesn't encode baseSHA, making override contexts look suspicious.
+- **Two-part solution**: Explains that fixing override plugin first makes Tide's implementation cleaner and more maintainable (vs. special-casing "Overridden by" pattern).
+- **Technical implementation details**: Specific code locations (override.go:521, accumulate, prowJobsFromContexts), file paths, and line numbers. Explains that solution builds on existing baseSHA verification.
+- **Architectural rationale**: Why two parts is cleaner than special-casing, and why PRs must stay in pool (not filtered out).
+- **Complexity split**: Part 1 is good-first-issue (trivial), Part 2 is help-wanted (moderate).
 
 **Why these labels**:
-- `/area tide`: Already applied, but included for completeness. Issue affects Tide's accumulation/retest logic.
-- `/kind feature`: Already applied. This is a security/reliability enhancement, not a bug fix.
-- `/help-wanted`: Based on Level 2 effort assessment. Well-defined problem with clear solution, suitable for contributors familiar with Prow. Implementation approach is documented.
-- `/priority important-soon`: This is a security/reliability feature that protects against bugs like #540 (haywire components falsely marking jobs as passing). Important for merge safety but not critical-urgent since workarounds exist (manual verification, fixing buggy components).
+- `/area tide`: Issue affects Tide's accumulation/retest logic (Part 2)
+- `/area plugins`: Issue affects override plugin (Part 1)
+- `/kind feature`: Security/reliability enhancement, not a bug fix
+- `/good-first-issue`: Part 1 (override plugin fix) is 1-line change, suitable for newcomers
+- `/help-wanted`: Part 2 (Tide enhancement) requires Prow familiarity, suitable for skilled contributors
+- `/priority important-soon`: Protects against bugs like #540 (haywire components falsely marking jobs as passing)
 
 **What's NOT included**:
-- **Incorrect filtering approach**: Initially considered filtering PRs out, but this is architecturally wrong (PRs get stuck). Comment focuses on the correct approach only.
-- **All technical details**: Research found extensive details about data flow, architecture, test coverage, etc. Comment distills to essential information needed to understand and implement.
-- **/retitle**: Current title is clear and specific. "Suspiciously passing" effectively conveys the concept.
-- **good-first-issue**: This is Level 2 (moderate), requires Tide architecture knowledge. Not appropriate for newcomers despite clear solution.
+- **Special-case override detection**: Comment doesn't mention detecting "Overridden by" pattern because Part 1 solves it cleanly
+- **All technical details**: Research found extensive details; comment distills to essential information
+- **/retitle**: Current title is clear and specific
 
 ## Next Steps
 

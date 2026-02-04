@@ -333,9 +333,168 @@ Inconsistent author matching between sync controller (merge loop) and status con
 - Add release note documenting behavior change
 - Recommend users can remove `[bot]` suffixes from configs (but leaving them doesn't break anything)
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+This is a well-defined bug with a clear solution approach (normalize `[bot]` suffix in author matching). While the fix is straightforward, it requires understanding Tide's architecture, touches multiple components, has backwards compatibility considerations, and needs thoughtful testing across both sync and status controllers.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small to Moderate
+- **Details**:
+  - 3-4 files to modify: pkg/github/types.go, pkg/config/tide.go, pkg/tide/status.go, plus test files
+  - Estimated 50-100 lines of code (new normalization function, updating call sites, comprehensive tests)
+  - Affects two main code paths: query construction and status evaluation
+  - Changes are focused but require consistency across components
+- **Level Indication**: 2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**:
+  - Core logic is simple: string suffix normalization
+  - Complexity comes from ensuring both code paths (sync and status) use consistent normalization
+  - Need to understand how GitHub search queries work vs client-side evaluation
+  - Must handle case variations (`[bot]`, `[BOT]`, `[Bot]`)
+  - No concurrency issues or complex algorithms
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - Must understand Tide's two control loops (sync and status)
+  - Need familiarity with Go string manipulation and testing
+  - Should understand how GitHub search queries are constructed
+  - Helpful to know GitHub's bot account naming conventions
+  - Can learn from existing code patterns (NormLogin provides a template)
+  - No deep expertise required, but need to trace through both code paths
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Root cause clearly identified through code research
+  - Solution approach recommended (Approach 1: Normalize Bot Suffixes)
+  - Implementation steps documented
+  - Expected behavior is clear: `author: foo` should match `foo[bot]`
+  - No competing approaches with unclear trade-offs
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - Need unit tests for new `NormAuthor()` function with various inputs
+  - Need to test both code paths: query construction and status evaluation
+  - Should add integration test with mock bot PR
+  - Must verify existing human author matching isn't broken
+  - Can follow existing test patterns in pkg/tide/*_test.go
+  - Test scenarios are clear and well-defined
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Minor impact, mostly compatible
+- **Details**:
+  - Behavior change: `author: foo` will now match `foo[bot]` (previously didn't)
+  - Existing configs with workaround (`author: foo[bot]`) continue to work
+  - Low risk: most affected users already using workaround
+  - Potential edge case: if someone relies on NOT matching bots (unlikely)
+  - Should document behavior change in release notes
+  - No breaking changes to API or configuration schema
+- **Level Indication**: 2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**:
+  - Enhances existing normalization pattern (similar to NormLogin)
+  - Follows established approach of normalizing before comparison
+  - Doesn't introduce new architectural concepts
+  - Improves consistency between two code paths
+  - Aligns with user expectations (bot name shouldn't need suffix)
+  - Minor extension to existing patterns, not a new pattern
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None / Well-supported
+- **Details**:
+  - No external API limitations
+  - GitHub consistently provides `[bot]` suffix in responses
+  - GitHub search API accepts author queries with or without suffix
+  - No changes needed to external systems
+  - GitHub's User.Type field available if needed for future enhancements
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+Based on this assessment, recommend the following labels:
+- [x] `kind/bug`: This is a bug in author matching logic (already applied)
+- [x] `area/tide`: Affects Tide component (already applied)
+- [x] `help-needed`: Good scope for a skilled contributor with Tide familiarity
+- [ ] `good-first-issue`: Requires moderate understanding of Tide architecture, not ideal for first-time contributors
+- [x] `priority/important-longstanding`: Long-standing issue (reported Jan 2025, still open), affects user experience
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+
+**Prerequisites**:
+- Familiarity with Go programming
+- Understanding of string manipulation and normalization
+- Ability to read and follow existing test patterns
+
+**Recommended preparation**:
+- Review pkg/github/types.go to understand existing NormLogin function
+- Study pkg/config/tide.go:576 to see how queries are constructed
+- Examine pkg/tide/status.go:169-179 to understand author comparison
+- Read through pkg/tide/*_test.go to understand testing patterns
+
+**Implementation approach**:
+1. Create `NormAuthor()` function in pkg/github/types.go that strips both `@` prefix and `[bot]` suffix (case-insensitive)
+2. Update query construction in pkg/config/tide.go:576 to use NormAuthor for author field
+3. Update status evaluation in pkg/tide/status.go:169 to use NormAuthor instead of NormLogin
+4. Add comprehensive unit tests for NormAuthor with edge cases
+5. Add integration tests for both sync and status controllers with bot authors
+6. Test that existing human author matching still works
+
+**Key considerations**:
+- Ensure case-insensitive suffix matching (`[bot]`, `[BOT]`, `[Bot]` all stripped)
+- Keep NormLogin unchanged to avoid side effects in other parts of codebase
+- Test both code paths to ensure consistent behavior
+- Consider what happens if author is exactly `[bot]` (edge case)
+
+**Related files**:
+- pkg/github/types.go:166-168 - Existing NormLogin function
+- pkg/config/tide.go:576 - Query construction with author field
+- pkg/tide/status.go:169-179 - Author comparison logic
+- pkg/tide/status_test.go - Test patterns to follow
+
+**Testing strategy**:
+- Unit tests for NormAuthor: `"foo"` → `"foo"`, `"foo[bot]"` → `"foo"`, `"Foo[BOT]"` → `"foo"`, `"@foo[bot]"` → `"foo"`
+- Integration test: Configure Tide query with `author: test-bot`, create mock PR by `test-bot[bot]`, verify it matches
+- Regression test: Verify existing human author queries still work
+
+### Caveats and Considerations
+
+**Backwards Compatibility Notes**:
+- Users with workaround (`author: foo[bot]`) don't need to change configs - normalization handles it
+- Users without workaround will see behavior change - their queries will now match bots
+- Extremely unlikely edge case: if someone intentionally excluded bots, they may need to adjust approach
+
+**Alternative Considerations**:
+- Could implement Approach 3 (enhanced error messages) as a complement to Approach 1
+- Future enhancement: Use GitHub's User.Type field for explicit bot/human distinction
+- Could add configuration option to disable normalization if needed (probably not worth complexity)
+
+**Testing Importance**:
+- Critical to test BOTH code paths (sync controller search and status controller evaluation)
+- Must verify consistency between the two paths
+- Backwards compatibility testing important to avoid surprises
+
 ## Next Steps
 
-1. Proceed with effort assessment to categorize issue difficulty
+1. ~~Proceed with effort assessment to categorize issue difficulty~~ ✓ Complete
 2. Prepare augmentation to improve issue description and labels
 3. Brief maintainer on findings
 4. Finalize triage and post recommendations

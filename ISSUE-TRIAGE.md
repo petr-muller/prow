@@ -492,9 +492,58 @@ Based on this assessment, recommend the following labels:
 - Must verify consistency between the two paths
 - Backwards compatibility testing important to avoid surprises
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: `` `tide` queries are confusing when using GH app authors ``
+- **Proposed**: `` Tide queries require explicit `[bot]` suffix to match GitHub app authors ``
+- **Rationale**: Current title describes the symptom ("confusing") but the new title is more specific about the actual problem and what users must do. It makes the workaround immediately clear to anyone reading the issue title.
+
+### Proposed GitHub Comment
+
+```markdown
+/retitle Tide queries require explicit `[bot]` suffix to match GitHub app authors
+
+## Root Cause
+
+This occurs because Tide's author normalization function (`NormLogin` in `pkg/github/types.go:166-168`) only strips the `@` prefix and lowercases usernames, but doesn't strip the `[bot]` suffix that GitHub automatically appends to app accounts. When a query specifies `author: openshift-trt`, GitHub's search API looks for an exact match and doesn't return PRs by `openshift-trt[bot]`, so these PRs never enter the merge pool.
+
+## Technical Details
+
+The issue affects two code paths in Tide:
+- **Query construction** (`pkg/config/tide.go:576`): The author field is inserted literally into GitHub search queries as `author:"openshift-trt"`, which doesn't match `openshift-trt[bot]` in GitHub's search index
+- **Status evaluation** (`pkg/tide/status.go:169-179`): Uses `NormLogin` for client-side comparison, which also fails to match because the `[bot]` suffix isn't normalized
+
+The fix would be to create a `NormAuthor` function that strips both the `@` prefix and `[bot]` suffix (case-insensitive), and apply it consistently in both query construction and status evaluation. This would make `author: openshift-trt` automatically match PRs by `openshift-trt[bot]`, eliminating the need for users to know about GitHub's bot naming convention.
+
+/help-wanted
+/priority important-longstanding
+```
+
+### Rationale
+
+**What's being added**:
+- **Root cause explanation**: The original issue doesn't explain WHY the `[bot]` suffix is needed. Added explanation about `NormLogin` function and how it doesn't handle the suffix.
+- **Technical implementation details**: Original issue mentions "graphql api" as a hypothesis, but the actual root cause is the normalization function. Added specifics about the two affected code paths with file references.
+- **Fix approach**: Added high-level solution (NormAuthor function) to guide contributors.
+
+**Why these labels**:
+- `/area tide`: Already applied - issue is specific to Tide component
+- `/kind bug`: Already applied - this is broken behavior
+- `/help-wanted`: Based on Level 2 effort assessment - well-defined problem with clear solution, suitable for contributors with moderate Tide knowledge
+- `/priority important-longstanding`: Issue has been open since January 2025, affects user experience (confusing workflow), and has a workaround (so not critical-urgent) but should be fixed to improve UX
+
+**What's NOT included**:
+- No /retitle to something more technical like "NormLogin doesn't handle [bot] suffix" - keeping it user-focused
+- Didn't repeat the workaround (already clearly documented in original issue)
+- Didn't include detailed implementation steps (too verbose for issue comment, better for PR)
+- Didn't mention GraphQL vs REST API (user's hypothesis, but not actually the issue based on research)
+- No /good-first-issue label (Level 2 requires moderate Tide knowledge, not ideal for first-time contributors)
+
 ## Next Steps
 
 1. ~~Proceed with effort assessment to categorize issue difficulty~~ ✓ Complete
-2. Prepare augmentation to improve issue description and labels
+2. ~~Prepare augmentation to improve issue description and labels~~ ✓ Complete
 3. Brief maintainer on findings
 4. Finalize triage and post recommendations

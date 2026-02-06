@@ -695,11 +695,121 @@ The author (@NiJuFirenzia) has already self-assigned this issue and indicated th
 
 The `/help-wanted` label reflects that contributions are welcome (perhaps for review, testing, or helping with both components) but acknowledges active development.
 
+---
+
+### PR 573 Analysis
+
+**PR Review Date**: 2026-02-06
+
+**PR**: https://github.com/kubernetes-sigs/prow/pull/573
+**Title**: "Adding option to enable Back End HTTPS for Prow Ingress"
+**Author**: NiJuFirenzia
+**State**: OPEN (CHANGES_REQUESTED)
+**Branch**: `add-option-for-ssl` → `main`
+**Size**: 468 additions, 13 deletions across 8 files
+
+#### Files Changed
+
+| File | +/- | Purpose |
+|------|-----|---------|
+| cmd/deck/main.go | +19/-3 | Server TLS flags + client cert flag |
+| cmd/deck/main_test.go | +19/-1 | Tests for new deck flags |
+| cmd/deck/pluginhelp.go | +37/-5 | **Deck-as-hook-client TLS support** |
+| cmd/deck/pluginhelp_test.go | +238/-0 | New: comprehensive pluginhelp tests |
+| cmd/hook/main.go | +8/-4 | Server TLS flags |
+| cmd/hook/main_test.go | +13/-0 | Tests for new hook flags |
+| pkg/flagutil/ssl_enablement.go | +51/-0 | New: shared SSLEnablementOptions struct |
+| pkg/flagutil/ssl_enablement_test.go | +83/-0 | New: SSL options validation tests |
+
+#### Implementation Approach
+
+The PR follows Prow's `OptionGroup` pattern (as recommended in triage research), creating a shared `SSLEnablementOptions` struct in `pkg/flagutil/ssl_enablement.go` with:
+- `--enable-ssl` (bool): Explicit opt-in flag
+- `--server-cert-file` (string): Server certificate path
+- `--server-key-file` (string): Server key path
+
+This struct is embedded in both Deck and Hook options, implementing the `OptionGroup` interface with `AddFlags()` and `Validate()` methods.
+
+#### Key Finding: Deck-as-Hook-Client TLS (Corner Case)
+
+**This was NOT identified in our initial research and increases the PR's complexity.**
+
+Deck acts as an HTTP client to Hook's `/plugin-help` endpoint to fetch plugin help data for the UI. When Hook runs with TLS, Deck needs to:
+
+1. Connect to Hook via HTTPS (not HTTP)
+2. Trust Hook's TLS certificate (requires a CA cert)
+
+The PR addresses this with:
+- A `--client-cert-file` flag on Deck (separate from server cert/key)
+- Modified `newHelpAgent()` in cmd/deck/pluginhelp.go to create a custom `http.Client` with CA cert pool
+- URL scheme detection (`http` vs `https`) determines whether TLS client config is needed
+- The custom client avoids modifying `http.DefaultTransport` (addressed in review feedback)
+
+**Three certificate files are involved in a full TLS deployment**:
+1. Hook: `--server-cert-file` + `--server-key-file` (Hook's server certificate)
+2. Deck: `--server-cert-file` + `--server-key-file` (Deck's server certificate)
+3. Deck: `--client-cert-file` (CA cert to trust when connecting to Hook)
+
+#### Review History
+
+**Round 1 (Dec 17, 2025) - @petr-muller - CHANGES_REQUESTED**:
+
+1. **Group flags into shared struct** (like other OptionGroups) → ✅ Done in v2
+2. **Extract httpServer before condition** (DRY - identical in both branches) → Applied
+3. **Fix typo**: `tlsEnabledScehma` → `tlsEnabledSchema` → ✅ Done
+4. **Don't modify global `http.DefaultTransport`** - use custom client member on helpAgent → ✅ Done
+5. **Questioned cert coupling**: Original implementation reused Deck's server cert as CA cert for Hook trust - "a bit hacky and surprising" → ✅ Resolved with separate `--client-cert-file` flag
+   - Author initially pushed back: "That would require having to add another option flag"
+   - Eventually added the separate flag in v2
+
+**Round 2 (Jan 24, 2026) - @petr-muller - COMMENTED**:
+
+1. **Bug: Flag name mismatch in error messages**: Error says `--cert-file` but actual flag is `--server-cert-file`. Same for `--key-file` vs `--server-key-file`. → ❌ Not yet fixed
+2. **Naming nit**: `sslEnablement.EnableSSL` stutters → prefer `ssl.Enabled` → ❌ Not yet fixed
+3. **Naming nit**: Field name `sslEnablement` too verbose → prefer `ssl` → ❌ Not yet fixed
+4. **Naming nit**: Type name `SSLEnablementOptions` → prefer `SSLOptions` or `SSLServerOptions`, package `flagutil/ssl` → ❌ Not yet fixed
+5. **Design feedback**: Should also check opposite case (enabled=false but cert was passed, confusing admin), or make EnableSSL an implied field from cert file presence → ❌ Not yet addressed
+
+**Author Response (Jan 29, 2026)**:
+- "I agree with the name changes. I'll have updates to this PR out next week"
+- "All change requests have been addressed and this PR is ready for a re-review" (this appears to refer to round 1 changes, not round 2)
+- As of Feb 6, 2026: No new commits pushed since round 2 review
+
+#### Impact on Triage Assessment
+
+**Scope Revision**: Our initial estimate (2 files, 60-100 LOC) was too optimistic:
+- Actual: 8 files, 468 additions (mostly tests, but still significant)
+- The Deck-as-hook-client corner case adds ~37 LOC in pluginhelp.go and 238 LOC of tests
+- The shared `SSLEnablementOptions` struct is an additional 51 LOC + 83 LOC tests
+
+**Effort Level Revision**: Stays at **Level 2** but on the higher end. The Deck-as-hook-client aspect adds moderate complexity:
+- Need to understand inter-component communication (Deck → Hook)
+- Certificate trust configuration (CA certs vs server certs)
+- Custom HTTP client creation
+- Comprehensive test coverage for both server and client scenarios
+
+**Augmentation Revision**: The proposed GitHub comment should be updated to:
+- Mention the Deck-as-hook-client corner case
+- Note that 3 certificate files are involved (not just 2 per component)
+- Adjust scope estimate to reflect actual PR size
+- Acknowledge the PR already exists and is in review
+
+#### Open Questions for Maintainer Review
+
+1. **Naming**: Should the struct/fields be renamed per round 2 feedback? (Author agreed but hasn't pushed yet)
+2. **Implied enablement**: Should `--enable-ssl` be dropped in favor of inferring from cert file presence? This aligns with how other Prow components work (admission doesn't have an explicit enable flag).
+3. **Certificate trust model**: Is a separate `--client-cert-file` for Deck-to-Hook trust the right approach? Alternatives include:
+   - Trust system CA store by default
+   - Use Kubernetes service mesh for inter-pod TLS
+   - Skip verification for internal cluster communication (less secure)
+4. **PR momentum**: Author committed to updates on Jan 29 but hasn't pushed as of Feb 6. Should we follow up?
+
 ## Next Steps
 
 1. ✅ Initial validation complete - Issue is LEGITIMATE
 2. ✅ Code research complete - Infrastructure exists, clear pattern to follow
 3. ✅ Effort assessment complete - Level 2 (Moderate/help-wanted)
 4. ✅ Issue augmentation proposed - Retitle + context + labels
-5. ⏳ Brief maintainer on findings
-6. ⏳ Finalize triage and post results
+5. ✅ PR 573 reviewed - Deck-as-hook-client corner case identified, outstanding review comments
+6. ✅ Maintainer briefed on findings
+7. ⏳ Finalize triage and post results

@@ -602,11 +602,104 @@ Based on this assessment:
 - ✅ Documentation explains usage and certificate requirements
 - ✅ Code follows existing Prow patterns (admission/webhook-server)
 
+---
+
+### Proposed Issue Augmentation
+
+**Augmentation Date**: 2026-02-06
+
+#### Title Change
+
+- **Current**: "Allow Option for Ingress to Reach pods through SSL"
+- **Proposed**: "Add optional TLS backend support for Deck and Hook pods"
+- **Rationale**: More technically precise (TLS vs SSL), mentions both affected components explicitly, clearer that it's an optional feature
+
+#### Proposed GitHub Comment
+
+```
+/retitle Add optional TLS backend support for Deck and Hook pods
+
+## Infrastructure Already Exists
+
+Good news: the core infrastructure for this feature already exists in Prow. The `interrupts.ListenAndServeTLS()` function (pkg/interrupts/interrupts.go:179-187) is already implemented and proven in production use by the admission and webhook-server components. What's missing is simply the configuration flags to enable it in Deck and Hook.
+
+## Implementation Pattern
+
+The pattern to follow is in **cmd/admission/main.go** (lines 38-39, 51-86), which implements exactly this feature:
+- Add `--tls-cert-file` and `--tls-key-file` flags to the options struct
+- Validate that both flags are provided together (or neither)
+- Conditionally call `interrupts.ListenAndServeTLS()` when flags are present, or `interrupts.ListenAndServe()` (current HTTP mode) when absent
+- This keeps the feature fully backwards compatible - deployments without the flags continue with HTTP backends as they do today
+
+The **cmd/webhook-server/main.go** (lines 188-196) provides a secondary reference showing how to configure the TLS server with appropriate `tls.Config` settings.
+
+## Estimated Scope
+
+This is a relatively straightforward addition:
+- **Files to modify**: cmd/deck/main.go and cmd/hook/main.go (2 files)
+- **Lines of code**: ~30-50 per component (~60-100 total)
+- **Pattern**: Directly follows existing Prow components
+- **Breaking changes**: None (opt-in via flags)
+- **Testing**: Unit tests for flag validation, manual testing with certificates (self-signed or cert-manager)
+
+Note that health check endpoints (default port 8081) would remain on HTTP regardless of the main server's TLS configuration, ensuring liveness/readiness probes work without complexity.
+
+/area deck
+/area hook
+/kind feature
+/help-wanted
+```
+
+#### Rationale
+
+**What's being added**:
+
+1. **Infrastructure confirmation**: The issue author mentioned testing with `ListenAndServeTLS()` but didn't know how complete the infrastructure is. Confirming it exists and is production-proven reduces uncertainty.
+
+2. **Specific implementation guidance**: While the author said they're working on it, pointing to the exact pattern in cmd/admission/main.go (with line numbers) provides a concrete reference that matches Prow's conventions.
+
+3. **Scope estimate**: The original issue lacks any detail about implementation complexity. Adding scope estimates (files, LOC, breaking changes) helps set expectations and demonstrates this is a manageable change.
+
+4. **Backwards compatibility assurance**: Important for maintainer review - explicitly stating this is opt-in and non-breaking addresses the bandwidth concerns raised by @BenTheElder.
+
+5. **Health check note**: A technical detail that wasn't obvious from the issue but matters for Kubernetes deployments.
+
+**Why these labels**:
+
+- `/area deck`: One of the two components affected by this feature
+- `/area hook`: The other component affected by this feature
+- `/kind feature`: Confirms this is a feature request (already applied, but reinforcing)
+- `/help-wanted`: Based on Level 2 effort assessment - moderate complexity, well-defined, suitable for contributors with some Prow experience
+
+**Why retitle**:
+
+- "SSL" is outdated terminology; "TLS" is more accurate
+- "Ingress to Reach pods through SSL" is awkwardly phrased
+- New title makes it immediately clear: optional feature, TLS backends, two components
+- More searchable for others with similar needs
+
+**What's NOT included**:
+
+- No priority label: Author is already working on it, not seeking urgency
+- No deep technical dive: Issue author already understands the problem and has tested an approach
+- No alternative solutions discussion: Author already committed to this approach, and it's architecturally sound
+- No detailed certificate management guidance: Keep comment focused; detailed docs can come with the PR
+
+**Special Consideration**:
+
+The author (@NiJuFirenzia) has already self-assigned this issue and indicated they're working on it. The augmentation is structured to be **helpful to their implementation** rather than inviting others to take over. It provides:
+- Confirmation their approach is correct
+- Specific code references to follow
+- Scope validation
+- Assurance it will align with Prow patterns
+
+The `/help-wanted` label reflects that contributions are welcome (perhaps for review, testing, or helping with both components) but acknowledges active development.
+
 ## Next Steps
 
 1. ✅ Initial validation complete - Issue is LEGITIMATE
 2. ✅ Code research complete - Infrastructure exists, clear pattern to follow
 3. ✅ Effort assessment complete - Level 2 (Moderate/help-wanted)
-4. ⏳ Propose issue augmentation with technical details
+4. ✅ Issue augmentation proposed - Retitle + context + labels
 5. ⏳ Brief maintainer on findings
 6. ⏳ Finalize triage and post results

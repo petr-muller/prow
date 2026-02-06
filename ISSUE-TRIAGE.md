@@ -348,11 +348,265 @@ Add `--tls-port` flag alongside existing port. Run both HTTP and HTTPS servers s
 - New dependencies: 0
 - Breaking changes: 0
 
+---
+
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+**Assessment Date**: 2026-02-06
+
+#### Summary
+
+This is a moderate-effort feature addition. While the infrastructure already exists and the pattern is well-established, implementing it across both Deck and Hook requires understanding TLS concepts, Prow's option patterns, and testing both components. Well-suited for contributors with some Go and Prow experience.
+
+#### Factor Analysis
+
+##### Scope of Changes
+- **Assessment**: Small
+- **Details**:
+  - 2 files to modify: cmd/deck/main.go, cmd/hook/main.go
+  - Estimated 60-100 total lines of code (30-50 per component)
+  - Changes are localized to main.go files in each component
+  - No changes to shared packages or libraries
+  - Optional: Documentation updates for new flags
+- **Level Indication**: 1-2
+
+##### Complexity
+- **Assessment**: Moderate
+- **Details**:
+  - Core logic is straightforward: add flags and conditional server initialization
+  - Must understand TLS certificate/key file configuration
+  - Need to replicate changes consistently across two components
+  - Pattern already exists in cmd/admission/main.go to follow
+  - No algorithmic challenges or concurrency issues
+  - Edge case: validation that both cert and key are provided together
+- **Level Indication**: 1-2
+
+##### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - **Go knowledge**: Basic to intermediate (flags, structs, conditionals)
+  - **TLS concepts**: Understanding of certificates, keys, HTTPS
+  - **Prow patterns**: Familiarity with options structs and flag registration (learnable from code)
+  - **Testing**: Basic unit test writing following existing patterns
+  - **Not required**: Deep Prow architecture knowledge, distributed systems expertise
+  - Can learn by studying cmd/admission/main.go as reference
+- **Level Indication**: 2
+
+##### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**:
+  - Problem is clearly articulated by issue author
+  - Solution approach is unambiguous (already tested by author)
+  - Exact pattern to follow exists (cmd/admission/main.go)
+  - Required infrastructure (`interrupts.ListenAndServeTLS()`) already exists
+  - No competing approaches or design debates needed
+  - Author has already validated the approach works
+- **Level Indication**: 1-2
+
+##### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - **Unit tests needed**:
+    - Flag parsing with TLS flags present
+    - Flag parsing without TLS flags (default HTTP mode)
+    - Validation that both cert and key are required together
+    - Validation error when only one TLS flag is provided
+  - **Testing patterns**: Can follow existing option validation tests
+  - **Integration testing**: Could use self-signed certs, but not strictly necessary for unit coverage
+  - **Manual testing**: Would require certificate setup for verification
+  - No complex test infrastructure needed
+- **Level Indication**: 2
+
+##### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**:
+  - **Default behavior unchanged**: Without flags, components run in HTTP mode (current behavior)
+  - **Opt-in feature**: Only users who add `--tls-cert-file` and `--tls-key-file` get TLS
+  - **No configuration changes**: Existing deployments continue to work
+  - **No API changes**: HTTP handlers remain the same
+  - **Health checks unaffected**: Run on separate port, remain HTTP
+  - **Zero risk to existing Kubernetes project deployment**
+  - Gradual rollout possible (enable on one component at a time)
+- **Level Indication**: 1-2
+
+##### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**:
+  - **Follows established patterns**: cmd/admission and cmd/webhook-server already use this exact pattern
+  - **Uses existing infrastructure**: `interrupts.ListenAndServeTLS()` proven in production
+  - **Consistent with Prow philosophy**: Optional features via flags
+  - **No new abstractions needed**: Everything already exists
+  - **Natural extension**: Adding configurability to existing capability
+  - **Aligns with Go standards**: Standard lib `crypto/tls` and `http.Server.TLSConfig`
+  - Fits Prow's design of "provide hooks, let users configure"
+- **Level Indication**: 1-2
+
+##### External Dependencies
+- **Assessment**: None
+- **Details**:
+  - **No new dependencies**: Uses only existing packages
+  - **No external API requirements**: Works with any TLS certificate
+  - **Certificate management**: User responsibility (cert-manager, manual, etc.)
+  - **Well-documented**: TLS and Go HTTP server documentation extensive
+  - **Standard practice**: HTTPS servers are well-understood in Go ecosystem
+- **Level Indication**: 1-3
+
+#### Overall Assessment
+
+**Level 2 (Moderate)** is appropriate because:
+
+✅ **Factors favoring Level 1-2:**
+- Small scope (2 files, <100 LOC)
+- Clear solution with existing pattern to follow
+- Fully backwards compatible
+- Perfect architectural fit
+- No external dependencies
+
+⚠️ **Factors elevating to Level 2 (not Level 1):**
+- Requires moderate Go and TLS knowledge
+- Must be implemented consistently across two components
+- Need to understand Prow's option/flag patterns
+- Testing requires understanding of both components
+- Not trivial enough for a complete newcomer to Prow
+
+**Not Level 3 because:**
+- Infrastructure already exists (not building something new)
+- Well-defined with clear reference implementation
+- Limited scope and impact
+- No concurrency, race conditions, or complex edge cases
+
+#### Recommended Labels
+
+Based on this assessment:
+
+- [x] **`help-wanted`**: Good scope for contributor with some experience
+  - *Rationale*: Well-defined, moderate scope, clear pattern to follow
+
+- [x] **`kind/feature`**: Already applied, confirms this is a feature request
+  - *Rationale*: Adding new optional capability
+
+- [x] **`area/deck`**: Affects Deck component
+  - *Rationale*: One of two components being modified
+
+- [x] **`area/hook`**: Affects Hook component
+  - *Rationale*: One of two components being modified
+
+- [ ] **`good-first-issue`**: Not recommended
+  - *Rationale*: Requires moderate expertise, touches multiple components, needs TLS understanding
+
+- [ ] **`priority/important-longterm`**: Could be considered
+  - *Rationale*: Helps specific security compliance scenarios, but niche use case
+
+#### Guidance for Contributors
+
+**For Level 2 (Moderate):**
+
+**Prerequisites**:
+- Familiarity with Go (flags, structs, conditional logic, testing)
+- Understanding of TLS/HTTPS concepts (certificates, keys, what they do)
+- Ability to read and follow existing code patterns
+- Experience writing unit tests in Go
+
+**Recommended Study**:
+1. **Primary reference**: cmd/admission/main.go (lines 38-39, 51-86)
+   - Shows exact pattern for `--tls-cert-file` and `--tls-key-file` flags
+   - Demonstrates validation that both are required
+   - Shows how to call `interrupts.ListenAndServeTLS()`
+
+2. **Secondary reference**: cmd/webhook-server/main.go (lines 188-196)
+   - Shows TLS configuration with `tls.Config`
+   - Demonstrates `interrupts.ListenAndServeTLS()` usage
+
+3. **Infrastructure**: pkg/interrupts/interrupts.go (lines 179-187)
+   - Understand the `ListenAndServeTLS()` function signature
+   - Note the graceful shutdown handling
+
+4. **Optional features pattern**: cmd/deck/main.go (lines 664-684)
+   - Shows how Deck implements optional features with flags
+   - Example of conditional feature enablement
+
+**Implementation Checklist**:
+- [ ] Add `tlsCertFile` and `tlsKeyFile` fields to options struct
+- [ ] Register flags in `gatherOptions()` function
+- [ ] Add validation in `Validate()` method (both or neither required)
+- [ ] Modify server initialization with conditional logic
+- [ ] Add TLSConfig to http.Server when TLS enabled
+- [ ] Call appropriate ListenAndServe function based on flags
+- [ ] Write unit tests for flag parsing and validation
+- [ ] Test manually with self-signed certificates
+- [ ] Update documentation/help text for new flags
+- [ ] Repeat for both Deck and Hook components
+
+**Testing Approach**:
+- Generate self-signed certificates for local testing:
+  ```bash
+  openssl req -x509 -newkey rsa:4096 -keyout key.pem -out cert.pem -days 365 -nodes
+  ```
+- Test with flags: `--tls-cert-file=cert.pem --tls-key-file=key.pem`
+- Verify server starts with HTTPS
+- Verify health check port still HTTP
+- Test without flags to ensure HTTP mode works (backwards compat)
+
+**Questions to Consider**:
+- Should there be a separate port for TLS, or use the same port?
+  - **Answer**: Same port (simpler, matches user's use case)
+- What should happen if only one TLS flag is provided?
+  - **Answer**: Validation error (both required together)
+- Should health checks be on HTTPS too?
+  - **Answer**: No, keep on separate HTTP port for simplicity
+
+**Similar PRs to Review** (if any exist):
+- This would be the first to add this feature to Deck/Hook
+- Review how admission was implemented for TLS
+
+#### Caveats and Considerations
+
+**Important Notes**:
+
+1. **Issue author already implementing**: The issue author (NiJuFirenzia) has already indicated they're working on this and have tested the approach. Consider:
+   - Reaching out to coordinate if you want to help
+   - Letting them proceed if they're making progress
+   - Offering review/testing assistance
+
+2. **Maintainer bandwidth concerns**: Maintainer @BenTheElder noted limited bandwidth. A clean, well-tested PR following existing patterns will be easier to review and merge.
+
+3. **Certificate management is user responsibility**:
+   - This feature doesn't include certificate rotation/renewal
+   - Users must handle certificate lifecycle (via cert-manager, manual process, etc.)
+   - Document this clearly in flag help text and docs
+
+4. **Niche use case**: First request for this feature in Prow's history
+   - Validates that optional implementation is correct choice
+   - Low risk since it won't affect existing users
+   - Should remain simple and not add complexity for non-users
+
+5. **Alternative exists**: Service mesh (Istio, Linkerd) with mTLS
+   - Some orgs may prefer this architectural approach
+   - Consider documenting service mesh approach as alternative
+   - This PR provides choice for users who can't/won't use service mesh
+
+6. **Testing with real certificates**:
+   - Self-signed certs sufficient for testing
+   - Consider testing with cert-manager in a real cluster
+   - Document common certificate setups
+
+**Success Criteria**:
+- ✅ Both Deck and Hook support optional TLS flags
+- ✅ Backwards compatible (no flags = HTTP mode)
+- ✅ Validation prevents partial configuration
+- ✅ Unit tests cover flag parsing and validation
+- ✅ Manual testing confirms HTTPS works with certificates
+- ✅ Health checks remain accessible via HTTP
+- ✅ Documentation explains usage and certificate requirements
+- ✅ Code follows existing Prow patterns (admission/webhook-server)
+
 ## Next Steps
 
 1. ✅ Initial validation complete - Issue is LEGITIMATE
-2. ⏳ Run research subcommand to examine implementation details
-3. ⏳ Assess effort level and complexity
+2. ✅ Code research complete - Infrastructure exists, clear pattern to follow
+3. ✅ Effort assessment complete - Level 2 (Moderate/help-wanted)
 4. ⏳ Propose issue augmentation with technical details
 5. ⏳ Brief maintainer on findings
 6. ⏳ Finalize triage and post results

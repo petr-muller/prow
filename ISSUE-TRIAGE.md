@@ -244,6 +244,79 @@ The validation should:
 **Migration/Rollout Strategy**:
 No migration needed. Operators with overlapping contexts will get a clear error on next restart, prompting them to fix their kubeconfig. Their current configuration is already producing incorrect behavior (PipelineRun deletions).
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+The recommended fix (startup validation to detect duplicate cluster endpoints) is small in scope, follows existing patterns in the codebase, and has clear implementation path. The existing `InClusterContext → DefaultClusterAlias` deduplication in `main.go` serves as a direct template.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1-2 files (`cmd/pipeline/main.go`, possibly `pkg/kube/config.go`), estimated ~30-50 lines of new code plus tests
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Compare REST config `Host` fields across loaded contexts to detect duplicates. Straightforward map-based deduplication logic. No concurrency, no complex algorithms.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go knowledge, understanding of kubeconfig concepts (contexts, clusters). The existing code in `main.go:120-136` provides a clear template. No deep Prow internals knowledge needed.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Problem is precisely identified (two contexts → same cluster → destructive behavior). Solution approach is clear (detect at startup, error or warn). No open design questions for the recommended approach.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Add test cases to `cmd/pipeline/main_test.go` or `pkg/kube/config_test.go` following existing patterns. Test that duplicate server URLs are detected and rejected.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Configurations with overlapping contexts are already broken (PipelineRuns being deleted). Rejecting them at startup with a clear error is strictly better behavior. No working configurations would break.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: The exact same pattern (deduplicating aliased clusters) already exists for the `InClusterContext → DefaultClusterAlias` case in `main.go:127-136`. This extends that approach to the general case.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Pure Go code comparing REST config fields. No external API calls or system dependencies.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Small scope, clear solution, existing patterns to follow
+- [x] `kind/bug`: Destructive behavior (PipelineRun deletion) from valid-seeming configuration
+- [x] `area/pipeline`: Affects the pipeline (Tekton) controller
+
+### Guidance for Contributors
+
+- Good starting point for new Prow contributors with basic Go and Kubernetes knowledge
+- Suggested prerequisite knowledge: Go maps, kubeconfig structure (contexts, clusters), REST config basics
+- Key files to review before starting:
+  - `cmd/pipeline/main.go:120-164` - Current cluster config loading (the template to follow)
+  - `pkg/kube/config.go:52-71` - How configs are merged
+  - `cmd/pipeline/controller.go:463` - The code path that causes the bug (for understanding motivation)
+- Recommended approach: After loading all cluster configs in `main.go`, iterate the map and build a reverse mapping of `Host → []contextName`. If any Host has multiple context names, log an error identifying the conflicting contexts and exit.
+- Tests: Add a test case that provides two REST configs with the same Host but different context names, and verify the startup rejects them.
+
+### Caveats and Considerations
+
+- URL normalization should be considered (trailing slashes, port numbers) when comparing Host fields
+- The fix should preserve the existing `InClusterContext → DefaultClusterAlias` dedup behavior
+- An alternative approach of deduplicating silently (keeping one context, warning about the others) would also be valid but is less safe
+
 ## Next Steps
 
 (Action items will be added here)

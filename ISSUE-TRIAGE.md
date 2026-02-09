@@ -317,6 +317,43 @@ The recommended fix (startup validation to detect duplicate cluster endpoints) i
 - The fix should preserve the existing `InClusterContext → DefaultClusterAlias` dedup behavior
 - An alternative approach of deduplicating silently (keeping one context, warning about the others) would also be valid but is less safe
 
+## Proposed Issue Augmentation
+
+### Title Change
+- **Current**: Dealing with default and named clusters in prow configuration
+- **Proposed**: Pipeline controller deletes PipelineRuns when two cluster contexts share the same cluster
+- **Rationale**: Current title is vague ("Dealing with...") and doesn't mention the component or the destructive behavior. The new title is specific about what happens, which component is affected, and what triggers it.
+
+### Proposed GitHub Comment
+
+~~~
+/retitle Pipeline controller deletes PipelineRuns when two cluster contexts share the same cluster
+
+The root cause is in how the pipeline controller sets up per-cluster informers. When multiple kubeconfig contexts point to the same underlying cluster, each context gets its own independent informer watching the same resources. When a PipelineRun event arrives via the "wrong" context's informer, the reconciliation check at `cmd/pipeline/controller.go:463` (`ClusterToCtx(pj.Spec.Cluster) != ctx`) evaluates to true, setting `wantPipelineRun = false` and causing the controller to delete the PipelineRun. This only affects the pipeline (Tekton) controller; other Prow controllers operate in single-cluster mode and are not impacted.
+
+The fix would be to add startup validation in `cmd/pipeline/main.go` that detects when multiple kubeconfig contexts resolve to the same cluster API server endpoint. There's already precedent for this kind of deduplication in the same file: the `InClusterContext` → `DefaultClusterAlias` mapping at lines 127-136 handles the specific case of empty-string vs "default" aliasing. The general case (any two contexts sharing a server URL) can follow the same pattern. As a workaround until this is fixed, ensure each kubeconfig context name maps to a distinct cluster — remove the duplicate context or avoid configuring `cluster:` in ProwJobs to use a named alias that shares a cluster with `default`.
+
+/kind bug
+/good-first-issue
+~~~
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the original issue correctly identifies the code location but doesn't explain the dual-informer mechanism that causes the problem
+- Scope clarification: this is pipeline-controller-specific, not a general Prow problem
+- Fix approach: startup validation following existing patterns, giving potential contributors a clear starting point
+- Workaround: practical guidance for the reporter until a fix lands
+
+**Why these labels**:
+- `/kind bug`: This is destructive behavior (PipelineRun deletion) from a valid-seeming configuration
+- `/good-first-issue`: Level 1 effort — small scope (1-2 files, ~30-50 LOC), clear solution, existing pattern to follow
+- No `/area` label: There is no `area/pipeline` label in the repository's label taxonomy. The pipeline controller is not represented.
+
+**What's NOT included**:
+- Priority label: While destructive, this affects a specific configuration pattern and has a straightforward workaround. Not adding priority — let maintainers decide.
+- Detailed solution approaches: The comment focuses on the recommended approach. The full analysis of 3 approaches is in the triage document for maintainer reference.
+
 ## Next Steps
 
 (Action items will be added here)

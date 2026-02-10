@@ -334,7 +334,7 @@ The root cause is in how the pipeline controller sets up per-cluster informers. 
 The fix would be to add startup validation in `cmd/pipeline/main.go` that detects when multiple kubeconfig contexts resolve to the same cluster API server endpoint. There's already precedent for this kind of deduplication in the same file: the `InClusterContext` → `DefaultClusterAlias` mapping at lines 127-136 handles the specific case of empty-string vs "default" aliasing. The general case (any two contexts sharing a server URL) can follow the same pattern. As a workaround until this is fixed, ensure each kubeconfig context name maps to a distinct cluster — remove the duplicate context or avoid configuring `cluster:` in ProwJobs to use a named alias that shares a cluster with `default`.
 
 /kind bug
-/good-first-issue
+/help-wanted
 ~~~
 
 ### Rationale
@@ -347,7 +347,7 @@ The fix would be to add startup validation in `cmd/pipeline/main.go` that detect
 
 **Why these labels**:
 - `/kind bug`: This is destructive behavior (PipelineRun deletion) from a valid-seeming configuration
-- `/good-first-issue`: Level 1 effort — small scope (1-2 files, ~30-50 LOC), clear solution, existing pattern to follow
+- `/help-wanted`: While the code change is small, reasoning about multi-cluster configurations is non-trivial. Upgraded from good-first-issue per maintainer judgment.
 - No `/area` label: There is no `area/pipeline` label in the repository's label taxonomy. The pipeline controller is not represented.
 
 **What's NOT included**:

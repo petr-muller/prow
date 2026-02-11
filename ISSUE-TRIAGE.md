@@ -271,6 +271,7 @@ This is a well-defined, small-scope addition to an existing plugin. The implemen
 - One design choice to consider: whether to also detect `squash!` commits (produced by `git commit --squash`). These serve the same purpose as `fixup!` and should probably be included.
 - The shared `do-not-merge/invalid-commit-message` label means users see the same label for close-issue keywords, @mentions, AND fixup commits. The explanatory comment is what distinguishes the reason. This is acceptable but worth noting.
 - An alternative approach (Approach 2: standalone plugin) offers more granular control but is significantly more work for little benefit. The maintainer has already indicated preference for Approach 1.
+- **Merge method interaction**: Blocking `fixup!` commits is unnecessary when the repository or PR is configured for squash merge, since squash merge collapses all commits into one and the `fixup!` messages never appear in the target branch history. Rebase merge does NOT help — it replays each commit individually without `--autosquash`, so `fixup!` commits remain as separate entries. This means the feature is only useful for repos using merge commits or rebase merge. The existing `invalidcommitmsg` plugin has the same blind spot (close-issue keywords in individual commit messages are also harmless under squash merge), so this is not a new problem, but it is worth noting in the issue comment. A more sophisticated implementation could check Tide's merge method configuration, but that would significantly increase complexity beyond Level 1.
 
 ## Proposed Issue Augmentation
 
@@ -284,6 +285,8 @@ This is a well-defined, small-scope addition to an existing plugin. The implemen
 This fits naturally into the existing `invalidcommitmsg` plugin (`pkg/plugins/invalidcommitmsg/`), which already validates commit messages against patterns (close-issue keywords and @mentions) and applies the `do-not-merge/invalid-commit-message` label. The plugin uses GitHub's API to list PR commits and checks each message against regex patterns — adding `fixup!`/`amend!` detection would follow this exact pattern. It's worth also detecting `squash!` commits (produced by `git commit --squash`), which serve the same purpose and would similarly benefit from merge blocking.
 
 The implementation would involve adding a new regex (e.g., `^(fixup|amend|squash)! `), an additional check in the existing commit iteration loop at `invalidcommitmsg.go:126-131`, and a comment template guiding users to run `git rebase --autosquash` to resolve. The label management (add when detected, remove when clean) and comment pruning infrastructure are already in place and would be reused directly.
+
+One consideration: this check is only useful when PRs are merged with merge commits or rebase merge. Squash merge collapses all commits into one, so `fixup!` messages never reach the target branch. Rebase merge does NOT autosquash — it replays commits individually, preserving the `fixup!` entries. The existing `invalidcommitmsg` checks have the same blind spot (individual commit messages are irrelevant under squash merge), so this is consistent behavior, but worth keeping in mind.
 
 /good-first-issue
 ```

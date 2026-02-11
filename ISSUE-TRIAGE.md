@@ -309,7 +309,12 @@ One consideration: this check is only useful when PRs are merged with merge comm
 - Priority labels: Not warranted for an enhancement with no urgency
 - Detailed implementation plan: Would be too prescriptive; the contributor guidance in the code research covers this
 
-## Next Steps
+## Briefing Completed
 
-- Brief maintainer on findings
-- Wrap up triage
+Briefed maintainer on: 2026-02-11
+
+Key questions asked:
+- Whether fixup! commits are actually invalid when the repo uses squash or rebase merge: Squash merge makes blocking unnecessary (commits collapse). Rebase merge does NOT autosquash, so fixup! commits persist. This is a pre-existing blind spot shared with the current invalidcommitmsg checks.
+
+Maintainer decision:
+Noted the merge method caveat; updated triage notes and proposed comment accordingly. Proceeded to wrapup.

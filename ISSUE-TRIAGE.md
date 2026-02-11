@@ -272,6 +272,41 @@ This is a well-defined, small-scope addition to an existing plugin. The implemen
 - The shared `do-not-merge/invalid-commit-message` label means users see the same label for close-issue keywords, @mentions, AND fixup commits. The explanatory comment is what distinguishes the reason. This is acceptable but worth noting.
 - An alternative approach (Approach 2: standalone plugin) offers more granular control but is significantly more work for little benefit. The maintainer has already indicated preference for Approach 1.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Add a plugin to block merging PRs with `fixup!` commits" is clear, specific, and descriptive. It accurately describes the feature request and mentions the relevant concept. While it says "a plugin" and the implementation would extend an existing one, the title still conveys the intent correctly.
+
+### Proposed GitHub Comment
+
+```
+This fits naturally into the existing `invalidcommitmsg` plugin (`pkg/plugins/invalidcommitmsg/`), which already validates commit messages against patterns (close-issue keywords and @mentions) and applies the `do-not-merge/invalid-commit-message` label. The plugin uses GitHub's API to list PR commits and checks each message against regex patterns — adding `fixup!`/`amend!` detection would follow this exact pattern. It's worth also detecting `squash!` commits (produced by `git commit --squash`), which serve the same purpose and would similarly benefit from merge blocking.
+
+The implementation would involve adding a new regex (e.g., `^(fixup|amend|squash)! `), an additional check in the existing commit iteration loop at `invalidcommitmsg.go:126-131`, and a comment template guiding users to run `git rebase --autosquash` to resolve. The label management (add when detected, remove when clean) and comment pruning infrastructure are already in place and would be reused directly.
+
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Implementation direction: confirming the maintainer's suggestion to extend `invalidcommitmsg` with specific code references
+- Scope clarification: noting that `squash!` commits should also be detected
+- Implementation sketch: enough detail for a contributor to get started (regex pattern, code location, what infrastructure is reused)
+
+**Why these labels**:
+- `area/plugins`: Already applied
+- `kind/feature`: Already applied
+- `/good-first-issue`: Level 1 effort — well-defined, small scope (~30-50 LOC), follows an established pattern exactly, contained in a single plugin directory
+
+**What's NOT included**:
+- `/area plugins` and `/kind feature`: Already on the issue, no need to re-apply
+- `/retitle`: Current title is already clear and specific
+- Priority labels: Not warranted for an enhancement with no urgency
+- Detailed implementation plan: Would be too prescriptive; the contributor guidance in the code research covers this
+
 ## Next Steps
 
-- Draft augmentation comment for the issue
+- Brief maintainer on findings
+- Wrap up triage

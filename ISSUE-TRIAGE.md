@@ -195,7 +195,83 @@ This is the simpler, more pragmatic solution. The `invalidcommitmsg` plugin alre
 - Fixup commits removed (post-rebase) → label removed
 - Text containing "fixup" not at start of message → no match
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+This is a well-defined, small-scope addition to an existing plugin. The implementation follows an established pattern exactly — adding one more regex check to `invalidcommitmsg` alongside the existing two. Existing test patterns, commit-fetching infrastructure, and label management logic are all reused directly.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 2 files modified (`invalidcommitmsg.go`, `invalidcommitmsg_test.go`), estimated ~30-50 lines added (regex constant, comment template, check in loop, 3-4 test cases)
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Adding a third regex pattern to an existing check loop. The commit iteration, label management, and comment pruning logic already exist and don't need modification. The new regex (`^(fixup|amend|squash)! `) is straightforward.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go knowledge and regex understanding. The contributor can follow the exact pattern of the existing `CloseIssueRegex` and `AtMentionRegex` checks. No Prow-specific architectural knowledge needed beyond reading the single plugin file.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The desired behavior is unambiguous: match commits starting with `fixup!`, `amend!`, or `squash!`, apply the existing label, add an explanatory comment. The maintainer has already confirmed the implementation direction (extend `invalidcommitmsg`).
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Follow existing table-driven test pattern in `invalidcommitmsg_test.go`. Add 3-4 test cases: fixup commit detected, amend commit detected, fixup commits removed after rebase, "fixup" in middle of message not matched. Existing `fakegithub.NewFakeClient()` infrastructure handles all mocking.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Purely additive behavior. Existing `invalidcommitmsg` users get the new check automatically. Users not using fixup commits are completely unaffected — the regex only matches commits with specific prefixes. The same `do-not-merge/invalid-commit-message` label is reused.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Follows the existing pattern exactly — the plugin is designed to detect invalid commit message patterns and this is one more pattern. No new abstractions, interfaces, or registration needed.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Uses the same `ListPullRequestCommits()` GitHub API call that already exists. No new API endpoints or capabilities needed.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, excellent pattern to follow
+- [x] `area/plugins`: Plugin modification
+- [x] `kind/feature`: New detection capability
+- [ ] `help-needed`: Too simple for this label; better suited for new contributors
+
+### Guidance for Contributors
+
+**For Level 1 (Easy)**:
+- Good starting point for new Prow contributors
+- Suggested prerequisite knowledge: Basic Go, regular expressions
+- The entire change is contained in `pkg/plugins/invalidcommitmsg/`
+- Read `invalidcommitmsg.go` (~200 lines) — the new check follows the exact pattern of `CloseIssueRegex` and `AtMentionRegex`
+- Read `invalidcommitmsg_test.go` (~280 lines) — new test cases follow the existing table-driven pattern
+- Key steps:
+  1. Add a `FixupCommitRegex` constant (e.g., `regexp.MustCompile(`^(fixup|amend|squash)! `)`)
+  2. Add a comment template constant for fixup commits (guide users to `git rebase --autosquash`)
+  3. Add the regex check in the commit iteration loop (line ~126-131)
+  4. Add test cases for fixup detection, removal, and non-matching
+
+### Caveats and Considerations
+
+- One design choice to consider: whether to also detect `squash!` commits (produced by `git commit --squash`). These serve the same purpose as `fixup!` and should probably be included.
+- The shared `do-not-merge/invalid-commit-message` label means users see the same label for close-issue keywords, @mentions, AND fixup commits. The explanatory comment is what distinguishes the reason. This is acceptable but worth noting.
+- An alternative approach (Approach 2: standalone plugin) offers more granular control but is significantly more work for little benefit. The maintainer has already indicated preference for Approach 1.
+
 ## Next Steps
 
-- Assess effort level for extending `invalidcommitmsg`
 - Draft augmentation comment for the issue

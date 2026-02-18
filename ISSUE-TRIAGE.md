@@ -43,10 +43,142 @@ The issue was originally filed in kubernetes/test-infra and correctly migrated t
 **Suggested Action**:
 - Keep open and continue triage
 
-## Findings
+## Code Research
 
-(Further findings from triage subcommands will be added here)
+### Current Implementation
+
+**Primary Components**:
+- `targetURL()`: `pkg/tide/status.go:379-405` — Constructs the "Details" link URL for the Tide GitHub status check
+- `CodeReviewCommon`: `pkg/tide/codereview.go:83-107` — Shared struct that carries PR metadata between Tide subsystems
+- `CodeReviewCommonFromPullRequest()`: `pkg/tide/codereview.go:144-169` — Populates `CodeReviewCommon` from a GraphQL `PullRequest`
+- `PullRequest` (GraphQL model): `pkg/tide/tide.go:1914-1946` — GraphQL struct for fetching PR data
+
+**Architecture Overview**:
+Tide periodically queries GitHub's GraphQL API for open PRs. For each PR, it creates a `CodeReviewCommon` struct containing metadata including `AuthorLogin`. When setting GitHub status checks, `targetURL()` constructs a "Details" link pointing to the Prow PR dashboard with a pre-populated search query: `is:pr repo:ORG/REPO author:LOGIN head:BRANCH`.
+
+**Key Code Paths**:
+1. `pkg/tide/tide.go:1916-1918` — GraphQL `PullRequest.Author` struct only fetches `Login`, not user type
+2. `pkg/tide/codereview.go:161` — `AuthorLogin` set from `string(pr.Author.Login)` with no type info
+3. `pkg/tide/status.go:397` — Query constructed: `fmt.Sprintf("is:pr repo:%s author:%s head:%s", ..., crc.AuthorLogin, ...)`
+4. `pkg/tide/status.go:462` — `TargetURL` field set on the GitHub status via `sc.ghc.CreateStatus()`
+
+**Data Flow**:
+1. Tide sync loop queries GitHub GraphQL for PRs → `PullRequest.Author.Login` returns `"dependabot"` (no `[bot]` suffix, no type info)
+2. `CodeReviewCommonFromPullRequest()` copies `Author.Login` into `AuthorLogin` string field
+3. `targetURL()` uses `crc.AuthorLogin` directly in the `author:` query parameter
+4. For bot users, this produces `author:dependabot` instead of the required `author:app/dependabot`
+
+### Related Code
+
+**GitHub User Type System** (`pkg/github/types.go:147-163`):
+- `User` struct has a `Type string` field
+- Constants defined: `UserTypeUser = "User"`, `UserTypeBot = "Bot"`
+- This is used for REST API responses, but is NOT available in the GraphQL path
+
+**GraphQL Inline Fragments** (existing pattern in codebase):
+- `pkg/plugins/bugzilla/bugzilla.go:536` uses `graphql:"... on User"` for type discrimination
+- The shurcooL/githubv4 library supports inline fragments via struct tags
+- This pattern can be used to detect `Bot` type on the `Actor` interface
+
+### Test Coverage
+
+**Existing Tests** (`pkg/tide/status_test.go:1033-1159`):
+- `TestTargetUrl` has 7 test cases covering various configuration scenarios
+- All test cases use `AuthorLogin: "author"` (a regular user)
+- Tests verify URL construction with `author:author` in the query
+- Coverage assessment: **Missing** — no test cases for bot/app users
+
+**Test Gaps**:
+- No test for GitHub App bot users (e.g., dependabot)
+- No test for the `author:app/` prefix requirement
+
+### Documentation Review
+
+**Code Comments**:
+- `codereview.go:98-99`: "AuthorLogin is the author login from the fork on GitHub, this will be the author login from Gerrit."
+- No documentation about bot user handling
+
+**Known Limitations**:
+- The code assumes all PR authors are regular users
+- No distinction between user types in the GraphQL query or data model
+
+### Root Cause Analysis
+
+**Primary Cause**:
+The `PullRequest` GraphQL struct (`pkg/tide/tide.go:1916-1918`) only queries `Author { Login }` from the GitHub GraphQL API. The `Author` field returns a GitHub `Actor` interface, which can be a `User`, `Bot`, `Organization`, etc. Without type discrimination, there is no way to detect that an author is a GitHub App bot. For bot users, GitHub's search requires `author:app/<name>` instead of `author:<name>`, but `targetURL()` always uses the bare login.
+
+**Contributing Factors**:
+1. GitHub GraphQL API returns `"dependabot"` as the login for bot users (no `[bot]` suffix), making it indistinguishable from a regular user based on login string alone
+2. The `CodeReviewCommon` struct carries only a plain `AuthorLogin` string with no type information
+3. The existing `User.Type` field and `UserTypeBot` constant in `pkg/github/types.go` are only used for REST API responses, not in the Tide GraphQL path
+
+**Reproduction Conditions**:
+- A PR is authored by a GitHub App bot user (e.g., dependabot, renovate)
+- Tide sets a status check on the PR
+- The "Details" link uses the PR status dashboard (not the overview URL)
+- Clicking the link produces a query with `author:botname` which returns no results
+
+### Proposed Solutions
+
+#### Approach 1: Add Bot Detection via GraphQL Inline Fragment
+
+**Description**: Extend the `PullRequest.Author` GraphQL struct to include a `... on Bot` inline fragment that detects bot authors. Propagate this information through `CodeReviewCommon` and use it in `targetURL()` to prefix the author login with `app/` for bot users.
+
+**Changes**:
+- `pkg/tide/tide.go` — Add `Bot` fragment to `Author` struct: `Bot struct { Login githubql.String } \`graphql:"... on Bot"\``
+- `pkg/tide/codereview.go` — Add `AuthorIsBot bool` field to `CodeReviewCommon`; set it from `pr.Author.Bot.Login != ""`
+- `pkg/tide/status.go` — In `targetURL()`, use `author:app/<login>` when `crc.AuthorIsBot` is true
+
+**Pros**:
+- Addresses root cause directly using existing GraphQL query (no extra API calls)
+- Uses an established pattern in the codebase (`... on Bot` fragments)
+- Clean, minimal change footprint
+
+**Cons**:
+- Requires understanding of how shurcooL/githubv4 handles inline fragments
+- Need to verify the `... on Bot` fragment works correctly with the Actor interface
+
+**Affected Components**:
+- `pkg/tide/tide.go` — PullRequest struct (GraphQL model)
+- `pkg/tide/codereview.go` — CodeReviewCommon struct and factory function
+- `pkg/tide/status.go` — targetURL() function
+
+**Complexity**: Low
+
+**Backwards Compatibility**: No impact — this only changes the "Details" link URL for bot-authored PRs
+
+#### Approach 2: Construct Author Query from PR Number Instead
+
+**Description**: Instead of constructing a search query with `author:`, use a more direct query that avoids the author field entirely, relying on `repo:` and `head:` or potentially the PR number.
+
+**Pros**:
+- Avoids the bot detection problem entirely
+- Simpler conceptually
+
+**Cons**:
+- May not uniquely identify PRs (multiple forks could use the same branch name)
+- Changes the query semantics, potentially affecting dashboard behavior
+- Less informative query for the user
+
+**Complexity**: Low
+
+**Backwards Compatibility**: Could affect PR dashboard filtering behavior for all users
+
+#### Recommendation
+
+**Preferred Approach**: Approach 1 (Bot Detection via GraphQL Inline Fragment)
+
+This approach directly addresses the root cause, uses an existing codebase pattern, and has minimal blast radius. The fix is self-contained to three files and doesn't change behavior for regular users.
+
+**Key Implementation Considerations**:
+1. Verify the `... on Bot` inline fragment returns data from the GitHub GraphQL API for the `Actor` interface
+2. Consider handling other bot-like types (`Mannequin`, `EnterpriseUserAccount`) if they face the same issue
+3. The `[bot]` suffix convention is not reliable for detection since GraphQL returns bare login names
+
+**Testing Requirements**:
+- Add test case in `TestTargetUrl` for bot-authored PRs verifying `author:app/botname` format
+- Add test for regular users to ensure no regression (already covered)
 
 ## Next Steps
 
-- Proceed with research subcommand to investigate root cause and solution approaches
+- Proceed with effort assessment

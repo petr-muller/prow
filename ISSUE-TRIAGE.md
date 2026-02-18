@@ -253,6 +253,40 @@ A well-defined, small-scope bug fix touching 3 files with clear solution approac
 - The `Mannequin` and `EnterpriseUserAccount` Actor types may also need the `app/` prefix, but this is a rare edge case and can be addressed separately if needed
 - The fix should be verified against a real GitHub App bot PR to confirm the `... on Bot` fragment populates correctly
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title ("Details" link for "tide" check on GitHub PRs doesn't work for PRs authored by bot users) is specific, mentions the affected component (Tide), describes the symptom clearly, and identifies the trigger condition (bot users).
+
+### Proposed GitHub Comment
+
+```
+The root cause is in `pkg/tide/status.go`, in the `targetURL()` function that constructs the "Details" link URL. It builds a query string using `author:<login>`, where the login comes from the GraphQL `PullRequest.Author.Login` field. For GitHub App bot users like dependabot, the GraphQL API returns just `"dependabot"` as the login. However, GitHub's search syntax requires `author:app/dependabot` for App bot users. The code has no way to distinguish bot authors from regular users because the GraphQL query (defined in `pkg/tide/tide.go`) only fetches `Author { Login }` without any type discrimination on the `Actor` interface.
+
+The fix would involve adding a `... on Bot` inline fragment to the GraphQL `PullRequest.Author` struct (the shurcooL/githubv4 library supports this pattern, and there's an existing example in `pkg/plugins/bugzilla/bugzilla.go`), propagating the bot type info through `CodeReviewCommon`, and conditionally prefixing `app/` in the author query parameter when the author is a Bot. This touches three files (`pkg/tide/tide.go`, `pkg/tide/codereview.go`, `pkg/tide/status.go`) with roughly 30 lines of changes.
+
+/area tide
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: The issue author correctly identified the symptom and the fix needed in the URL, but the underlying code path and reason why the login lacks the `app/` prefix was not explained. The augmentation identifies exactly where the bug is, why the GraphQL query is insufficient, and what the fix entails.
+- Implementation guidance: Specific file paths, existing pattern reference (`bugzilla.go`), and scope of changes to help a contributor get started quickly.
+
+**Why these labels**:
+- `/area tide`: The bug is in Tide's status URL generation code
+- `/good-first-issue`: Level 1 effort assessment — small scope (3 files, ~30 LOC), clear solution using an existing codebase pattern, no architectural concerns
+
+**What's NOT included**:
+- `/kind bug`: Already present on the issue
+- `/help-wanted`: Already present; `good-first-issue` is more appropriate for a Level 1 issue. Both can coexist, so not removing it.
+- `/retitle`: Current title is already clear and specific
+- `/priority`: This is a broken link, not a critical or blocking issue
+
 ## Next Steps
 
-- Proceed with augment subcommand to prepare issue comment
+- Brief the maintainer on findings
+- Wrap up and post the comment

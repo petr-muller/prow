@@ -179,6 +179,80 @@ This approach directly addresses the root cause, uses an existing codebase patte
 - Add test case in `TestTargetUrl` for bot-authored PRs verifying `author:app/botname` format
 - Add test for regular users to ensure no regression (already covered)
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+A well-defined, small-scope bug fix touching 3 files with clear solution approach. The fix adds bot type detection via a GraphQL inline fragment and adjusts the URL query construction. Existing test patterns can be followed directly.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 3 files modified (`pkg/tide/tide.go`, `pkg/tide/codereview.go`, `pkg/tide/status.go`) plus test updates in `status_test.go`. Estimated ~30 lines of code changes.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: The fix is straightforward: add a field to the GraphQL struct, propagate a boolean, and conditionally prefix `app/` in a format string. No concurrency, no algorithmic challenges, one edge case (bot vs. non-bot).
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Requires basic Go knowledge and understanding of struct tags for the GraphQL library. The existing `... on User` pattern in `pkg/plugins/bugzilla/bugzilla.go` serves as a direct example. No Prow-specific architectural knowledge needed beyond following the data flow.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The problem is clearly described with concrete examples. The root cause is identified (missing type info in GraphQL query). The solution approach (inline fragment + conditional prefix) is unambiguous. The only minor uncertainty is verifying the `... on Bot` fragment works with the `Actor` interface, which can be validated quickly.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Add 1-2 test cases to the existing `TestTargetUrl` function following the established pattern. Set `AuthorIsBot: true` and verify the URL contains `author:app/botname`. Existing test infrastructure is sufficient.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Only changes the "Details" link URL for bot-authored PRs (which is currently broken anyway). No behavior change for regular users. No configuration changes needed.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Uses existing patterns (GraphQL inline fragments, boolean fields in `CodeReviewCommon`). Follows the established data flow. No new patterns introduced.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: GitHub GraphQL API supports the `Bot` type on the `Actor` interface. The shurcooL/githubv4 library supports inline fragments. The `author:app/` search syntax is documented GitHub behavior.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, existing patterns to follow
+- [x] `kind/bug`: Fixing broken "Details" link for bot-authored PRs
+- [x] `area/tide`: Tide component
+- [ ] `help-needed`: Already has this label, but `good-first-issue` is more appropriate given the low effort
+
+### Guidance for Contributors
+
+- Good starting point for new Prow contributors
+- Suggested prerequisite knowledge: Basic Go, understanding of Go struct tags
+- Key files to review:
+  - `pkg/tide/status.go:379-405` — the function to fix
+  - `pkg/tide/codereview.go:83-169` — the data structure and factory function
+  - `pkg/tide/tide.go:1914-1946` — the GraphQL model to extend
+  - `pkg/plugins/bugzilla/bugzilla.go:531-537` — example of `... on` fragment pattern
+  - `pkg/tide/status_test.go:1033-1159` — existing tests to extend
+
+### Caveats and Considerations
+
+- The existing `help wanted` label should be replaced with `good-first-issue` since this is a Level 1 issue
+- The `Mannequin` and `EnterpriseUserAccount` Actor types may also need the `app/` prefix, but this is a rare edge case and can be addressed separately if needed
+- The fix should be verified against a real GitHub App bot PR to confirm the `... on Bot` fragment populates correctly
+
 ## Next Steps
 
-- Proceed with effort assessment
+- Proceed with augment subcommand to prepare issue comment

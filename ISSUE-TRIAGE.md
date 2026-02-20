@@ -203,6 +203,80 @@ Approach 3 (liveness probe) is complementary: it provides observability and auto
 - Test that legitimate removal of a single presubmit still works
 - Test that metrics/logging fire when suspicious delta is detected
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+The fix requires adding config sanity validation in the status-reconciler's reconciliation path and optionally adding health/metrics signaling. The problem is well-understood, the solution is clear, and the scope is contained to a few files, but it requires understanding the config agent delta mechanism and careful consideration of edge cases (legitimate vs corrupted empty config).
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-Moderate
+- **Details**: Primary fix in `pkg/statusreconciler/controller.go` (validation in `removedPresubmits()` or `reconcile()`), plus tests. Optional additions in `cmd/status-reconciler/main.go` for health/metrics. Estimated 2-4 files, ~100-200 lines including tests.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: The fix itself is straightforward (check if new config is empty before retiring), but choosing the right validation heuristic requires thought. Need to distinguish "all jobs removed due to corruption" from "legitimate removal of jobs for one repo". Per-repo vs global check is a design decision. The config agent delta mechanism needs to be understood.
+- **Level Indication**: 2-3
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires understanding of the config agent subscription/delta mechanism, the status-reconciler's reconciliation loop, and how presubmits are structured in config. Familiarity with Prow config patterns is helpful. Can be learned from reading the relevant code.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The problem is precisely described with log evidence. The solution direction (refuse to retire when config is empty/corrupted) is clear. The main design question is the exact validation heuristic, which is a bounded decision.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Need to add test cases for the empty-config scenario in `controller_test.go`, following existing test patterns for `removedPresubmits()`. Existing test infrastructure is sufficient. No integration tests needed.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: The fix only prevents destructive actions that should never happen. No behavior change for legitimate config changes. No configuration changes required for the primary fix.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Adding validation before destructive operations fits naturally with Prow's patterns. The config agent delta mechanism is not being changed, only consumed more carefully. Health probe integration follows existing Prow patterns.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: No external API changes needed. All changes are internal to Prow's config and status-reconciler components.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `kind/bug`: This is a bug fix for catastrophic behavior
+- [x] `area/status-reconciler`: Already applied
+- [x] `help-wanted`: Already applied; appropriate for a skilled contributor
+- [ ] `good-first-issue`: Requires understanding of config agent delta mechanism, not ideal for first-timers
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and willing to learn the config agent pattern
+- Should review:
+  - `pkg/statusreconciler/controller.go` (reconciliation logic, `removedPresubmits()`)
+  - `pkg/config/agent.go` (how deltas are created and broadcast)
+  - `pkg/statusreconciler/controller_test.go` (existing test patterns)
+- Recommended approach: Add a validation check in `removedPresubmits()` or `reconcile()` that detects when the new config has zero presubmits but the old config had many, and logs an error + skips retirement in that case
+- Consider adding a metric to track when this safety check fires
+
+### Caveats and Considerations
+
+- The issue already has `help-wanted` label, which aligns with the Level 2 assessment
+- The optional liveness probe / metrics additions could push this toward Level 3 if pursued as part of the same change, but the core safety fix is Level 2
+- A broader fix at the config agent level (Approach 2 from research) would be Level 3 due to the shared infrastructure impact, but is not the recommended approach
+
 ## Next Steps
 
 (Action items will be added here)

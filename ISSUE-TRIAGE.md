@@ -277,6 +277,41 @@ The fix requires adding config sanity validation in the status-reconciler's reco
 - The optional liveness probe / metrics additions could push this toward Level 3 if pursued as part of the same change, but the core safety fix is Level 2
 - A broader fix at the config agent level (Approach 2 from research) would be Level 3 due to the shared infrastructure impact, but is not the recommended approach
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "status-reconciler started retiring whole world when its configuration became corrupted" is clear, specific, mentions the component, and accurately describes the catastrophic behavior.
+
+### Proposed GitHub Comment
+
+```
+## Code-Level Root Cause
+
+The vulnerability is in the `removedPresubmits()` function (`pkg/statusreconciler/controller.go:405-434`). When a config delta arrives, this function iterates all presubmits in the **old** config and marks any not found in the **new** config as "removed". There is no validation that the new config is non-empty or reasonable. When `Load()` succeeds with an empty job config (e.g. because git-sync left the config directory empty rather than failing outright), the config agent at `pkg/config/agent.go:372-374` calls `Set()` unconditionally, creating a delta where every presubmit appears "removed". The downstream `retireRemovedContexts()` at `controller.go:291-319` then retires all of them without any circuit breaker.
+
+## Suggested Fix Approach
+
+The primary fix should add config sanity validation before retirement: if the new config has zero presubmits but the old config had many, refuse to retire and log an error. This check belongs in `removedPresubmits()` or `reconcile()`. A per-repo check (detecting when all presubmits for a given org/repo disappear while others remain) would be more precise than a global check, since legitimate removal of all jobs for a single repo is plausible but all jobs for all repos disappearing is not. Adding a metric for when this safety check fires would help with monitoring. The liveness probe approach mentioned in the issue is complementary but doesn't cover the case where `Load()` succeeds with empty config (which is what happened here). Existing test patterns in `controller_test.go` for `removedPresubmits()` can be extended to cover the empty-config scenario.
+```
+
+### Rationale
+
+**What's being added**:
+- Specific code locations where the vulnerability exists (file:line references to `removedPresubmits()`, `retireRemovedContexts()`, config agent `Set()`)
+- The exact mechanism chain: `Load()` succeeds with empty config → `Set()` broadcasts delta unconditionally → `removedPresubmits()` marks everything as removed → `retireRemovedContexts()` retires without circuit breaker
+- Concrete fix approach with per-repo vs global check guidance, and pointer to existing test patterns
+- Note that the liveness probe approach alone is insufficient (doesn't cover successful-but-empty Load)
+
+**Why these labels**:
+- All appropriate labels (`kind/bug`, `area/status-reconciler`, `help-wanted`) are already applied
+
+**What's NOT included**:
+- No `/retitle`: current title is already clear and specific
+- No label commands: all appropriate labels already applied
+- No `/priority`: while this is severe, it's a latent vulnerability rather than an active blocker, and adding priority might imply urgency beyond the existing `help-wanted` invitation
+- No `/good-first-issue`: this requires understanding the config agent delta mechanism, making it unsuitable for first-time contributors
+
 ## Next Steps
 
 (Action items will be added here)

@@ -40,9 +40,168 @@ Keep open and continue triage. This is a well-documented, high-severity bug repo
 **Suggested Action**:
 - Keep open and continue triage
 
-## Findings
+## Code Research
 
-(Research findings will be added here)
+### Current Implementation
+
+**Primary Components**:
+- **statusController**: `pkg/statusreconciler/status.go` - Manages config agent lifecycle, subscribes to config deltas
+- **Controller**: `pkg/statusreconciler/controller.go` - Reconciles GitHub statuses when config changes are detected
+- **Config Agent**: `pkg/config/agent.go` - Loads and polls for config changes, broadcasts deltas to subscribers
+- **Main entry**: `cmd/status-reconciler/main.go` - Creates controller, starts agent, runs reconciliation loop
+
+**Architecture Overview**:
+The status-reconciler watches for Prow configuration changes via the config agent. When the agent detects a config file modification (polling loop), it loads the new config, computes a delta (old vs new), and broadcasts it. The controller receives the delta and reconciles GitHub statuses by: (1) triggering newly added blocking presubmits, (2) retiring removed contexts, and (3) migrating renamed contexts.
+
+**Key Code Paths**:
+1. Config initialization: `pkg/statusreconciler/status.go:57-71` - Creates agent, loads saved state, subscribes to deltas
+2. Run loop: `pkg/statusreconciler/controller.go:161-183` - Waits for config deltas, calls reconcile
+3. Reconcile dispatcher: `pkg/statusreconciler/controller.go:185-209` - Routes changes to retire/trigger/migrate handlers
+4. Removed presubmit detection: `pkg/statusreconciler/controller.go:405-434` - Compares old vs new config to find removed jobs
+5. Context retirement: `pkg/statusreconciler/controller.go:291-319` - Retires contexts on all open PRs for removed jobs
+6. Config agent polling: `pkg/config/agent.go:338-379` - Polls config files, loads changes, broadcasts deltas
+7. Delta creation: `pkg/config/agent.go:401-424` - Creates delta from old and new config, broadcasts to subscribers
+
+**Data Flow**:
+1. Config agent polls config files for modification time changes (`agent.go:356-366`)
+2. On change, calls `Load()` to parse config (`agent.go:368`)
+3. On load error, logs and continues (old config preserved) (`agent.go:369-371`)
+4. On load success, calls `Set(c)` which creates delta and broadcasts (`agent.go:372-374`, `401-424`)
+5. Status controller receives delta via subscription channel (`controller.go:170`)
+6. `removedPresubmits()` compares old vs new to find removed jobs (`controller.go:405-434`)
+7. `retireRemovedContexts()` sets "Context retired without replacement" on all matching PRs (`controller.go:291-319`)
+
+### Root Cause Analysis
+
+**Primary Cause**:
+When git-sync fails and the config directory becomes empty/corrupted, the config agent's `Load()` function can either:
+- **Fail and return error**: Agent logs the error and keeps old config (safe path)
+- **Succeed with empty/minimal config**: Agent calls `Set()` with the empty config, creating a delta that shows ALL presubmits as "removed" (catastrophic path)
+
+The second scenario is what happened in the reported incident. The `removedPresubmits()` function at `controller.go:405-434` has **no validation** that the new config is non-empty or reasonable. It simply iterates all old presubmits and marks any not found in the new config as "removed". When the new config is empty, **all** presubmits are marked as removed.
+
+**Contributing Factors**:
+1. **No config sanity validation**: `removedPresubmits()` does not check if `new` is empty before treating it as authoritative
+2. **No circuit breaker**: `retireRemovedContexts()` at `controller.go:291-319` has no protection against retiring "too many" contexts at once
+3. **Config agent trusts Load() results unconditionally**: `agent.go:372-374` calls `Set(c)` on any successful load, even if the resulting config has zero presubmits
+4. **No distinction between "intentional removal" and "config load failure"**: The delta mechanism cannot distinguish between a legitimate config change that removes all jobs and a corrupted/empty config
+
+**Reproduction Conditions**:
+- Git-sync sidecar fails to fetch config repository
+- Config directory becomes empty or contains only partial/base config
+- Config agent's `Load()` succeeds (returns `*Config` with empty job maps instead of error)
+- Delta broadcast triggers mass retirement of all presubmits
+
+### Related Code
+
+**Dependencies**:
+- `pkg/config`: Config loading, agent, delta mechanism
+- `pkg/statusreconciler/migrator`: Actual GitHub status operations (retire, migrate)
+- `pkg/github`: GitHub API client for creating statuses
+
+**Similar Functionality**:
+- Other Prow controllers that subscribe to config deltas face the same risk if they act destructively on "removed" items
+
+### Test Coverage
+
+**Existing Tests**:
+- `pkg/statusreconciler/status_test.go`: Tests state load/save and initial config loading (lines 46-232)
+- `pkg/statusreconciler/controller_test.go`: Tests `addedBlockingPresubmits()` (lines 35-251) and `removedPresubmits()` (lines 253-399)
+
+**Test Gaps**:
+- No test for config loading failure scenario
+- No test for empty config being loaded after previously having content
+- No test for the "retire all contexts when config becomes empty" catastrophic scenario
+- No test for git-sync failure while controller is running
+- No test validating circuit breaker or sanity checks (because none exist)
+
+### Proposed Solutions
+
+#### Approach 1: Config Sanity Validation in removedPresubmits()
+
+**Description**: Add validation in `removedPresubmits()` and/or `reconcile()` to detect and refuse to act on suspicious deltas where the new config is empty or has drastically fewer jobs than the old config.
+
+**Pros**:
+- Directly prevents the catastrophic scenario
+- Simple to implement
+- Minimal changes to existing architecture
+
+**Cons**:
+- Heuristic-based (what threshold is "suspicious"?)
+- Could block legitimate mass removal of jobs (rare but possible)
+- Only protects status-reconciler, not other delta consumers
+
+**Affected Components**:
+- `pkg/statusreconciler/controller.go`: Add validation before retirement
+
+**Complexity**: Low
+
+**Backwards Compatibility**: No impact - adds safety checks only
+
+#### Approach 2: Config Agent Validation (prevent empty config from being Set)
+
+**Description**: Add validation in the config agent's `Set()` or polling loop to refuse to accept a config that has zero presubmits when the previous config had many. This protects all delta consumers, not just status-reconciler.
+
+**Pros**:
+- Protects all config delta consumers system-wide
+- Prevents the bad delta from ever being created
+- Centralized fix
+
+**Cons**:
+- May be too broad - some deployments may legitimately have zero presubmits
+- Harder to define "valid" config universally
+- Config agent is shared infrastructure, higher risk of unintended effects
+
+**Affected Components**:
+- `pkg/config/agent.go`: Add validation in Set() or polling loop
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: Could affect deployments with legitimately empty configs
+
+#### Approach 3: Liveness/Readiness Probe + Metrics (issue's suggested approach)
+
+**Description**: When config loading fails, flip the liveness probe to unhealthy and expose metrics indicating the reconciler is not actuating. This causes Kubernetes to restart the pod, preventing stale empty config from causing retirement.
+
+**Pros**:
+- Leverages Kubernetes health check infrastructure
+- Observable via metrics
+- Follows cloud-native patterns
+
+**Cons**:
+- Doesn't prevent the issue if `Load()` succeeds with empty config (it's not a load failure per se)
+- Only addresses the "load error" scenario, not the "load succeeds with empty config" scenario
+- Pod restart loop if config remains unavailable
+
+**Affected Components**:
+- `cmd/status-reconciler/main.go`: Health endpoint logic
+- `pkg/config/agent.go`: Error signaling
+
+**Complexity**: Medium
+
+**Backwards Compatibility**: Requires deployment config changes for health probes
+
+#### Recommendation
+
+**Preferred Approach**: Combination of Approach 1 and Approach 3
+
+Approach 1 (config sanity validation) should be the primary fix because it directly prevents the catastrophic retirement regardless of how the empty config arrived. The validation should:
+- Refuse to retire contexts if the new config has zero presubmits and the old config had any
+- Log a clear error when this condition is detected
+- Expose a metric for monitoring
+
+Approach 3 (liveness probe) is complementary: it provides observability and auto-recovery when config loading is genuinely failing.
+
+**Key Implementation Considerations**:
+1. The validation must distinguish between "config became empty due to corruption" and "legitimate removal of all jobs for a repo"
+2. A per-repo check may be better than a global check: if all presubmits for a specific org/repo disappear while others remain, that's suspicious
+3. Adding a metric for "contexts retired" count would help with monitoring
+4. Tests must cover the empty-config scenario
+
+**Testing Requirements**:
+- Test that empty new config does NOT cause retirement when old config had presubmits
+- Test that legitimate removal of a single presubmit still works
+- Test that metrics/logging fire when suspicious delta is detected
 
 ## Next Steps
 

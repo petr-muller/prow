@@ -291,6 +291,47 @@ This is a well-defined feature addition to the trigger plugin that requires modi
 - The threshold value (default 3 merged PRs) is somewhat arbitrary. Making it configurable avoids debates about the "right" number.
 - Consider whether the search should be org-scoped (as proposed) or repo-scoped. Org-scoped is better for contributor experience but requires broader API permissions.
 
+## Proposed Issue Augmentation
+
+### Title Change
+- **Current**: "Feature Request: Issue Org Invitations"
+- **Proposed**: "Trigger: invite repeat contributors to join org in ok-to-test message"
+- **Rationale**: The current title is ambiguous ("Issue Org Invitations" could mean "issue" as in GitHub issue or as a verb). The new title names the affected component (trigger), describes what it does, and where (ok-to-test message).
+
+### Proposed GitHub Comment
+
+```
+/retitle Trigger: invite repeat contributors to join org in ok-to-test message
+
+The trigger plugin's welcome message for non-org-member PRs is generated in `pkg/plugins/trigger/pull-request.go` (`welcomeMsg()` function). It currently includes a generic line: _"Regular contributors should join the org to skip this step"_, but this is buried and vague. The proposed enhancement would make this invitation bold, prominent, and conditional on the contributor's actual merged PR history.
+
+Implementation-wise, the GraphQL approach from the issue would work, but Prow's GitHub client already has a REST-based `FindIssuesWithOrg()` method (in `pkg/github/client.go`) that can query `type:pr author:{user} org:{org} is:merged` to get the count. This avoids defining new GraphQL types while achieving the same result. The trigger plugin's config struct (in `pkg/plugins/config.go`) already has a `JoinOrgURL` field that should be reused for the invitation link. New config fields would control the threshold and feature toggle, defaulting to disabled for backwards compatibility.
+
+Existing test infrastructure (`fakegithub.FakeClient`, table-driven tests in `pull-request_test.go`) provides clear patterns to follow for testing the new behavior with mocked search results.
+
+/area plugins
+```
+
+### Rationale
+
+**What's being added**:
+- Implementation location (`welcomeMsg()` in `pull-request.go`) — not mentioned in the original issue
+- That a REST alternative to the proposed GraphQL exists and is already available in the codebase
+- Reference to existing config field (`JoinOrgURL`) that should be reused
+- Test infrastructure guidance for contributors
+
+**Why these labels**:
+- `/area plugins`: The trigger plugin lives under `pkg/plugins/trigger/`; `area/plugins` is the most specific available label
+- No `/kind feature`: Already applied
+- No `/help-wanted`: Already applied
+- No `/priority`: Already has `priority/backlog`, which is appropriate for a nice-to-have enhancement
+
+**What's NOT included**:
+- `/kind feature` and `/help-wanted` — already on the issue
+- Priority change — `priority/backlog` is correct for this enhancement
+- Detailed implementation steps — the issue is well-specified enough; a contributor can figure out the details from the code references provided
+
 ## Next Steps
 
-- Propose augmented issue content
+- Brief the maintainer on findings
+- Wrap up triage

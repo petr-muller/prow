@@ -339,4 +339,4 @@ Key questions asked:
 - None — maintainer acknowledged all slides without additional questions
 
 Maintainer decision:
-Proceed with wrapup and posting the augmentation comment.
+Do not post augmentation comment. Triage document preserved for reference.

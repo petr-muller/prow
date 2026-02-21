@@ -241,6 +241,41 @@ Well-defined feature with clear precedent in the codebase (branchprotector, merg
 - Contributors should consider whether to treat `includedBranches`/`excludedBranches` entries as regex always (branchprotector approach) or add a way to distinguish exact vs regex (more complex but gives users control).
 - The recommended approach (always regex) is simpler and fully backwards compatible since exact strings are valid regex.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Add regex support for branch matching in Tide status controller" is clear, specific, and mentions the component.
+
+### Proposed GitHub Comment
+
+```
+Beyond branchprotector, regex-based branch matching is already used in two other places in the codebase: the `TideBranchMergeType` config (`pkg/config/tide.go:42-49`) uses compiled `*regexp.Regexp` to match branches for merge method selection, and the `Brancher` struct in job config (`pkg/config/jobs.go:400-414`) uses `CopyableRegexp` for `branches`/`skip_branches` filtering. These provide well-tested patterns to follow for the implementation. The core change is in `pkg/tide/status.go:148-157` where `requirementDiff()` currently uses `==` for branch comparison — this needs to switch to `MatchString()` on compiled regex patterns.
+
+One subtlety worth noting: GitHub's Search API `base:` operator (used in `TideQuery.constructQuery()` at `pkg/config/tide.go:578-583`) only supports exact branch matching. This means regex patterns in `includedBranches`/`excludedBranches` cannot be passed through to the search query — they would need to be filtered locally in `requirementDiff()` after GitHub returns results. Since exact strings are valid regex, treating all entries as regex patterns (the branchprotector approach) is fully backwards compatible and keeps the implementation simple.
+
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Broader precedent: The issue only mentions branchprotector, but two other Prow components (TideBranchMergeType, Brancher) also use regex for branch matching. This strengthens the case and gives implementers more examples to follow.
+- Specific code locations for the change: exact lines in status.go where matching occurs, with the recommended approach (MatchString instead of ==).
+- GitHub Search API subtlety: A key design consideration the issue doesn't mention — the `base:` operator doesn't support regex, so filtering must happen locally.
+- Backwards compatibility note: Reassurance that treating all entries as regex is safe.
+
+**Why these labels**:
+- `/help-wanted`: Level 2 effort — well-defined, clear precedent, moderate scope, suitable for skilled contributors
+- `area/tide` and `kind/feature` are already applied
+
+**What's NOT included**:
+- No `/retitle`: Current title is already specific and clear
+- No `/priority`: This is an enhancement, not a bug or urgent issue
+- No `/good-first-issue`: The GitHub API subtlety and need to understand the config validation pipeline put this above entry level
+- Not repeating what the issue already says about branchprotector inconsistency
+
 ## Next Steps
 
-- Augment the issue with technical findings
+- Brief the maintainer on findings
+- Wrapup: push branches and post comment

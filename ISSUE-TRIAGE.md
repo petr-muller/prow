@@ -161,7 +161,86 @@ This is the simplest path and follows the established branchprotector pattern. S
 - Test invalid regex patterns are caught during validation
 - Test interaction between GitHub search (exact) and local regex filtering
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+Well-defined feature with clear precedent in the codebase (branchprotector, merge method config both already implement regex branch matching). Touches 4-5 files, ~100-200 lines. The main subtlety is the GitHub Search API limitation requiring a two-level filtering design, which lifts this above a good-first-issue.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-Moderate
+- **Details**: ~4-5 files (pkg/config/tide.go, pkg/tide/status.go, plus their test files, possibly pkg/config/config.go for validation pipeline). Estimated 100-200 LOC changes.
+- **Level Indication**: 2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: The regex implementation pattern is well-established, but the contributor must understand the two-level filtering: GitHub Search API uses exact `base:` matching while `requirementDiff()` does local matching. Regex patterns cannot be passed to GitHub search, so they only filter locally. This is a design subtlety that needs to be handled correctly.
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Needs understanding of Tide config loading pipeline, status evaluation flow, and Go's `regexp` package. However, existing code provides clear examples to follow (TideBranchMergeType, branchprotector).
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Problem is clear, solution approach is clear, precedent exists. The only open question is how to handle regex patterns in GitHub search queries (skip them or try to approximate).
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple-Moderate
+- **Details**: Add test cases following existing patterns in status_test.go and tide_test.go. Need to test regex patterns, exact string backwards compatibility, invalid regex rejection, and the two-level filtering interaction.
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Exact strings are valid regex patterns (`"main"` matches the string "main" as both exact and regex). No existing configs would break.
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Three other components (branchprotector, merge method, Brancher) already use regex for branch matching. This change brings Tide queries in line with established patterns.
+- **Level Indication**: 1
+
+#### External Dependencies
+- **Assessment**: Minor limitation
+- **Details**: GitHub Search API's `base:` operator doesn't support regex. Regex patterns must be filtered locally after GitHub returns results. This means regex-heavy configs may fetch more PRs than needed from GitHub, but `requirementDiff()` will correctly narrow results.
+- **Level Indication**: 2
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined, moderate scope, good for skilled contributors
+- [x] `area/tide`: Core Tide functionality
+- [x] `kind/feature`: New capability
+- [ ] `good-first-issue`: The GitHub API subtlety and config pipeline understanding make this above entry level
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and willing to learn Tide's config system
+- Should review:
+  - `pkg/config/tide.go:504-520` - TideQuery struct
+  - `pkg/config/tide.go:42-49` - TideBranchMergeType (regex precedent)
+  - `pkg/tide/status.go:148-157` - Current exact matching logic
+  - `cmd/branchprotector/protect.go:312-345` - Branchprotector regex pattern
+  - `pkg/config/config.go:2850-2864` - Regex compilation during validation
+- Recommended approach:
+  1. Add compiled regex fields to TideQuery (or helper struct)
+  2. Compile regexes during config validation in the existing validation pipeline
+  3. Update `requirementDiff()` to use `MatchString()` instead of `==`
+  4. Handle GitHub search construction: skip regex patterns in `base:` queries
+  5. Add comprehensive tests
+
+### Caveats and Considerations
+
+- The GitHub Search API limitation means regex patterns only filter locally, not at the API level. This is acceptable but should be documented.
+- Contributors should consider whether to treat `includedBranches`/`excludedBranches` entries as regex always (branchprotector approach) or add a way to distinguish exact vs regex (more complex but gives users control).
+- The recommended approach (always regex) is simpler and fully backwards compatible since exact strings are valid regex.
+
 ## Next Steps
 
-- Assess effort level
 - Augment the issue with technical findings

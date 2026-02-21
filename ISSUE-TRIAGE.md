@@ -213,7 +213,84 @@ The REST search API is preferred over GraphQL because it uses existing, well-und
 - Tests for API failure fallback behavior
 - Mock `FindIssuesWithOrg()` in existing test infrastructure
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+This is a well-defined feature addition to the trigger plugin that requires modifying 4-6 files, adding ~200-300 lines of code, and understanding the trigger plugin architecture. The solution is clear, uses existing infrastructure (GitHub search API, config patterns, test fakes), and is fully backwards compatible. It's not trivial enough for a first-time contributor but is well-suited for someone with some Go and Prow familiarity.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: 4-6 files affected: `config.go` (new config fields), `pull-request.go` (message logic, history lookup), possibly `trigger.go` (interface extension), plus corresponding test files. Estimated ~200-300 LOC.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: Simple to Moderate
+- **Details**: Core logic is straightforward — query PR count, compare against threshold, modify message. No concurrency issues. Edge cases include API failures (need graceful fallback) and threshold boundary conditions.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires understanding the trigger plugin architecture (event handling, trust checking, message generation), the Prow config system, and how to use the GitHub client's search API. All learnable from existing code.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The issue provides a sample message, a query approach, and clear motivation. Minor design decisions remain (exact config field names, threshold default, message wording) but none are blocking.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Follow existing table-driven test patterns with `fakegithub.FakeClient`. Need to add search result mocking to the fake client (or add a method to the test interface). Test cases: below/at/above threshold, API failure fallback, feature disabled.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: New config fields default to disabled. Existing deployments see zero behavior change unless they opt in. The existing "Regular contributors should join the org" message remains as-is by default.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Follows existing patterns exactly — new config fields in the Trigger struct, conditional message logic in `welcomeMsg()`, GitHub API calls via the existing client interface. Similar to existing draft PR message variation.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: GitHub search API is stable, well-documented, and already used elsewhere in Prow (`FindIssuesWithOrg()`). Rate limits exist but a single search per PR open event is negligible.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined, moderate scope, good for a skilled contributor
+- [x] `kind/feature`: New feature addition
+- [ ] `good-first-issue`: Requires understanding multiple components, not suitable for first-time contributors
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and the Prow plugin system
+- Should review:
+  - `pkg/plugins/trigger/pull-request.go` — `welcomeMsg()` function and `handlePR()` flow
+  - `pkg/plugins/trigger/trigger.go` — `TrustedUser()` and client interfaces
+  - `pkg/plugins/config.go` — Trigger config struct
+  - `pkg/plugins/trigger/pull-request_test.go` — existing test patterns
+- Recommended approach:
+  1. Add config fields to Trigger struct (`RepeatContributorInvitation`, `RepeatContributorThreshold`)
+  2. Add a function to query merged PR count via `FindIssuesWithOrg()`
+  3. Modify `welcomeMsg()` to conditionally include a bold org invitation
+  4. Add tests following existing table-driven patterns
+- The `JoinOrgURL` config field already exists and should be reused for the invitation link
+
+### Caveats and Considerations
+
+- The issue is from 2024 (migrated from 2019 in test-infra). The original context was Kubernetes-specific contributor experience. Prow is now a standalone project and deployments vary — the feature should be generic enough for any Prow deployment, not just Kubernetes.
+- The threshold value (default 3 merged PRs) is somewhat arbitrary. Making it configurable avoids debates about the "right" number.
+- Consider whether the search should be org-scoped (as proposed) or repo-scoped. Org-scoped is better for contributor experience but requires broader API permissions.
+
 ## Next Steps
 
-- Assess effort level
 - Propose augmented issue content

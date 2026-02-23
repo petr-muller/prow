@@ -298,6 +298,51 @@ This is an exploratory feature request whose feasibility is fundamentally constr
 - Conversely, if API verification confirms no nested query support, the issue may need to be rescoped to focus only on internal optimizations (still Level 2-3) or closed as infeasible in its current form
 - The issue is 8 months old with only bot activity — the exploration work has not been started by anyone
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Explore GitHub's Improved Search API" is accurate and appropriate for an exploratory issue.
+
+### Proposed GitHub Comment
+
+```
+## API Availability Constraint
+
+A key question for this issue is whether the new nested query and boolean operator features are available through GitHub's REST Search API (`/search/issues`) and GraphQL API (`search` connection), which is what Prow actually uses. The blog posts and documentation describe these features in the context of the web UI Issues search, which was rebuilt on a new AST-based parser backed by Elasticsearch. The REST API documentation mentions support for AND, OR, and NOT operators but limits queries to a maximum of 5 such operators and 256 characters (excluding operators/qualifiers), and does not document support for parentheses. Verifying actual API support with test queries would be a useful first step before investing in implementation work.
+
+## Additional Search API Consumers
+
+Beyond the five code locations listed in the issue, three more plugins also use the Search API: the blunderbuss plugin (`pkg/plugins/blunderbuss/blunderbuss.go`) for SHA-based PR lookups on status events, the welcome plugin (`pkg/plugins/welcome/welcome.go`) to check for first-time contributors, and the CLA plugin (`pkg/plugins/cla/cla.go`) for SHA-based PR lookups with retry logic. These use the REST API via `FindIssues`/`FindIssuesWithOrg` with simple queries, so they are less likely to benefit from boolean operators than the Tide and needs-rebase components. The needs-rebase plugin's special-case sharding for the kubernetes org (splitting into 3 queries by creation date to work around the 1000-result cap) is the most obvious optimization target.
+
+## Suggested Approach
+
+Rather than designing a new configuration language upfront (which may be premature given the API uncertainty), the most practical path forward would be: (1) verify REST/GraphQL API support for boolean operators and parentheses via manual `gh api` calls, (2) if supported, investigate merging TideQuery objects within the 5-operator limit, and (3) explore internal query optimizations that reduce API calls regardless of boolean operator support.
+
+/remove-lifecycle stale
+```
+
+### Rationale
+
+**What's being added**:
+- API availability constraint: The issue links to GitHub blog posts about improved search but doesn't address whether these features work through the programmatic APIs Prow uses. This is the critical feasibility question.
+- Additional consumers: Three more plugins using Search API that the issue didn't identify.
+- Practical approach: Concrete first steps instead of jumping to implementation.
+
+**Why these labels**:
+- `area/tide` and `kind/feature` are already applied — no changes needed
+- No difficulty label: Level 3 issue requires expertise, not appropriate for good-first-issue or help-wanted
+- `/remove-lifecycle stale`: Issue has active maintainer interest (reopened by stmcginnis), should be fresh
+
+**What's NOT included**:
+- No `/retitle`: Current title is appropriate for an exploratory issue
+- No additional area labels: While plugins like blunderbuss/welcome/cla are affected, the primary impact is on Tide
+- No priority label: This is exploratory work, not urgent
+- No difficulty label: Level 3 — experienced contributors will self-select
+
 ## Next Steps
 
-(Action items will be added here)
+1. Verify GitHub REST/GraphQL API support for boolean operators and parentheses
+2. If supported: investigate TideQuery merging within API constraints
+3. If not supported: focus on internal query optimizations (e.g., needs-rebase sharding)
+4. Consider rescoping issue based on API verification results

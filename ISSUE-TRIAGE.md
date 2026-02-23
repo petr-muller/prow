@@ -219,6 +219,85 @@ Approach 2 is premature until the API situation is clarified and there's demonst
 - Integration tests verifying merged queries return same results as individual queries
 - API rate limit impact measurement
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+This is an exploratory feature request whose feasibility is fundamentally constrained by GitHub's API capabilities. The core premise (leveraging nested queries and boolean operators) may not be available through the APIs Prow uses. Even within achievable scope, changes touch critical search infrastructure across multiple components and require deep understanding of Prow's architecture, GitHub's API constraints, and Tide's query model.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Large
+- **Details**: 8 components use the Search API across 7+ files. Any meaningful improvement touches Tide config (`pkg/config/tide.go`), Tide search (`pkg/tide/github.go`), blockers (`pkg/tide/blockers/blockers.go`), and possibly needs-rebase plugin. Estimated 500+ LOC for a full implementation.
+- **Level Indication**: 3-4
+
+#### Complexity
+- **Assessment**: High
+- **Details**: Query merging requires correct boolean logic composition, preserving org-scoped isolation for GitHub Apps auth, respecting API constraints (5 operators, 256 chars, 1000 results), and handling edge cases where merged queries exceed limits. Sharding strategies add further complexity.
+- **Level Indication**: 3-4
+
+#### Required Expertise
+- **Assessment**: Deep
+- **Details**: Requires understanding of: Prow's Tide architecture, GitHub Search API (REST + GraphQL) constraints and behavior, TideQuery configuration model, org-scoped auth isolation, and the needs-rebase sharding workaround. Also requires ability to verify API capabilities empirically.
+- **Level Indication**: 3-4
+
+#### Clarity and Certainty
+- **Assessment**: Significant uncertainty
+- **Details**: The fundamental question — whether GitHub's REST/GraphQL APIs actually support the new nested query features — is unanswered. The issue is exploratory ("we should explore whether these improvements offer opportunities"), meaning the scope of achievable work is unknown until API capabilities are verified.
+- **Level Indication**: 3-4
+
+#### Testing Requirements
+- **Assessment**: Complex
+- **Details**: Any query merging or optimization requires verifying that merged queries return identical results to individual queries. This needs integration-style testing against actual GitHub API behavior, not just unit tests. Existing test patterns cover query string generation but not semantic equivalence of merged queries.
+- **Level Indication**: 3-4
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible (Approach 3) / Minor impact (Approach 2)
+- **Details**: Internal query optimization (Approach 3) is fully backwards compatible. A new configuration language (Approach 2) would be additive but requires maintaining two config formats. No breaking changes expected.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit with minor extensions
+- **Details**: Query optimization fits naturally within Prow's existing architecture. A new configuration language would extend the existing TideQuery model. Neither approach contradicts Prow's design.
+- **Level Indication**: 2-3
+
+#### External Dependencies
+- **Assessment**: Limited by external API capabilities
+- **Details**: The entire feature is constrained by what GitHub's Search API supports. The API has hard limits (5 boolean operators, 256 chars, 1000 results, no documented parentheses support) that may prevent the most impactful improvements. This is the dominant constraint.
+- **Level Indication**: 3-4
+
+### Recommended Labels
+
+- [x] `kind/feature`: Feature exploration and potential enhancement
+- [x] `area/tide`: Primary impact area is Tide's search infrastructure
+- [ ] `good-first-issue`: Too complex, too much uncertainty, requires deep expertise
+- [ ] `help-wanted`: Requires deep architectural knowledge and API investigation
+
+### Guidance for Contributors
+
+**For Level 3 (Large)**:
+- Requires experience with Prow architecture, specifically Tide's query model
+- **Critical first step**: Verify GitHub REST/GraphQL API support for boolean operators and parentheses by running test queries via `gh api`
+- Should review:
+  - `pkg/config/tide.go`: TideQuery struct and query construction
+  - `pkg/tide/github.go`: GraphQL search execution
+  - `pkg/tide/blockers/blockers.go`: Blocker query patterns
+  - `cmd/external-plugins/needs-rebase/plugin/plugin.go`: Sharding workaround
+- Key architectural considerations:
+  - Org-scoped query isolation must be preserved for GitHub Apps auth
+  - API rate limit impact of any changes must be measured
+  - Query merging must be provably equivalent to individual queries
+- Consult with maintainers before starting implementation
+
+### Caveats and Considerations
+
+- The effort level could drop to Level 2 if API verification reveals strong support for boolean operators and parentheses, narrowing the scope to specific optimizations
+- Conversely, if API verification confirms no nested query support, the issue may need to be rescoped to focus only on internal optimizations (still Level 2-3) or closed as infeasible in its current form
+- The issue is 8 months old with only bot activity — the exploration work has not been started by anyone
+
 ## Next Steps
 
 (Action items will be added here)

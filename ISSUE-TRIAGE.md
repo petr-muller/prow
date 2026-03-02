@@ -227,6 +227,45 @@ This is a well-defined, small-scope feature that follows an established pattern 
 
 The `clearStaleComments` function matches bot comments by string-comparing against `releaseNoteBody`. After this change, if a deployment switches from default to custom URL, old comments with the default URL won't match the new body string and won't be auto-cleaned. This is a minor edge case — the comments remain but are harmless, and is consistent with how other plugins handle similar transitions. No special handling is needed.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "release-note plugin: make documentation URL configurable" is clear, specific, and mentions the affected component.
+
+### Proposed GitHub Comment
+
+````
+The `release-note` plugin currently has no configuration struct in `pkg/plugins/config.go` — it's one of the few plugins that never needed one. The hardcoded URL appears in two places in `pkg/plugins/releasenote/releasenote.go`: the `releaseNoteFormat` constant (line 41, used in bot comments when a PR lacks a release-note block) and the `helpProvider` function (line 87, used in the `/release-note-none` command description rendered by `/help`).
+
+The `help` plugin already implements exactly this pattern for its own documentation URL. Its `Help` struct in `pkg/plugins/config.go` (lines 101-118) has a `HelpGuidelinesURL` field with a `setDefaults()` method that falls back to the Kubernetes URL when unconfigured. A contributor implementing this feature can follow that pattern closely: add a `ReleaseNote` config struct with a URL field, wire it into `Configuration.setDefaults()`, and thread the configured URL through the handler functions (which already receive `plugins.Agent` with access to `PluginConfig`) and `helpProvider` (which already receives `*plugins.Configuration` but currently ignores it).
+
+One minor consideration: the `clearStaleComments` function (line 316) matches old bot comments by string-comparing against `releaseNoteBody`. If a deployment switches from the default URL to a custom one, previously-posted comments with the old URL won't match and won't be auto-cleaned. This is a harmless edge case consistent with how other plugins handle similar transitions and doesn't require special handling.
+
+/good-first-issue
+````
+
+### Rationale
+
+**What's being added**:
+- The fact that the plugin currently has zero configuration infrastructure (not mentioned in the issue)
+- Exact code locations (file, line numbers) for both hardcoded URL instances
+- The Help plugin as a concrete precedent to follow, with specific file/line references
+- Implementation guidance: which parameters/receivers already carry the config
+- The stale comment matching edge case (minor, but useful for a contributor to know about)
+
+**Why these labels**:
+- `area/plugins`: Already applied by maintainer
+- `kind/feature`: Already applied by maintainer
+- `/good-first-issue`: Level 1 effort — small scope (~50-80 LOC across 3 files), well-defined solution, exact precedent exists, no architectural complexity
+
+**What's NOT included**:
+- No `/retitle`: Title is already clear and specific
+- No `/priority`: This is an enhancement, not urgent
+- No `/help-wanted`: `good-first-issue` is more appropriate for this level of effort
+- No repeated information: The issue author already described the problem and proposed solution clearly
+
 ## Next Steps
 
-- Augment the issue with findings
+- Brief the maintainer on findings
+- Wrap up triage

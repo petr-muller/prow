@@ -158,7 +158,75 @@ The `clearStaleComments` function (line 316) matches bot comments by checking if
 - Custom URL appears in help provider output
 - Stale comment cleanup still works with default URL
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+This is a well-defined, small-scope feature that follows an established pattern (identical to the Help plugin's `HelpGuidelinesURL`). A contributor can implement it by copying the Help plugin's config pattern and threading the URL through two locations in one file.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 3 files modified: `pkg/plugins/config.go` (add struct + defaults), `pkg/plugins/releasenote/releasenote.go` (use config URL instead of hardcoded const), `pkg/plugins/releasenote/releasenote_test.go` (add test cases). Estimated ~50-80 lines of code.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: The change is mechanical: add a config field, set a default, thread the value to two locations. The only subtlety is converting the package-level `releaseNoteBody` var into something dynamic, but this is straightforward (compute it per-call or accept URL as parameter).
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: A contributor needs basic Go knowledge and can learn the plugin config pattern directly from the Help plugin example. No Prow-specific domain knowledge required beyond reading existing code.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The problem is specific (two hardcoded URLs), the solution is clear (configurable field with default), and there is an exact precedent to follow (Help plugin). No open design questions.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Follow existing test patterns in `releasenote_test.go`. Add cases verifying: (1) default URL used when config is empty, (2) custom URL appears in bot comments, (3) custom URL appears in help output. Existing fake client infrastructure supports this.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: The default value preserves current behavior exactly. Only users who explicitly configure the new field will see different behavior. No migration needed.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: This follows the exact same pattern used by the Help, Approve, and Trigger plugins. Adding a config struct with a URL field and `setDefaults()` is the standard Prow approach.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: No external APIs or systems involved. This is purely an internal configuration change.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, exact precedent exists
+- [x] `kind/feature`: Already applied
+- [x] `area/plugins`: Already applied
+- [ ] `help-needed`: Too simple for this label; good-first-issue is more appropriate
+
+### Guidance for Contributors
+
+- Review the Help plugin config pattern in `pkg/plugins/config.go:101-118` as a template
+- The `helpProvider` function already receives `*plugins.Configuration` — just use it instead of ignoring it
+- Handler functions receive `plugins.Agent` which has `PluginConfig` — thread the URL from there
+- For the `releaseNoteBody` package-level var, convert to a function like `releaseNoteBody(url string) string`
+- Keep the `clearStaleComments` stale-matching logic aware that old comments may have the default URL
+
+### Caveats and Considerations
+
+The `clearStaleComments` function matches bot comments by string-comparing against `releaseNoteBody`. After this change, if a deployment switches from default to custom URL, old comments with the default URL won't match the new body string and won't be auto-cleaned. This is a minor edge case — the comments remain but are harmless, and is consistent with how other plugins handle similar transitions. No special handling is needed.
+
 ## Next Steps
 
-- Assess effort level
 - Augment the issue with findings

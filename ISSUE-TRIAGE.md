@@ -275,6 +275,7 @@ Key questions asked:
 Maintainer decision:
 Proceed with wrapup.
 
-## Next Steps
+## Wrapup
 
-- Wrap up triage (push branches, post comment)
+- Comment **not posted** — maintainer decided not to post
+- Branches synced to origin

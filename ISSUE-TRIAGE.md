@@ -296,9 +296,49 @@ The recommended fix (using GitHub's `mergeStateStatus` field to filter PRs block
 - If `mergeStateStatus` proves unreliable due to latency or Tide's own context-setting, fall back to Approach 1 (explicit branch protection API checks) or Approach 3 (backoff on repeated failures)
 - Consider whether this should be a config option or default behavior — arguably, attempting merges that GitHub will reject is always wasteful, so defaulting to filtering them seems correct
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "`tide` merge queue stalls when unresolved comments exist" is clear, mentions the component, and describes the user-visible problem accurately.
+
+### Proposed GitHub Comment
+
+```
+This is closely related to #269 (PR with "Changes Requested" repeatedly failing to merge). Both stem from the same root cause: Tide does not pre-validate GitHub branch protection requirements before attempting to merge a PR.
+
+Tide's pre-merge filtering (`isAllowedToMerge` in `pkg/tide/github.go:605`) currently only checks for merge conflicts, invalid merge method labels, and rebase capability. It does not check whether the PR meets branch protection requirements like "require conversations to be resolved" or "require approving reviews". When a PR passes all required CI checks but fails these branch protection rules, Tide categorizes it as a "success" and repeatedly attempts to merge it. GitHub rejects the merge with a 405 error (`UnmergablePRError`), Tide logs the failure at debug level, and on the next sync cycle the same PR is picked again — creating an invisible infinite retry loop. The stalling is particularly impactful in the single-PR merge path: `pickHighestPriorityPR` selects the same PR every cycle, effectively blocking all other successful PRs in that subpool from merging.
+
+A potential fix would be to use GitHub's `mergeStateStatus` GraphQL field on the PullRequest object. This field aggregates all branch protection checks into a single state (`BLOCKED`, `CLEAN`, `BEHIND`, etc.) — so checking for `BLOCKED` in `isAllowedToMerge` would filter out PRs that can't pass branch protection, covering both this issue and #269 without needing to understand each individual branch protection rule. This follows the same pattern as the existing `Mergeable == Conflicting` check in that function.
+
+/remove-lifecycle stale
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause: Tide's pre-merge filtering doesn't check branch protection rules (not in original issue)
+- Stalling mechanism: The infinite retry loop via `pickHighestPriorityPR` and debug-level logging (not in original issue)
+- Why it blocks other PRs (not in original issue — reporter said "stalls" but didn't explain why others are blocked)
+- Connection to #269 with shared root cause explanation
+- Concrete fix approach with specific code locations
+
+**Why these labels**:
+- `/remove-lifecycle stale`: Issue is being actively triaged
+- `/help-wanted`: Level 2 effort assessment — well-defined fix, suitable for skilled contributors
+- No `/area` or `/kind` needed: `area/tide` and `kind/bug` already applied
+
+**What's NOT included**:
+- No `/retitle`: Current title is already clear and specific
+- No `/priority`: While the bug is impactful, it only affects repos with specific branch protection settings — not critical enough for a priority label
+- No detailed implementation instructions: Kept the fix suggestion high-level to leave room for the implementer's judgment
+- No mention of Approach 1 or 3 from research: Kept the comment focused on the recommended approach to avoid information overload
+
 ## Next Steps
 
-1. Validate `mergeStateStatus` field behavior with GitHub API (especially interaction with Tide context-setting)
-2. Implement the fix following the recommended approach
-3. Add unit tests
-4. Consider linking this fix to issue #269 as a shared solution
+1. Get maintainer approval to post the augmentation comment
+2. Push branches and post comment (wrapup subcommand)
+3. Validate `mergeStateStatus` field behavior with GitHub API (especially interaction with Tide context-setting)
+4. Implement the fix following the recommended approach
+5. Consider whether this fix also closes issue #269

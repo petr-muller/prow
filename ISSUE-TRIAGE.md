@@ -217,6 +217,88 @@ Approach 3 is useful as a defense-in-depth measure but should not be the primary
 - No tests for repeated merge failure of the same PR across sync cycles (the stalling scenario)
 - No tests verifying that a single unmergeable PR doesn't block other successful PRs in serial merge path
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+The recommended fix (using GitHub's `mergeStateStatus` field to filter PRs blocked by branch protection) is well-defined and follows existing patterns in the codebase, but touches Tide's core merge path across multiple files and requires careful consideration of edge cases (particularly how the field interacts with Tide's own context-setting behavior).
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-Moderate
+- **Details**: 3-5 files (tide.go GraphQL query, github.go merge check, codereview.go abstraction, status.go description, tests). ~100-200 lines of new/modified code including tests.
+- **Level Indication**: 2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: The core change is simple (add field to query, add check before merge), but understanding how `mergeStateStatus` interacts with Tide's context-setting behavior requires careful analysis. Tide sets its own "tide" context to SUCCESS before merge — need to verify this doesn't cause `mergeStateStatus` to flip to CLEAN for PRs that should be BLOCKED. The `mergeStateStatus` field is computed by GitHub and may have latency. Also need to handle the interaction with the existing `Mergeable` field and `ReviewApprovedRequired` config.
+- **Level Indication**: 2-3
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires understanding of Tide's sync/merge flow, GitHub GraphQL API, and the `mergeStateStatus` field semantics. Contributor should be comfortable reading the existing code in `pkg/tide/` and following existing patterns (e.g., how `Mergeable` and `ReviewDecision` are used).
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined with some uncertainty
+- **Details**: The problem and general approach are clear. Key uncertainty: whether `mergeStateStatus` correctly reflects all branch protection requirements and how it interacts with Tide setting its own context. May need experimentation with the GitHub API to validate behavior.
+- **Level Indication**: 2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Unit tests following existing patterns in tide_test.go (mock PR with different `mergeStateStatus` values, verify filtering behavior). Existing test helpers (`testPR()`) would need extension. No integration test infrastructure needed.
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Adds a pre-check that prevents Tide from attempting merges that would fail anyway. No behavior change for PRs that can currently be merged. Could be gated behind a config option (following `ReviewApprovedRequired` pattern) if needed, though it's arguably correct behavior by default.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Follows the exact same pattern as the existing `Mergeable` state check in `isAllowedToMerge()` and the `ReviewDecision` check in `requirementDiff()`. The codebase already has the infrastructure for this kind of pre-merge validation.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: GitHub's GraphQL API supports `mergeStateStatus` on PullRequest objects. The field is well-documented with values: BEHIND, BLOCKED, CLEAN, DIRTY, DRAFT, HAS_HOOKS, UNKNOWN, UNSTABLE. GitHub computes this by evaluating all branch protection rules.
+- **Level Indication**: 1-2
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined problem with clear solution approach, suitable for skilled contributors
+- [x] `area/tide`: Core Tide merge logic
+- [x] `kind/bug`: Fixing incorrect merge queue behavior
+- [ ] `good-first-issue`: Requires understanding Tide's merge flow and GitHub API — not ideal for first contribution
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and GitHub's GraphQL API
+- Should review:
+  - `pkg/tide/tide.go`: PullRequest struct (line ~1914), `filterPR()`, `isAllowedToMerge()`
+  - `pkg/tide/github.go`: `mergePRs()`, `isAllowedToMerge()`
+  - `pkg/tide/status.go`: `requirementDiff()` for the `ReviewApprovedRequired` pattern
+  - `pkg/tide/tide_test.go`: `testPR()` helper, merge error test cases
+- Recommended approach:
+  1. Add `MergeStateStatus` field to PullRequest GraphQL query struct
+  2. Check for BLOCKED state in `isAllowedToMerge()` (filter before merge attempt)
+  3. Add status description in `requirementDiff()` for user-facing explanation
+  4. Add unit tests following existing patterns
+- Key question to resolve first: Verify `mergeStateStatus` behavior when Tide sets its own context — does GitHub re-evaluate `mergeStateStatus` synchronously?
+
+### Caveats and Considerations
+
+- The `mergeStateStatus` approach solves both this issue and issue #269 simultaneously (any branch protection violation results in BLOCKED state)
+- If `mergeStateStatus` proves unreliable due to latency or Tide's own context-setting, fall back to Approach 1 (explicit branch protection API checks) or Approach 3 (backoff on repeated failures)
+- Consider whether this should be a config option or default behavior — arguably, attempting merges that GitHub will reject is always wasteful, so defaulting to filtering them seems correct
+
 ## Next Steps
 
-(Action items will be added here)
+1. Validate `mergeStateStatus` field behavior with GitHub API (especially interaction with Tide context-setting)
+2. Implement the fix following the recommended approach
+3. Add unit tests
+4. Consider linking this fix to issue #269 as a shared solution

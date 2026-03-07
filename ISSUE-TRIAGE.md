@@ -277,6 +277,44 @@ The exact reproduction scenario hasn't been fully characterized with detailed lo
 2. Reproduce the issue in a test environment with two semantically-conflicting PRs
 3. Confirm whether the baseSHA invalidation cycle (Factor 3) or the `isPassingTests` disagreement (Factor 4) is the primary contributor
 
+## Proposed Issue Augmentation
+
+### Title Change
+- **Current**: "2 pr's are not compatible in merge pool"
+- **Proposed**: "Tide repeatedly re-batches semantically incompatible PRs instead of falling back to individual merges"
+- **Rationale**: Current title is vague - doesn't mention Tide, doesn't describe the stuck behavior, and "not compatible" is ambiguous. New title precisely describes the component (Tide), the behavior (re-batching), the root cause (semantic incompatibility), and the expected behavior (individual merges).
+
+### Proposed GitHub Comment
+
+```
+/retitle Tide repeatedly re-batches semantically incompatible PRs instead of falling back to individual merges
+
+Tide's `takeAction` priority cascade in `pkg/tide/tide.go` is designed to fall back from batch merging to individual PR merging: if no batch is passing or pending, individual PRs with passing tests should be merged one at a time. However, when two PRs pass tests individually but fail as a batch (semantic conflict, not git conflict), Tide enters a cycle where it keeps re-triggering the same failing batch. The `pickNewBatch` function only detects git merge conflicts (`r.MergeWithStrategy`), so it will always include both semantically-incompatible PRs in the new batch. Additionally, if the base SHA changes while the batch runs (e.g., another PR merges to the branch), individual PR test results become stale (ProwJobs are indexed by baseSHA), moving PRs from `successes` to `missings` and preventing the individual merge fallback at `takeAction` line 1499 from firing.
+
+The core issue is that Tide has no memory of batch failures. `accumulateBatch` returns only successful or pending batches, and failed batch ProwJobs are silently ignored. When `pickBatchWithPreexistingTests` finds no usable pre-existing batch, it falls through to `pickNewBatch` which recreates the same failing combination. A fix would need to either track recently-failed batch PR combinations to avoid re-batching them, or ensure that after a batch failure, individual PR testing and merging takes priority over re-batching. Multiple solution approaches exist with different trade-offs; this is a Level 3 complexity change requiring deep familiarity with Tide's sync loop architecture.
+
+/remove-lifecycle stale
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation with specific code references (not in original issue)
+- Explanation of the baseSHA invalidation cycle that prevents individual fallback
+- Description of the batch failure memory gap (`accumulateBatch` ignores failures)
+- High-level fix approaches and complexity assessment
+
+**Why these labels**:
+- `/retitle`: Current title is vague and doesn't mention the component or specific behavior
+- No `/area` or `/kind` commands: `area/tide` and `kind/bug` are already applied
+- No difficulty label: Level 3 issue - too complex for good-first-issue or help-wanted
+- `/remove-lifecycle stale`: Issue was recently marked stale by k8s-triage-robot; removing since it's actively triaged
+
+**What's NOT included**:
+- No `/priority` label: While this is a real bug, it requires a specific and uncommon scenario (two semantically-conflicting PRs in the same pool). Not critical enough for priority labels.
+- Detailed solution proposals: Too long for an issue comment. The research is documented in the triage doc for anyone who picks this up.
+- Reproduction steps: The original issue and tide-history link already provide sufficient evidence.
+
 ## Next Steps
 
 (Action items will be added here)

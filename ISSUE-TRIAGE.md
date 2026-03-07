@@ -198,6 +198,85 @@ The cleanest fix would combine:
 - Test: batch failure cache expires correctly
 - Test: HEAD change on a PR clears the failure cache for that combination
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+Fixing Tide's batch fallback behavior requires modifying core merge decision logic (`takeAction`), adding new state tracking for batch failures, and careful testing of concurrent scenarios. The fix touches Tide's most critical code path and requires deep understanding of its sync loop, ProwJob lifecycle, and the interaction between multiple data sources (ProwJob states vs GitHub commit statuses).
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: Primary changes in `pkg/tide/tide.go` (takeAction, accumulateBatch, pickBatch) and `pkg/tide/tide_test.go`. Estimated 3-5 files, 200-400 LOC. New batch failure cache structure needed.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: High
+- **Details**: The bug involves multiple interacting factors (baseSHA invalidation, two different test-passing checks, batch ProwJob lifecycle). The fix must correctly handle state across sync loop iterations without introducing new race conditions or deadlocks. Edge cases include: partial batch overlap with previous failures, HEAD changes invalidating cache, interaction with `PrioritizeExistingBatches` config.
+- **Level Indication**: 3-4
+
+#### Required Expertise
+- **Assessment**: Deep
+- **Details**: Requires understanding of Tide's complete sync loop architecture, ProwJob indexing by baseSHA, the difference between `accumulate` and `isPassingTests`, batch creation and reuse logic, and Go concurrency patterns. Contributor must understand why the current fallback doesn't work to avoid introducing a fix that breaks under different conditions.
+- **Level Indication**: 3-4
+
+#### Clarity and Certainty
+- **Assessment**: Some uncertainty
+- **Details**: The problem is confirmed by maintainers but the exact stuck scenario isn't fully characterized with logs/reproduction. The root cause involves multiple interacting factors, and it's unclear which combination of factors dominates in practice. Multiple solution approaches exist with different trade-offs, and the "right" one hasn't been agreed upon.
+- **Level Indication**: 2-3
+
+#### Testing Requirements
+- **Assessment**: Complex
+- **Details**: Need to test multi-cycle sync scenarios (batch fails → individual fallback → merge → re-batch). Existing test patterns in `tide_test.go` can be followed but new test scenarios are needed for the stuck cycle. Testing timing-dependent interactions (baseSHA changes during batch execution) is inherently complex.
+- **Level Indication**: 3-4
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: The fix would make Tide's behavior match its documented/expected behavior (fall back to individual merges after batch failure). No configuration changes needed. Purely additive internal behavior.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: The fix extends existing patterns (action priority cascade, ProwJob accumulation). Adding batch failure tracking is a natural extension of the existing `accumulateBatch` function. No new architectural patterns required.
+- **Level Indication**: 2-3
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Purely internal Tide logic. No GitHub API or Kubernetes API changes needed.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `area/tide`: Core Tide batch/merge functionality
+- [x] `kind/bug`: Confirmed bug - expected fallback behavior doesn't work
+- [ ] `good-first-issue`: Too complex, requires deep Tide expertise
+- [ ] `help-wanted`: Requires significant familiarity with Tide internals
+
+### Guidance for Contributors
+
+**For Level 3 (Large)**:
+- Requires experience with Prow architecture, specifically Tide's sync loop
+- Should review:
+  - `pkg/tide/tide.go`: `takeAction`, `accumulateBatch`, `pickBatch`, `accumulate`
+  - `pkg/tide/tide_test.go`: `TestAccumulateBatch`, `TestPickBatchV2`, `TestPickBatchPrefersBatchesWithPreexistingJobs`
+  - The full `syncSubpool` flow to understand how data flows between functions
+- Key architectural considerations:
+  - State tracking across sync loop iterations (batch failure cache)
+  - Interaction between `accumulate` (ProwJob-based) and `isPassingTests` (GitHub status-based)
+  - ProwJob indexing by baseSHA and its implications for test result validity
+  - Correct cache invalidation when PR HEADs change or PRs leave the pool
+- Consult with Tide maintainers before starting implementation
+
+### Caveats and Considerations
+
+The exact reproduction scenario hasn't been fully characterized with detailed logs. Before implementing a fix, it would be valuable to:
+1. Add debug logging to `takeAction` to capture the exact state when Tide gets stuck
+2. Reproduce the issue in a test environment with two semantically-conflicting PRs
+3. Confirm whether the baseSHA invalidation cycle (Factor 3) or the `isPassingTests` disagreement (Factor 4) is the primary contributor
+
 ## Next Steps
 
 (Action items will be added here)

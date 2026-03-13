@@ -309,9 +309,48 @@ The fix is to add `Merged githubql.Boolean` to the `PullRequest` GraphQL struct 
 - Priority label: This is a rare edge case (requires GitHub search index lag), not a blocking issue
 - The observation about excessive triggers per base SHA in tide-history is noted but not included in the comment - it needs further investigation to determine if it's related to this bug or a separate pattern
 
+## Log Analysis Findings
+
+### Logging Makes Tide Unobservable
+
+Analyzed live Tide pod `tide-bb56955b9-h8ckw` on app.ci (ci namespace). Pod uptime: 63 minutes, but only ~5 minutes of logs are retrievable due to container log buffer rotation.
+
+**Log volume**: ~37,600 lines in ~5 minutes (~7,500 lines/minute)
+
+**Breakdown by level**:
+- debug: 35,939 (99.7%)
+- info: 452 (0.3%)
+
+**Top debug messages**:
+| Message | Count | % of total |
+|---------|-------|------------|
+| `Presubmit excluded by ps.ShouldRun` | 30,306 | **87%** |
+| `Blocking merges to branch via issue.` | 986 | 3% |
+| `Sending query` / `Finished query` | 945 | 3% |
+
+**Consequence**: A single debug message (`tide.go:1714`, fires for every presubmit x every PR x every branch combination) generates 87% of all log output. This causes:
+1. Container log buffer rotates every ~5 minutes
+2. Incident logs are lost within minutes of occurring
+3. Cannot retrieve logs from the PR 4390 incident (~40 minutes before log retrieval)
+4. Info-level entries that would diagnose the issue (`"Subpool synced."` with action and targets) are evicted almost immediately
+
+**Root cause investigation impact**: We cannot confirm or deny the search index staleness theory because the diagnostic info-level logs from the incident timeframe have been rotated out. The original log file provided (315 lines) appears to have been a partial capture that only contained query-phase debug entries.
+
+**Logging improvement suggestions**:
+1. Reduce or aggregate `"Presubmit excluded by ps.ShouldRun"` - alone would extend retention from ~5 min to ~40+ min
+2. Add pool membership change tracking at info level (PR joins/leaves pool)
+3. Aggregate per-query debug logs into a single info-level summary
+4. Aggregate per-PR filtering into per-subpool summaries
+
+### Open Questions from Briefing Discussion
+
+1. **Is search index staleness really the cause?** If `state:open` is stale, would a `merged` field in the same response also be stale? Depends on whether GitHub resolves node fields from the real-time DB or the search index.
+2. **The excessive trigger pattern in tide-history** (three batch sizes per base SHA) may suggest a more systematic issue than occasional search index lag.
+3. **Cannot be confirmed without logs** - the logging volume makes it impossible to investigate after the fact.
+
 ## Next Steps
 
-1. **Confirm root cause with Tide logs**: Need info-level logs showing "Subpool synced" entries with action and target PR numbers
-2. **Implement fix**: Add `Merged` field to `PullRequest` struct and filter in `Query()`
-3. **Add unit tests**: Test that merged PRs are excluded from the pool
-4. **Monitor**: Add a log warning when merged PRs are filtered to track frequency of search index lag
+1. **Fix Tide logging**: Reduce `"Presubmit excluded by ps.ShouldRun"` log volume to make Tide observable. This is a prerequisite for investigating the root cause.
+2. **Then investigate root cause**: With better log retention, wait for the next occurrence to see if the merged PR appears in the pool (and with what field values)
+3. **Consider adding `Merged` field**: Even if we can't confirm the search staleness theory, adding the field is low-cost and provides observability into whether search results include merged PRs
+4. **Investigate excessive trigger pattern**: Analyze tide-history to understand why there are typically three batch triggers per base SHA

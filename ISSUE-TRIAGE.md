@@ -205,9 +205,81 @@ This is the simplest and most effective solution. Adding `Merged` to the GraphQL
 - Tide relies entirely on GitHub's search `state:open` filter for merge status exclusion
 - No defensive post-query validation exists
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+Adding a `Merged` boolean field to the GraphQL PullRequest struct and a single post-query filter check. Well-defined problem, minimal scope, clear solution, existing test patterns to follow.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 2 files modified (`pkg/tide/tide.go`, `pkg/tide/github.go`), ~10-20 lines of production code + test cases
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Add one field to a struct, add one conditional filter. No concurrency, no algorithmic challenges, no complex interactions.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go, basic understanding of GraphQL structs. The pattern for adding fields and filters is clear from existing code.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause is clear (missing `Merged` field), solution approach is straightforward (add field + filter). No ambiguity in desired behavior.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Add test case with a PR where `Merged == true` and verify it's excluded from the pool. Existing test patterns in `tide_test.go` can be followed.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Adding a field to an internal struct and filtering out PRs that shouldn't be there. No behavior change for correct scenarios. No configuration changes.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Follows existing pattern of requesting GraphQL fields and filtering on them. No new patterns needed.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: GitHub GraphQL API supports the `merged` field on PullRequest objects. Standard, stable API.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, existing patterns to follow
+- [x] `area/tide`: Core Tide functionality
+- [x] `kind/bug`: Fixing a defensive gap
+
+### Guidance for Contributors
+
+- Good starting point for new Prow contributors
+- Suggested prerequisite knowledge: Basic Go, understanding of Go struct tags for GraphQL
+- Key files to review:
+  - `pkg/tide/tide.go:1914-1949` - PullRequest struct (add `Merged` field here)
+  - `pkg/tide/github.go:102-151` - Query() function (add filter here)
+  - `pkg/tide/tide_test.go` - existing test patterns
+- The fix is: add `Merged githubql.Boolean` to PullRequest struct, then filter out PRs where `Merged == true` in `Query()` with a log warning
+
+### Caveats and Considerations
+
+- While the fix is simple, the root cause (GitHub search index staleness) is not something Prow can control. This fix is a defensive measure.
+- The root cause theory should ideally be confirmed with info-level Tide logs showing the merged PR in the pool (look for "Subpool synced" entries with `"action":"TRIGGER_BATCH"` containing the PR number). The log provided only contained debug-level query execution entries, which don't show PR numbers or actions.
+- An important assumption: that GitHub's GraphQL API returns real-time field data (including `merged: true`) for PR nodes found via a stale search index. This needs verification but is consistent with how GraphQL resolvers work.
+
 ## Next Steps
 
-1. **Confirm root cause with Tide logs**: The reporter/maintainer should examine Tide logs from the incident to verify the merged PR was returned by the search query
-2. **Implement Approach 1**: Add `Merged` field to `PullRequest` struct and filter in `Query()`
+1. **Confirm root cause with Tide logs**: Need info-level logs showing "Subpool synced" entries with action and target PR numbers
+2. **Implement fix**: Add `Merged` field to `PullRequest` struct and filter in `Query()`
 3. **Add unit tests**: Test that merged PRs are excluded from the pool
-4. **Monitor**: Add a log line when merged PRs are filtered to track frequency of search index lag
+4. **Monitor**: Add a log warning when merged PRs are filtered to track frequency of search index lag

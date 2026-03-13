@@ -277,6 +277,38 @@ Adding a `Merged` boolean field to the GraphQL PullRequest struct and a single p
 - The root cause theory should ideally be confirmed with info-level Tide logs showing the merged PR in the pool (look for "Subpool synced" entries with `"action":"TRIGGER_BATCH"` containing the PR number). The log provided only contained debug-level query execution entries, which don't show PR numbers or actions.
 - An important assumption: that GitHub's GraphQL API returns real-time field data (including `merged: true`) for PR nodes found via a stale search index. This needs verification but is consistent with how GraphQL resolvers work.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "`tide`: batch triggered containing an already-merged PR" is clear, specific, and mentions the component.
+
+### Proposed GitHub Comment
+
+```
+Tide queries GitHub's GraphQL search API with `state:open` to find eligible PRs (`pkg/config/tide.go:574`). This is backed by an eventually-consistent search index: when a PR is merged, the index may not immediately reflect the state change, causing the PR to still appear in search results. Crucially, the `PullRequest` GraphQL struct (`pkg/tide/tide.go:1914-1949`) does not include a `merged` field, so there is no post-query defense against stale results. The PR passes undetected through `filterPR()` (which checks merge conflicts and status contexts but not merge status), `pickBatch()` (which checks retest eligibility but not merge status), and into the triggered batch.
+
+The fix is to add `Merged githubql.Boolean` to the `PullRequest` GraphQL struct and filter out PRs where `merged == true` in `Query()` (`pkg/tide/github.go:141-143`). GitHub's GraphQL API returns real-time field data for each PR node even when the search index found them via a stale query, so the `merged` field will be accurate. This is a minimal, zero-cost change (no additional API calls) that provides a definitive defense against search index lag.
+
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: search index staleness + missing `merged` field in the GraphQL struct. The original issue only described the symptom, not why it happens.
+- Specific code paths where the merged PR slips through undetected
+- Concrete fix approach with file locations
+
+**Why these labels**:
+- `area/tide` and `kind/bug`: Already applied by the reporter
+- `/good-first-issue`: Level 1 effort - add one field to a struct, add one filter check, follow existing patterns
+
+**What's NOT included**:
+- `/retitle`: Current title is already clear and specific
+- Priority label: This is a rare edge case (requires GitHub search index lag), not a blocking issue
+- The observation about excessive triggers per base SHA in tide-history is noted but not included in the comment - it needs further investigation to determine if it's related to this bug or a separate pattern
+
 ## Next Steps
 
 1. **Confirm root cause with Tide logs**: Need info-level logs showing "Subpool synced" entries with action and target PR numbers

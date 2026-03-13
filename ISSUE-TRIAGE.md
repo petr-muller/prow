@@ -286,9 +286,11 @@ Adding a `Merged` boolean field to the GraphQL PullRequest struct and a single p
 ### Proposed GitHub Comment
 
 ```
-Tide queries GitHub's GraphQL search API with `state:open` to find eligible PRs (`pkg/config/tide.go:574`). This is backed by an eventually-consistent search index: when a PR is merged, the index may not immediately reflect the state change, causing the PR to still appear in search results. Crucially, the `PullRequest` GraphQL struct (`pkg/tide/tide.go:1914-1949`) does not include a `merged` field, so there is no post-query defense against stale results. The PR passes undetected through `filterPR()` (which checks merge conflicts and status contexts but not merge status), `pickBatch()` (which checks retest eligibility but not merge status), and into the triggered batch.
+Analysis of the tide-history data confirms this is a systematic issue, not a one-off. Out of 418,918 PR merges across the entire history, 4,538 (1.1%) resulted in the merged PR appearing in a subsequent TRIGGER or TRIGGER_BATCH action. This affects 827 out of 8,964 pools. 94.5% of occurrences happen 2-5 minutes after the merge (exactly one sync cycle later), and the pattern includes PRs that Tide itself merged (MERGE/MERGE_BATCH followed by TRIGGER_BATCH containing the same PR).
 
-The fix is to add `Merged githubql.Boolean` to the `PullRequest` GraphQL struct and filter out PRs where `merged == true` in `Query()` (`pkg/tide/github.go:141-143`). GitHub's GraphQL API returns real-time field data for each PR node even when the search index found them via a stale query, so the `merged` field will be accurate. This is a minimal, zero-cost change (no additional API calls) that provides a definitive defense against search index lag.
+The root cause is GitHub's eventually-consistent search index. Tide queries with `state:open` (`pkg/config/tide.go:574`), but after a merge, the search index doesn't update immediately. The `PullRequest` GraphQL struct (`pkg/tide/tide.go:1914-1949`) does not include a `merged` field, so there is no post-query defense. The merged PR passes through `filterPR()` (checks merge conflicts and contexts, not merge status) and `pickBatch()` (checks retest eligibility, not merge status) into the triggered batch, wasting a CI job.
+
+The proposed fix is to add `Merged githubql.Boolean` to the `PullRequest` GraphQL struct and filter out merged PRs in `Query()` (`pkg/tide/github.go:141-143`), logging a warning when this happens. An open question is whether GitHub resolves node fields from the real-time database or from the stale search index: if the former, the `merged` field will be accurate and the filter will work; if the latter, further investigation is needed.
 
 /good-first-issue
 ```
@@ -296,9 +298,11 @@ The fix is to add `Merged githubql.Boolean` to the `PullRequest` GraphQL struct 
 ### Rationale
 
 **What's being added**:
-- Root cause explanation: search index staleness + missing `merged` field in the GraphQL struct. The original issue only described the symptom, not why it happens.
+- Quantified scope: 4,538 occurrences, 1.1% of merges, 827 pools, based on tide-history analysis
+- Root cause explanation: search index staleness + missing `merged` field in the GraphQL struct
 - Specific code paths where the merged PR slips through undetected
 - Concrete fix approach with file locations
+- Open question about GraphQL node resolution
 
 **Why these labels**:
 - `area/tide` and `kind/bug`: Already applied by the reporter
@@ -306,8 +310,8 @@ The fix is to add `Merged githubql.Boolean` to the `PullRequest` GraphQL struct 
 
 **What's NOT included**:
 - `/retitle`: Current title is already clear and specific
-- Priority label: This is a rare edge case (requires GitHub search index lag), not a blocking issue
-- The observation about excessive triggers per base SHA in tide-history is noted but not included in the comment - it needs further investigation to determine if it's related to this bug or a separate pattern
+- Priority label: Systematic but low-impact per occurrence (wasted CI job, not incorrect merge)
+- Logging issue: should be filed separately (87% of log output is one debug message, making Tide unobservable)
 
 ## Log Analysis Findings
 
@@ -342,15 +346,44 @@ Analyzed live Tide pod `tide-bb56955b9-h8ckw` on app.ci (ci namespace). Pod upti
 3. Aggregate per-query debug logs into a single info-level summary
 4. Aggregate per-PR filtering into per-subpool summaries
 
-### Open Questions from Briefing Discussion
+### Tide History Analysis
 
-1. **Is search index staleness really the cause?** If `state:open` is stale, would a `merged` field in the same response also be stale? Depends on whether GitHub resolves node fields from the real-time DB or the search index.
-2. **The excessive trigger pattern in tide-history** (three batch sizes per base SHA) may suggest a more systematic issue than occasional search index lag.
-3. **Cannot be confirmed without logs** - the logging volume makes it impossible to investigate after the fact.
+Analyzed full tide-history data (518,719 records across 8,964 pools, spanning 2019-03-20 to 2026-03-13).
+
+**Key findings**:
+- 4,538 cases of merged PRs appearing in subsequent triggers (1.1% of 418,918 total merges)
+- 827 out of 8,964 pools affected (9.2%)
+- 94.5% of cases (4,290) have a 2-5 minute delta - exactly one sync cycle
+- 4,534 out of 4,538 cases have a different base SHA (expected: merge changes the base)
+- Pattern includes Tide's own MERGE/MERGE_BATCH actions followed by TRIGGER_BATCH
+
+**Top affected repos**: kubevirt-ui/kubevirt-plugin:main (86), Azure/ARO-HCP:main (84), openshift-kni/lifecycle-agent (multiple branches, 60-77 each)
+
+**Downstream impact**: After a trigger-with-merged-PR, next action is MERGE 70% (Tide moves on), TRIGGER 27% (serial fallback), TRIGGER_BATCH 2.5% (another batch). Each occurrence wastes a CI job.
+
+### Open Questions
+
+1. **Does GitHub resolve GraphQL node fields from the real-time DB or the stale search index?** If the former, adding `Merged` field and filtering will work. If the latter, we need a different approach (REST API verification or pool membership tracking).
+2. **Is this the only cause of the excessive trigger pattern?** The tide-history shows multiple batch sizes per base SHA in some repos. The merged-PR-in-pool issue explains some of this, but there may be other contributing factors.
+
+## Briefing Completed
+
+Briefed maintainer on: 2026-03-13
+
+Key questions asked:
+- "Shouldn't `state:open` be enough?" - Yes in theory, but GitHub search index is eventually consistent. Tide-history analysis confirmed this happens at 1.1% of all merges.
+- "If search is stale, would the `merged` field also be stale?" - Depends on GitHub's implementation. Standard GraphQL resolves node fields from the DB, but this needs verification.
+- "Can you inspect tide-history for more repos?" - Led to the quantified analysis above.
+- "How to improve Tide logging?" - Led to log analysis showing 87% of output is one debug message.
+
+Maintainer decisions:
+- Proceed with augmentation comment including tide-history evidence
+- File logging issue separately
+- Good-first-issue label appropriate
 
 ## Next Steps
 
-1. **Fix Tide logging**: Reduce `"Presubmit excluded by ps.ShouldRun"` log volume to make Tide observable. This is a prerequisite for investigating the root cause.
-2. **Then investigate root cause**: With better log retention, wait for the next occurrence to see if the merged PR appears in the pool (and with what field values)
-3. **Consider adding `Merged` field**: Even if we can't confirm the search staleness theory, adding the field is low-cost and provides observability into whether search results include merged PRs
-4. **Investigate excessive trigger pattern**: Analyze tide-history to understand why there are typically three batch triggers per base SHA
+1. **Post augmentation comment** with tide-history evidence and apply good-first-issue label
+2. **File separate issue**: Tide logging volume (87% from one debug message, 5-min log retention)
+3. **Implement fix**: Add `Merged` field to `PullRequest` struct and filter in `Query()` with warning log
+4. **Verify GraphQL behavior**: First PR should include a test or manual verification that `merged` field is accurate when search index is stale

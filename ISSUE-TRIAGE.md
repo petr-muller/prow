@@ -361,10 +361,63 @@ Analyzed full tide-history data (518,719 records across 8,964 pools, spanning 20
 
 **Downstream impact**: After a trigger-with-merged-PR, next action is MERGE 70% (Tide moves on), TRIGGER 27% (serial fallback), TRIGGER_BATCH 2.5% (another batch). Each occurrence wastes a CI job.
 
+### Temporal Analysis: Behavior Started November 2025
+
+Analyzed incident rate over the full 7-year history to determine when this behavior started or changed.
+
+**Key finding: The behavior exists since 2019 but underwent a dramatic regime change around November 18-20, 2025.**
+
+#### Incident rate by year (incidents / merges):
+
+| Year | Merges | Incidents | Rate | Pools Affected |
+|------|--------|-----------|------|----------------|
+| 2019 | 11,759 | 46 | 0.39% | 35 |
+| 2020 | 19,935 | 144 | 0.72% | 79 |
+| 2021 | 42,140 | 37 | 0.09% | 30 |
+| 2022 | 45,053 | 49 | 0.11% | 46 |
+| 2023 | 57,796 | 100 | 0.17% | 82 |
+| 2024 | 63,035 | 27 | 0.04% | 25 |
+| 2025 (pre-Nov) | ~90,000 | 79 | ~0.09% | ~60 |
+| 2025-11 onward | ~80,000 | 3,758 | ~4.7% | 546 |
+
+#### Daily onset around the transition:
+
+| Date | Merges | Incidents | Rate |
+|------|--------|-----------|------|
+| Nov 17 | 474 | 0 | 0% |
+| Nov 18 | 485 | 6 | 1.2% |
+| Nov 19 | 443 | 0 | 0% |
+| Nov 20 | 527 | 12 | 2.3% |
+| Nov 21 | 394 | 17 | 4.3% |
+| Nov 24 | 467 | 91 | 19.5% |
+| Nov 25 | 499 | 66 | 13.2% |
+
+First incidents appear Nov 18 01:53 UTC (isolated), then cluster at Nov 18 18:44 UTC, then gap on Nov 19, then persistent from Nov 20 onward.
+
+#### Evidence against a Prow code change:
+- Tide sync cycle frequency unchanged: ~165s median, stable before and after
+- Active pool count unchanged: ~1,300 pools
+- No relevant Tide code changes deployed around Nov 18-20
+- The spike is system-wide: 482 pools that **never** had incidents before suddenly started having them
+
+#### Evidence pointing to GitHub search backend change:
+- The merge-to-trigger gap distribution shifted dramatically:
+  - Before: variable (4% <1m, 57% 2-3m, long tail to hours/days)
+  - After: uniformly 88% at exactly 2-3 minutes, 0% below 2 minutes
+- This is consistent with the search index update latency increasing from "variable, often <2 min" to "consistently >2.7 min" (just above one sync cycle)
+- GitHub was migrating search backend to "advanced search" around Sep-Nov 2025 (ISSUE_ADVANCED GraphQL type removed Nov 4, 2025)
+- GitHub had a Git operations failure Nov 18 20:30-21:34 UTC (expired TLS cert) - close to but not exactly matching the onset
+- No specific GitHub changelog entry found documenting a search consistency change
+
+#### Interpretation:
+
+The issue reported in issue 651 was always possible (existed since 2019 at 0.04-0.7% rate) but became dramatically more prevalent (~50x increase) around November 18-20, 2025. The most likely cause is a change in GitHub's search index update pipeline that increased the eventual consistency window from typically <2 minutes to consistently >3 minutes. This makes the proposed fix (adding `Merged` field + filter) even more important, as the problem is now systemic rather than rare.
+
 ### Open Questions
 
 1. **Does GitHub resolve GraphQL node fields from the real-time DB or the stale search index?** If the former, adding `Merged` field and filtering will work. If the latter, we need a different approach (REST API verification or pool membership tracking).
 2. **Is this the only cause of the excessive trigger pattern?** The tide-history shows multiple batch sizes per base SHA in some repos. The merged-PR-in-pool issue explains some of this, but there may be other contributing factors.
+3. **What changed in GitHub's search backend around November 18-20, 2025?** The evidence strongly suggests a change in search index update latency, possibly related to the advanced search migration. No public changelog entry documents this.
 
 ## Briefing Completed
 

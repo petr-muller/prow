@@ -409,9 +409,30 @@ First incidents appear Nov 18 01:53 UTC (isolated), then cluster at Nov 18 18:44
 - GitHub had a Git operations failure Nov 18 20:30-21:34 UTC (expired TLS cert) - close to but not exactly matching the onset
 - No specific GitHub changelog entry found documenting a search consistency change
 
+#### Cross-check: k8s Prow instance (prow.k8s.io)
+
+Fetched tide-history from the Kubernetes Prow instance (prow.k8s.io, completely separate deployment, same GitHub API) and ran the same analysis.
+
+| Month | OpenShift CI (merges / incidents / rate) | k8s Prow (merges / incidents / rate) |
+|-------|------------------------------------------|--------------------------------------|
+| Nov 2025 | 11,101 / 285 / 2.57% | 2,700 / 0 / 0.00% |
+| Dec 2025 | 10,138 / 548 / 5.41% | 3,622 / 3 / 0.08% |
+| Jan 2026 | 14,344 / 951 / 6.63% | 3,227 / 0 / 0.00% |
+| Feb 2026 | 24,621 / 1,289 / 5.24% | 3,378 / 5 / 0.15% |
+
+**The k8s instance shows no spike.** With 2,700 merges in Nov 2025 and a true rate of 2.57%, we'd expect ~69 incidents; we got zero. This rules out a universal GitHub search API change as the cause.
+
+Additionally, the k8s Prow has a faster sync cycle (~118s median vs ~165s for OpenShift CI), meaning it should be *more* susceptible to catching stale data, not less.
+
+**Conclusion**: The November 2025 spike is specific to the OpenShift CI Prow deployment, not a GitHub-wide phenomenon. The underlying bug (missing `Merged` field defense) is real and affects both instances at a low baseline rate, but something specific to the OpenShift CI environment made it dramatically worse starting Nov 18-20, 2025. Possible OpenShift-specific causes include:
+- Prow version/image change deployed around that date
+- Configuration change (sync period, query structure, pool definitions)
+- Infrastructure change (network latency to GitHub API, caching layer)
+- GitHub App rate limiting causing query responses to lag
+
 #### Interpretation:
 
-The issue reported in issue 651 was always possible (existed since 2019 at 0.04-0.7% rate) but became dramatically more prevalent (~50x increase) around November 18-20, 2025. The most likely cause is a change in GitHub's search index update pipeline that increased the eventual consistency window from typically <2 minutes to consistently >3 minutes. This makes the proposed fix (adding `Merged` field + filter) even more important, as the problem is now systemic rather than rare.
+The issue reported in issue 651 is a legitimate upstream Prow bug (missing `Merged` field defense). It has existed since 2019 at a low baseline rate (0.04-0.7%). The dramatic increase seen in the OpenShift CI instance starting Nov 2025 is deployment-specific and not reproducible on the k8s Prow instance. The proposed fix (adding `Merged` field + filter) remains the correct approach regardless of the deployment-specific amplification factor.
 
 ### Open Questions
 

@@ -222,10 +222,81 @@ It's the simplest change with the smallest diff. The `b.Protected` flag from Git
 - Expected: `master` gets protection applied, `skip` gets `Request: nil` (removal)
 - Verify: `fakeClient.deleted` contains the excluded branch
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+This is a well-defined bug with a clear root cause, a straightforward fix (~5 lines of production code), and existing test infrastructure that directly supports verifying the fix. A new contributor could complete this with minimal Prow-specific knowledge.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1 production file (`cmd/branchprotector/protect.go`, ~5 lines added), 1 test file (`cmd/branchprotector/protect_test.go`, ~30 lines for a new test case)
+- **Level Indication**: 1
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Add a `b.Protected` check inside the existing exclusion filter and send a removal request. No concurrency concerns, no edge cases beyond the basic scenario. The removal mechanism already exists and is well-tested.
+- **Level Indication**: 1
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: The fix is localized to one function (`UpdateRepo`). A contributor only needs to understand the branch filtering loop and the `requirements` channel. The existing code comments and log messages make the flow self-explanatory. No Prow-wide architectural knowledge needed.
+- **Level Indication**: 1
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause is identified to exact line numbers. The issue author provided a code change suggestion. The desired behavior is unambiguous: excluded branches that are currently protected should have protection removed. No open design questions.
+- **Level Indication**: 1
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Add one test case to the existing `TestProtect` function following the exact pattern of the three existing exclusion tests (lines 1098-1167). The `fakeClient` mock already tracks deletions via its `deleted` map. The `startUnprotected` field controls initial protection state.
+- **Level Indication**: 1
+
+#### Backwards Compatibility
+- **Assessment**: Minor behavior change (safe)
+- **Details**: Previously, excluded branches with existing protection were silently left alone. After the fix, their protection will be actively removed. This matches user expectations — if you exclude a branch, you expect it to not be protected. The change only affects branches explicitly listed in `exclude` patterns, so it's opt-in via configuration.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Uses the existing `p.updates` channel and `requirements{Request: nil}` removal mechanism. Follows the same pattern used by `UpdateBranch` when `Protect: false`. No new abstractions or patterns introduced.
+- **Level Indication**: 1
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Uses existing GitHub API calls (`RemoveBranchProtection`). The `b.Protected` flag comes from `GetBranches(onlyProtected=true)` which is already called. No new API calls needed.
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, existing test patterns to follow
+- [x] `kind/bug`: Fixing incorrect behavior in branch exclusion logic
+- [x] `area/branchprotector`: Affects the branchprotector component
+- [ ] `help-needed`: Too simple for this label — better suited as good-first-issue
+
+### Guidance for Contributors
+
+- Good starting point for new Prow contributors
+- Suggested prerequisite knowledge: Basic Go, understanding of channels
+- The fix is ~5 lines in `cmd/branchprotector/protect.go:341-343`
+- Follow the existing exclusion test pattern in `protect_test.go:1098-1167`
+- The `fakeClient` mock (protect_test.go:83-178) tracks `RemoveBranchProtection` calls in its `deleted` map
+- The issue author's comment provides a helpful starting point for the code change
+
+### Caveats and Considerations
+
+- The `Include` path (lines 338-340) has a similar gap but with different semantics: "include" means "only manage these", so leaving non-included branches alone is arguably correct. Fixing `include` would be a separate issue if desired.
+- The behavior change (actively removing protection from excluded branches) is technically a change in semantics. Deployments that rely on the current behavior (exclude = "don't touch") would be affected. However, this current behavior is clearly a bug, not a feature — the workaround in the issue confirms users expect exclusion to mean "unprotect".
+
 ## Next Steps
 
 - [x] Research: Deep-dive into code paths and solution approaches
-- [ ] Assess effort: Determine complexity level
+- [x] Assess effort: Determine complexity level
 - [ ] Augment: Improve issue with triage findings
 - [ ] Brief: Walk maintainer through findings
 - [ ] Wrapup: Push and post comment

@@ -293,10 +293,47 @@ This is a well-defined bug with a clear root cause, a straightforward fix (~5 li
 - The `Include` path (lines 338-340) has a similar gap but with different semantics: "include" means "only manage these", so leaving non-included branches alone is arguably correct. Fixing `include` would be a separate issue if desired.
 - The behavior change (actively removing protection from excluded branches) is technically a change in semantics. Deployments that rely on the current behavior (exclude = "don't touch") would be affected. However, this current behavior is clearly a bug, not a feature — the workaround in the issue confirms users expect exclusion to mean "unprotect".
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "branchprotector: excluded branches retain existing protection instead of being removed" is already specific, mentions the component, describes the behavior clearly, and uses present tense. Excellent title.
+
+### Proposed GitHub Comment
+
+```
+/reopen
+
+The code at `cmd/branchprotector/protect.go:341-343` treats excluded branches identically to `unmanaged` branches — both are completely skipped. However, their intended semantics differ: `unmanaged` means "don't touch GitHub state" (for manually managed branches), while `exclude` means "these branches should not be protected." When an excluded branch was previously protected (before the exclusion was added), the branchprotector should actively remove that protection rather than silently ignoring it. The existing removal mechanism (`requirements{Request: nil}` -> `RemoveBranchProtection()`) is already in place and works correctly for branches with `protect: false`; excluded branches just need to be routed through it when `b.Protected` is true.
+
+The fix is small (~5 lines in `UpdateRepo()`): check `b.Protected` inside the exclusion filter and send a removal request to the updates channel. The `Protected` flag is already reliably populated by the `GetBranches(onlyProtected=true)` call at line 329 — no new API calls or architectural changes needed. There are three existing exclusion test cases (protect_test.go:1098-1167) and existing test infrastructure (`fakeClient.deleted` map) that serve as templates for adding a test covering this scenario.
+
+/kind bug
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Semantic distinction between `unmanaged`, `exclude`, and `protect: false` — the reporter identified the root cause correctly but didn't frame why the three mechanisms should behave differently. This framing helps contributors understand the design intent.
+- Simplified fix approach — the reporter's suggested fix in their comment adds excluded branches to the branches map and then needs special handling downstream. The simpler approach is to send a removal request directly from the exclusion filter, avoiding any changes to the downstream processing loop.
+- Test guidance — the reporter didn't mention testing. Pointing out existing test patterns and infrastructure lowers the barrier for a contributor to submit a complete fix.
+
+**Why these labels**:
+- `/kind bug`: This is clearly incorrect behavior — the exclusion filter doesn't clean up previously-applied protection
+- `/good-first-issue`: Level 1 effort — ~5 lines of production code, 1 test case following existing patterns, no architectural knowledge needed
+- No `/area` label: There is no established `area/branchprotector` label in the repository
+
+**What's NOT included**:
+- No `/retitle`: Title is already excellent
+- No `/priority`: While the bug causes real user pain (push failures), it has a documented workaround and affects a specific configuration scenario
+- No mention of the `Include` path gap: That's a separate issue with different semantics, mentioning it would add noise
+- The reporter's suggested code change is not criticized: it would also work, just with a slightly larger diff
+
 ## Next Steps
 
 - [x] Research: Deep-dive into code paths and solution approaches
 - [x] Assess effort: Determine complexity level
-- [ ] Augment: Improve issue with triage findings
+- [x] Augment: Improve issue with triage findings
 - [ ] Brief: Walk maintainer through findings
 - [ ] Wrapup: Push and post comment

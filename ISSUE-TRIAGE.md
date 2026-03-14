@@ -33,11 +33,18 @@ There are two reasonable interpretations of what `exclude` means:
 - The name "exclude" most naturally means "exclude from the tool's scope"
 - This is how exclusion works in most tools (gitignore, linters, etc.)
 - The current behavior is consistent: excluded branches are fully ignored
+- `exclude` has **never** removed protection — the `continue` at line 343 has been there since the feature was added (June 2021, commit `512e3c218`). The behavior is deterministic, not intermittent.
 
 **Arguments for interpretation 2 (current behavior is a bug)**:
-- The `unmanaged: true` flag already exists with explicit "don't touch" semantics. If `exclude` also means "don't touch," they're functionally identical (just at different granularity — regex pattern vs per-branch), raising the question of whether `exclude` was intended to have distinct behavior.
-- The user experience is confusing: if a branch was previously managed and you add it to `exclude`, the only way to remove the now-unwanted protection is a clunky workaround (temporarily remove from exclude, let branchprotector run, re-add).
+- The user experience is confusing in the transition scenario: if a branch was previously managed and you add it to `exclude`, the only way to remove the now-unwanted protection is a clunky workaround (temporarily remove from exclude, let branchprotector run, re-add).
 - Users who add branches to `exclude` likely expect them to become unprotected.
+
+**Relationship between `exclude` and `unmanaged`**:
+These features serve different purposes at different granularity levels, not duplicate semantics:
+- `unmanaged: true` is a per-branch setting that requires naming the branch explicitly in config
+- `exclude` is a regex pattern on the repo/org policy that matches many branches at once (e.g., `^dependabot/`, `^konflux-`)
+
+The main use case for `exclude` is **dynamic branches** where you can't predict and list every branch name. Both features currently have the same "don't touch" behavior — `exclude` is effectively the regex-based bulk version of `unmanaged`. Whether `exclude` should additionally clean up previously-applied protection is the design question.
 
 **Conclusion**: Regardless of classification (bug vs feature request), the issue describes a real user pain point with a reasonable proposed solution. The fix is small and backwards-compatible (could even be gated behind a flag if desired).
 

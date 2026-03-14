@@ -361,10 +361,23 @@ If the decision is to have `exclude` actively remove protection, the fix is smal
 - No mention of the `Include` path gap: That's a separate issue with different semantics, mentioning it would add noise
 - The reporter's suggested code change is not criticized: it would also work, just with a slightly larger diff
 
+## Briefing Completed
+
+Briefed maintainer on: 2026-03-14
+
+Key questions asked:
+- Why is this legitimate if "exclude" clearly means "excluded from scope, not disabled"? → Led to semantic ambiguity analysis: current behavior may be correct by design
+- If we have `unmanaged: true`, what is the purpose of `exclude`? → `exclude` is the regex-based bulk version of `unmanaged` for dynamic branches (e.g., `^dependabot/`)
+- Is there a removal mechanism? When does branchprotector remove protection? → `protect: false` actively removes, but only works on named branches
+- Could we use `protect: false`? → Yes, but it can't be regexed — that's the real gap
+
+Maintainer decision:
+No questions remaining. Proceeding to wrapup.
+
 ## Next Steps
 
 - [x] Research: Deep-dive into code paths and solution approaches
 - [x] Assess effort: Determine complexity level
 - [x] Augment: Improve issue with triage findings
-- [ ] Brief: Walk maintainer through findings
+- [x] Brief: Walk maintainer through findings
 - [ ] Wrapup: Push and post comment

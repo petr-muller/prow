@@ -39,12 +39,16 @@ There are two reasonable interpretations of what `exclude` means:
 - The user experience is confusing in the transition scenario: if a branch was previously managed and you add it to `exclude`, the only way to remove the now-unwanted protection is a clunky workaround (temporarily remove from exclude, let branchprotector run, re-add).
 - Users who add branches to `exclude` likely expect them to become unprotected.
 
-**Relationship between `exclude` and `unmanaged`**:
-These features serve different purposes at different granularity levels, not duplicate semantics:
-- `unmanaged: true` is a per-branch setting that requires naming the branch explicitly in config
+**Relationship between `exclude`, `unmanaged`, and `protect: false`**:
+
+These features operate at different granularity levels:
+- `protect: false` is a per-branch setting that actively removes protection — but requires naming the branch explicitly in config
+- `unmanaged: true` is a per-branch setting that leaves GitHub state untouched — also requires naming the branch explicitly
 - `exclude` is a regex pattern on the repo/org policy that matches many branches at once (e.g., `^dependabot/`, `^konflux-`)
 
-The main use case for `exclude` is **dynamic branches** where you can't predict and list every branch name. Both features currently have the same "don't touch" behavior — `exclude` is effectively the regex-based bulk version of `unmanaged`. Whether `exclude` should additionally clean up previously-applied protection is the design question.
+The main use case for `exclude` is **dynamic branches** where you can't predict and list every branch name. Both `exclude` and `unmanaged` currently have the same "don't touch" behavior — `exclude` is effectively the regex-based bulk version of `unmanaged`.
+
+**The real gap**: There is no regex-based equivalent of `protect: false`. The reporter's actual need is a way to say "actively unprotect all branches matching this pattern." `protect: false` does what they want semantically, but it can't be expressed as a regex. Whether that gap should be filled by changing `exclude` semantics, adding a new mechanism (e.g., `unprotect` pattern list or `exclude_removes_protection` flag), or left unfilled is the design question.
 
 **Conclusion**: Regardless of classification (bug vs feature request), the issue describes a real user pain point with a reasonable proposed solution. The fix is small and backwards-compatible (could even be gated behind a flag if desired).
 

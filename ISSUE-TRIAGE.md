@@ -223,6 +223,87 @@ Approach 3 is a good complement for the specific cross-plugin confusion case (`/
 - Integration tests for the suggestion plugin with mock comment events
 - Tests for edge cases: multiple commands in one comment, commands in code blocks (should be ignored)
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+Implementing command suggestions requires either a new plugin with cross-plugin awareness or architectural changes to the hook-plugin interface. The recommended approach (new suggestion plugin) avoids breaking changes but still requires understanding the plugin system deeply, building a command registry from `PluginHelp` data, implementing fuzzy matching, and handling concurrency concerns. The problem itself has significant design uncertainty with multiple viable approaches and trade-offs.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: Approach 1 (suggestion plugin): new plugin (1 file + tests ~300-500 LOC), possibly minor changes to `plugins.Agent` to expose help data. Approach 2 (hook-level): changes to `pkg/hook/events.go`, `pkg/plugins/plugins.go`, and every plugin handler (~20+ files).
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: High
+- **Details**: Building a reliable command registry from `Command.Usage` patterns (which use regex-like notation, not plain command names) is non-trivial. Fuzzy matching must be tuned to avoid false positives. Concurrency with parallel plugin handlers creates race conditions for suggestion timing. Two distinct sub-problems (unrecognized commands vs cross-plugin confusion) require different solutions.
+- **Level Indication**: 3-4
+
+#### Required Expertise
+- **Assessment**: Deep
+- **Details**: Requires understanding of the hook dispatch architecture, the plugin registration system, how `PluginHelp` is aggregated, the parallel goroutine execution model, and how individual plugins parse commands. A contributor must understand *why* the architecture is decentralized to make good design decisions.
+- **Level Indication**: 3-4
+
+#### Clarity and Certainty
+- **Assessment**: Some uncertainty
+- **Details**: The problem is well-understood but the solution has significant design trade-offs. The maintainer's own comment on the issue highlights the architectural challenges. No single approach cleanly solves both sub-problems. Approach 1 leaves Case 2 (cross-plugin confusion) unsolved; Approach 2 requires breaking the plugin interface.
+- **Level Indication**: 2-3
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Need unit tests for fuzzy matching, command extraction from `PluginHelp`, and the suggestion plugin itself. Existing test patterns for plugins can be followed. No new test infrastructure needed, but edge cases (commands in code blocks, multiple commands per comment, edited comments) require careful coverage.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible (Approach 1) / Breaking changes (Approach 2)
+- **Details**: Approach 1 is opt-in via plugin configuration, no impact on existing deployments. Approach 2 would break the `GenericCommentHandler` type signature. Recommendation is to go with Approach 1.
+- **Level Indication**: 1-2 (for recommended approach)
+
+#### Architectural Alignment
+- **Assessment**: Requires new patterns
+- **Details**: No existing plugin performs cross-plugin awareness. The suggestion plugin would need to query `HelpProviders()` to build a command registry, which is a new pattern - currently only the help HTTP endpoint does this. The plugin would also need to handle the fact that it cannot know whether another plugin successfully handled a command (since they run in parallel with no coordination).
+- **Level Indication**: 3
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: No external system constraints. This is purely internal to Prow's plugin system. GitHub API is only used for posting comments (already well-supported).
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `kind/feature`: New functionality for command suggestion
+- [x] `area/hook`: The dispatcher is central to the problem
+- [x] `area/plugins`: Affects the plugin system
+- [ ] `good-first-issue`: Too complex, requires deep architectural understanding
+- [ ] `help-wanted`: Design uncertainty makes this hard for external contributors without maintainer guidance
+
+### Guidance for Contributors
+
+**For Level 3 (Large)**:
+- Requires experience with Prow's plugin architecture, particularly the hook dispatch system
+- Should review before starting:
+  - `pkg/hook/events.go`: How `handleGenericComment` dispatches to plugins
+  - `pkg/plugins/plugins.go`: Plugin registration and handler types
+  - `pkg/pluginhelp/pluginhelp.go`: `Command` and `PluginHelp` structures
+  - `pkg/pluginhelp/hook/hook.go`: How `HelpAgent` aggregates plugin commands
+  - `pkg/plugins/label/label.go`: Example of command parsing and error messages
+- Key architectural considerations:
+  - The suggestion plugin runs in parallel with all other plugins - cannot wait for them to finish
+  - `Command.Usage` patterns are human-readable, not machine-parseable - need reliable extraction of command names
+  - Must handle commands inside code blocks (should be ignored, see `pkg/markdown/code_block.go`)
+  - Must avoid suggesting when another plugin will handle the command correctly
+- Should discuss design approach with maintainers before implementation
+
+### Caveats and Considerations
+
+- The effort could be reduced to Level 2 if scope is limited to *only* Approach 3 (enhancing label plugin error messages for the specific cross-plugin confusion case). This would be a targeted improvement that solves the exact example in the issue.
+- A full solution (Approach 1 + 3) that covers both sub-problems is solidly Level 3.
+- The issue has `lifecycle/stale` label, indicating limited community interest. The effort-to-impact ratio should be considered.
+
 ## Next Steps
 
 (Action items will be added here)

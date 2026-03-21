@@ -304,6 +304,50 @@ Implementing command suggestions requires either a new plugin with cross-plugin 
 - A full solution (Approach 1 + 3) that covers both sub-problems is solidly Level 3.
 - The issue has `lifecycle/stale` label, indicating limited community interest. The effort-to-impact ratio should be considered.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Suggest similar commands when users type non-existent commands" is clear, specific, and accurate.
+
+### Proposed GitHub Comment
+
+```
+Following up on my earlier architectural analysis with some concrete findings from a deeper code review.
+
+There are actually **two distinct sub-problems** here that require different solutions:
+
+1. **Completely unrecognized commands** (e.g., `/aprove` typo for `/approve`): No plugin matches, the user gets zero feedback. This is the easier case.
+2. **Cross-plugin confusion** (the example in this issue: `/label release-note-none` vs `/release-note-none`): The label plugin *does* match the `/label` command but the argument is invalid. The label plugin then reports the error but has no knowledge of the `/release-note-none` command handled by the `releasenote` plugin. This is the harder case.
+
+The good news is that Prow already has the data needed for command suggestions: every plugin provides a `PluginHelp` struct with a `Commands` field (defined in `pkg/pluginhelp/pluginhelp.go`) that includes `Usage` patterns and `Examples`. The `HelpAgent` in `pkg/pluginhelp/hook/hook.go` already aggregates this data from all plugins at runtime for the help endpoint. The missing piece is leveraging this data for command suggestion at dispatch time.
+
+The most viable approach seems to be a **new "command-suggestion" plugin** that registers as a `GenericCommentHandler`, extracts all `/command` patterns from the comment body, compares them against a command registry built from `PluginHelp.Commands`, and posts a "Did you mean...?" comment for close matches using edit distance. This avoids any breaking changes to the plugin interface - it's opt-in via plugin configuration. The main challenge is that this plugin runs in parallel with all other plugins, so it cannot know whether another plugin will successfully handle a command. It would address sub-problem 1 (unrecognized commands) but not sub-problem 2 (cross-plugin confusion). For sub-problem 2, individual plugins (like `label`) could be enhanced to check whether a failed argument matches a known command from another plugin.
+
+This is a **Level 3 (large/expert)** change due to the architectural complexity: cross-plugin awareness is a new pattern in Prow, the `Command.Usage` field uses human-readable regex-like patterns that need parsing, and there's significant design uncertainty. A contributor should discuss the approach with maintainers before starting.
+
+/remove-lifecycle stale
+```
+
+### Rationale
+
+**What's being added**:
+- The two-sub-problem framing (not in original issue or prior comments) - helps contributors understand why this is harder than it looks
+- Concrete reference to `PluginHelp.Commands` as the data source for a command registry - actionable information for would-be implementers
+- A specific viable approach (suggestion plugin) that avoids architectural changes - builds on the architectural concerns raised in my earlier comment
+- Effort level assessment (Level 3) - sets expectations for contributors
+- Removal of stale lifecycle label to keep the issue active
+
+**Why these labels**:
+- `/remove-lifecycle stale`: The triage activity shows this issue is still being considered; remove stale label
+- No new area/kind labels needed: `area/hook`, `area/plugins`, `kind/feature` already correctly applied
+- No difficulty label: Level 3, not appropriate for `good-first-issue` or `help-wanted`
+
+**What's NOT included**:
+- No `/retitle`: Current title is already clear and specific
+- No priority label: Nice-to-have feature enhancement, not urgent
+- No detailed code implementation: Level 3 issue needs design discussion first, not prescriptive code guidance
+
 ## Next Steps
 
 (Action items will be added here)

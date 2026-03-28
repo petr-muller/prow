@@ -136,7 +136,11 @@ that directory automatically. For example, to narrow the watch paths for hook:
 
 ```python
 # tilt.d/narrow-hook-deps.tiltfile
-prow_component('hook', ['cmd/hook/', 'pkg/github/', 'pkg/plugins/'])
+# Override hook's watch paths to only rebuild on plugin changes.
+COMPONENT_DEFS['hook'] = (
+    ['cmd/hook/', 'pkg/github/', 'pkg/plugins/'],
+    COMPONENT_DEFS['hook'][1],
+)
 ```
 
 Files in `tilt.d/` are git-ignored. The directory itself (containing only

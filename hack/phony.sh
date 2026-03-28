@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Copyright The Kubernetes Authors.
+# Copyright 2025 The Kubernetes Authors.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,10 +19,13 @@
 # Reads the HMAC token from the cluster and passes all arguments through to
 # go run ./cmd/phony. The --address flag defaults to the local dev hook endpoint.
 
-set -euo pipefail
+set -o errexit
+set -o nounset
+set -o pipefail
 
 HMAC=$(kubectl --context=kind-kind-prow-integration \
-    get secret hmac-token -o jsonpath='{.data.hmac}' | base64 -d)
+    get secret hmac-token -o jsonpath='{.data.hmac}' | base64 -d) \
+    || { echo >&2 "ERROR: failed to read HMAC token from the cluster. Is the dev environment running?"; exit 1; }
 
 exec go run ./cmd/phony \
     --address="http://localhost:${DEV_HTTP_PORT:-8080}/hook" \

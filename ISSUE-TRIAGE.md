@@ -163,6 +163,74 @@ While more complex, this approach correctly addresses the actual use case. Git s
 - Test: no excluded paths configured → current behavior preserved
 - Test: regex pattern matching for paths
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+A well-defined feature request that follows established Prow plugin patterns (blockade). Requires adding config plumbing to a currently zero-config plugin and implementing a new git operation, but the path is clear and the change is fully backwards compatible.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: 5-8 files affected (~200-400 LOC): config struct in `config.go`, plugin logic in `mergecommitblocker.go`, new git method in `interactor.go`, tests for all three, config documentation in `plugin-config-documented.yaml`
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: Config plumbing follows existing patterns exactly (blockade). The new git operation (`git diff-tree` per merge commit) is straightforward. Regex compilation follows existing `compileRegexpsAndDurations()` pattern. No concurrency, no race conditions.
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Needs familiarity with Prow plugin config patterns, Go regex handling, and git operations. All patterns can be learned from the blockade plugin as a template.
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined with minor design decisions
+- **Details**: The problem and general approach are clear. Minor decisions: exact config field naming, regex vs glob patterns (regex preferred for consistency), per-repo vs global config. These are tractable.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Follow existing test patterns from `mergecommitblocker_test.go`. Need to add scenarios for: excluded paths configured, merge commits touching only excluded paths (allowed), merge commits touching mixed paths (blocked), no config (current behavior preserved). New git interactor tests needed.
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: No config = current behavior. The change is purely additive — only users who configure excluded paths will see different behavior.
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Follows the blockade plugin's established pattern for path-based config. Extends the plugin config system in a standard way. The only new pattern is a git interactor method, which is a natural extension.
+- **Level Indication**: 2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Uses git operations (already available via the interactor) and existing plugin config infrastructure. No external API changes needed.
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined scope, clear approach, good for skilled contributors
+- [ ] `good-first-issue`: Too involved for a first contribution — requires config plumbing across multiple files and understanding of plugin patterns
+
+### Guidance for Contributors
+
+- Should review the blockade plugin (`pkg/plugins/blockade/`) as a template for path-based config
+- Should review plugin config patterns in `pkg/plugins/config.go`
+- Recommended approach: Start with the config struct, then add the git interactor method, then update the plugin logic
+- Test with real git subtree operations to validate the approach
+
+### Caveats and Considerations
+
+- The issue author suggests `excludeDir` (simple directory names), but regex patterns are recommended for consistency with existing Prow patterns (blockade uses `ExceptionRegexps`)
+- Contributors should consider whether the config should be per-repo or global — per-repo is more flexible and consistent with other plugin configs
+- The `git diff-tree` approach for inspecting merge commit files needs careful handling of merge commits with 2+ parents
+
 ## Next Steps
 
 (Action items will be added here)

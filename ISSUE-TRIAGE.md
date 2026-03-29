@@ -231,6 +231,40 @@ A well-defined feature request that follows established Prow plugin patterns (bl
 - Contributors should consider whether the config should be per-repo or global — per-repo is more flexible and consistent with other plugin configs
 - The `git diff-tree` approach for inspecting merge commit files needs careful handling of merge commits with 2+ parents
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Allow use of Git subtrees with `mergecommitblocker`" clearly communicates the use case and the affected component.
+
+### Proposed GitHub Comment
+
+```
+The `mergecommitblocker` plugin currently has zero configuration options — it unconditionally blocks all merge commits by running `git log --merges` between the base and head SHAs and applying the `do-not-merge/contains-merge-commits` label. Adding path-based exclusions would require building the config plumbing from scratch for this plugin, but there's a good template to follow: the `blockade` plugin (`pkg/plugins/blockade/`) already implements path-based regex filtering with `ExceptionRegexps` in its config struct and uses `compileRegexpsAndDurations()` for validation.
+
+An important design consideration: a simple check of the PR's overall changed files wouldn't be precise enough, since subtree PRs often also modify files outside the subtree directory. The implementation should instead inspect which files each merge commit specifically touches (e.g., via `git diff-tree --name-only`), and only allow the merge commits whose changed files all fall within excluded paths. This keeps the feature correct for mixed PRs that contain both subtree merges and regular commits. The git interactor (`pkg/git/v2/interactor.go`) would need a new method alongside the existing `MergeCommitsExistBetween()`.
+
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- The plugin's current zero-config state (the issue doesn't mention this — it implies config might already exist)
+- The blockade plugin as a concrete implementation template for contributors
+- The critical design insight about per-merge-commit file inspection vs PR-level check
+- The git interactor extension needed
+
+**Why these labels**:
+- `/help-wanted`: Level 2 effort — well-defined, follows established patterns, good for skilled contributors
+- No `/area` or `/kind` changes: `area/plugins` and `kind/feature` are already correctly applied
+
+**What's NOT included**:
+- No `/retitle`: title is already clear and specific
+- No `/priority`: this is an enhancement, not a critical bug
+- No `/good-first-issue`: requires config plumbing across multiple files and understanding of plugin patterns — too involved for a first contribution
+- No repetition of the issue's own content about subtrees and merge commits
+
 ## Next Steps
 
 (Action items will be added here)

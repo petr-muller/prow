@@ -190,6 +190,84 @@ This is the proven strategy — Gravitational Teleport successfully migrated a s
 - Core interfaces (ReportClient, plugins.Agent) are the critical path — coordinate these changes carefully
 - Each package conversion should be a separate PR for reviewability
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+This is a codebase-wide dependency migration touching ~250 files, multiple public interfaces, and custom logging infrastructure. While the individual file changes are mechanically simple (API translation), the scope, interface-breaking nature, and coordination required across the plugin system, reporter implementations, and Kubernetes ecosystem interop push this firmly to Level 3.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Very Large
+- **Details**: ~250 Go files import logrus. 31+ cmd/ entry points use ComponentInit(). 5+ public interfaces expose logrus types. Custom pkg/logrusutil/ package must be rewritten. If done incrementally, each individual PR is moderate (5-20 files), but the total migration is massive.
+- **Level Indication**: 3-4
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: Each individual file conversion is mechanically straightforward (logrus.WithField → slog.With, logrus.Info → slog.Info). The complexity lies in: (1) rewriting CensoringFormatter as slog Handler middleware, (2) handling Fatal/Panic level removal, (3) managing package-level logger initialization ordering, (4) maintaining GCP severity field compatibility, (5) coordinating interface changes across the plugin system.
+- **Level Indication**: 2-3
+
+#### Required Expertise
+- **Assessment**: Moderate-to-Deep
+- **Details**: Requires understanding of: slog Handler interface and middleware patterns, logr/slog interop for Kubernetes libraries, Prow's plugin system architecture, and how CensoringFormatter and DefaultFieldsFormatter work. A contributor needs to understand both the old and new logging ecosystems well.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The goal is clear (replace logrus with slog), the approach is proven (Teleport did it), and the API mapping is well-understood. The main uncertainty is around ordering of interface changes and whether to use a bridge library during transition.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Existing tests provide good coverage. Most changes are API-level swaps that existing tests validate. New tests needed for: slog Handler equivalents of DefaultFieldsFormatter and CensoringFormatter, logr bridge integration, and GCP severity field output format.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Breaking changes (if done at interface level)
+- **Details**: Any downstream consumers using Prow as a Go library and depending on `*logrus.Entry` in function signatures, struct fields, or interface methods will break. The `plugins.Agent.Logger` field type change affects all plugin implementations. The `ReportClient` interface change affects all reporter implementations. If done incrementally, each breaking change can be managed, but the total breaking surface is significant.
+- **Level Indication**: 3-4
+
+#### Architectural Alignment
+- **Assessment**: Good fit with pattern extension
+- **Details**: slog is a natural evolution from logrus. The existing patterns (struct field injection, WithField chaining, centralized init) all have direct slog equivalents. The CensoringFormatter → slog Handler middleware pattern is actually cleaner architecturally. Removing logrusr in favor of native logr/slog interop simplifies the dependency chain.
+- **Level Indication**: 2-3
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: slog is part of the Go standard library. logr has native slog interop. klog supports SetSlogLogger(). Bridge libraries (samber/slog-logrus) are mature and stable. No external blockers.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `kind/cleanup`: Dependency modernization / tech debt reduction
+- [x] `area/prow`: Affects all Prow components
+- [x] `help-wanted`: Large scope benefits from community contribution, but requires coordination
+- [ ] `good-first-issue`: Too large and cross-cutting for a new contributor
+
+### Guidance for Contributors
+
+**For Level 3 (Large)**:
+- Requires understanding of Prow's plugin system, reporter framework, and logging initialization
+- Should consult with maintainers before starting to agree on migration strategy and PR ordering
+- Recommended approach: Incremental migration with bridge (see Proposed Solutions above)
+- Reference: Gravitational Teleport's logrus→slog migration (issue #28109) as a model
+- Key architectural considerations:
+  - Maintain GCP log collection compatibility ("severity" field)
+  - Preserve secret censoring capability
+  - Coordinate interface changes to minimize churn
+  - Handle Fatal/Panic → Error + os.Exit(1) conversion
+- Could be split into a tracking issue with sub-issues for each phase
+
+### Caveats and Considerations
+
+- The scope is borderline Level 3/4 due to sheer volume, but the mechanical nature of most changes and the proven migration pattern keep it at Level 3.
+- This is excellent work for an experienced contributor looking for a high-impact modernization project.
+- The migration could reasonably be spread across 15-25 PRs over several months.
+- Each individual PR in the incremental approach would be Level 1-2 in isolation — the challenge is the coordination and total scope.
+
 ## Next Steps
 
 (Action items will be added here)

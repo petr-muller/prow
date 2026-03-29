@@ -268,6 +268,44 @@ This is a codebase-wide dependency migration touching ~250 files, multiple publi
 - The migration could reasonably be spread across 15-25 PRs over several months.
 - Each individual PR in the incremental approach would be Level 1-2 in isolation — the challenge is the coordination and total scope.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Switch From logrus To slog" is clear, specific, and accurately describes the request.
+
+### Proposed GitHub Comment
+
+```
+Logrus is currently imported in approximately 250 Go files across the codebase, with a centralized initialization through `pkg/logrusutil.ComponentInit()` called by 31+ command entry points. Prow also has custom logging infrastructure in `pkg/logrusutil/` including a `DefaultFieldsFormatter` (which renames "level" to "severity" for GCP log collection compatibility and injects component name), a `CensoringFormatter` (which scrubs secrets from log output), and `ThrottledWarnf` (which rate-limits deprecation warnings). For Kubernetes library interop, Prow currently bridges logrus to logr via `bombsimon/logrusr/v4`. All of these would need slog equivalents.
+
+The main challenge is that `*logrus.Entry` and `logrus.Fields` are exposed in several public interfaces: the `crier.ReportClient` interface (implemented by 5+ reporters), the `github.Client`/`bugzilla.Client`/`jira.Client`/`repoowners.Interface` all have `WithFields(logrus.Fields)` methods, and the plugin system's `plugins.Agent` struct exposes `Logger *logrus.Entry` to every plugin handler. This means the migration cannot be purely internal — interface consumers must update too. An incremental migration using a bridge adapter (e.g., `samber/slog-logrus`) would allow package-by-package conversion while keeping the codebase functional throughout. Gravitational Teleport successfully completed a similar-scale logrus-to-slog migration using this approach. For Kubernetes library compatibility, `logr.FromSlogHandler()` can replace the current `logrusr` bridge, simplifying the dependency chain.
+
+This is a large but well-understood migration that could be broken into 15-25 incremental PRs across four phases: (1) create slog-based equivalents of `pkg/logrusutil/` utilities, (2) update core interfaces to accept `*slog.Logger`, (3) convert packages individually starting from leaves, (4) remove logrus dependency and `logrusr` bridge.
+
+/area dependency
+/kind cleanup
+```
+
+### Rationale
+
+**What's being added**:
+- Scope quantification: the issue says "switch" but doesn't quantify; adding that logrus is in ~250 files with custom infrastructure gives contributors a realistic picture
+- API surface impact: the public interface exposure is the key technical challenge that isn't mentioned in the issue
+- Migration strategy: referencing the incremental approach and Teleport precedent gives contributors a proven playbook
+- Phase breakdown: concrete phases help potential contributors understand the work structure
+
+**Why these labels**:
+- `/area dependency`: This is a dependency modernization (logrus → slog). No single component label applies since all components are affected.
+- `/kind cleanup`: This is tech debt cleanup / dependency modernization, not a new feature or bug fix.
+- No difficulty label: Level 3 effort — too complex and cross-cutting for good-first-issue or help-wanted. Experienced contributors will self-select.
+
+**What's NOT included**:
+- No `/retitle`: Current title is already clear and concise
+- No `/priority`: This is a modernization, not urgent — logrus works fine, it just won't receive new features
+- No `/help-wanted`: Despite the large scope, the cross-cutting nature and interface-breaking changes require an experienced contributor who understands the full architecture, not a typical help-wanted candidate
+- Performance comparison (slog is ~5x faster): Omitted because Prow is not performance-sensitive in its logging and this would be a misleading motivation
+
 ## Next Steps
 
 (Action items will be added here)

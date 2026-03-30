@@ -240,9 +240,11 @@ A well-defined feature request that follows established Prow plugin patterns (bl
 ### Proposed GitHub Comment
 
 ```
-The `mergecommitblocker` plugin currently has zero configuration options — it unconditionally blocks all merge commits by running `git log --merges` between the base and head SHAs and applying the `do-not-merge/contains-merge-commits` label. Adding path-based exclusions would require building the config plumbing from scratch for this plugin, but there's a good template to follow: the `blockade` plugin (`pkg/plugins/blockade/`) already implements path-based regex filtering with `ExceptionRegexps` in its config struct and uses `compileRegexpsAndDurations()` for validation.
+The `mergecommitblocker` plugin currently has zero configuration options — it unconditionally blocks all merge commits by running `git log --merges` between the base and head SHAs and applying the `do-not-merge/contains-merge-commits` label. Adding path-based exclusions would require building the config plumbing from scratch for this plugin, but there are good templates to follow: the `lgtm` plugin's org/repo-sharded config pattern (with a `MergeCommitBlockerFor(org, repo)` lookup returning a single config entry, repo-specific overriding org-level) would be a natural fit. Excluded paths should be specified as regexes, consistent with how other plugins handle pattern matching.
 
 An important design consideration: a simple check of the PR's overall changed files wouldn't be precise enough, since subtree PRs often also modify files outside the subtree directory. The implementation should instead inspect which files each merge commit specifically touches (e.g., via `git diff-tree --name-only`), and only allow the merge commits whose changed files all fall within excluded paths. This keeps the feature correct for mixed PRs that contain both subtree merges and regular commits. The git interactor (`pkg/git/v2/interactor.go`) would need a new method alongside the existing `MergeCommitsExistBetween()`.
+
+See also #610 which deals with a related problem — `owners-label` applying wrong labels based on merge commit file changes.
 
 /help-wanted
 ```
@@ -251,9 +253,10 @@ An important design consideration: a simple check of the PR's overall changed fi
 
 **What's being added**:
 - The plugin's current zero-config state (the issue doesn't mention this — it implies config might already exist)
-- The blockade plugin as a concrete implementation template for contributors
+- The LGTM plugin's org/repo sharded config as the pattern to follow (per maintainer preference)
 - The critical design insight about per-merge-commit file inspection vs PR-level check
 - The git interactor extension needed
+- Cross-reference to #610 (related merge commit problem in owners-label)
 
 **Why these labels**:
 - `/help-wanted`: Level 2 effort — well-defined, follows established patterns, good for skilled contributors
@@ -265,6 +268,20 @@ An important design consideration: a simple check of the PR's overall changed fi
 - No `/good-first-issue`: requires config plumbing across multiple files and understanding of plugin patterns — too involved for a first contribution
 - No repetition of the issue's own content about subtrees and merge commits
 
+## Briefing Completed
+
+Briefed maintainer on: 2026-03-30
+
+Key questions asked:
+- What PR originally added the plugin? → Commit 3e07c63cd from 2019, always been zero-config
+- Any duplicates requesting this in another plugin? → No, but #610 (owners-label ignoring merge commits) and #617 (fixup commit blocking in invalidcommitmsg) are related
+- Why blockade as the template? → Maintainer preferred LGTM's org/repo sharded config pattern instead; updated recommendation accordingly
+- Regexes or simple prefixes? → Maintainer prefers regexes
+
+Maintainer decision:
+Proceed with augmentation using LGTM-style config pattern and regex-based path exclusions
+
 ## Next Steps
 
-(Action items will be added here)
+1. Run wrapup to push branches and post augmentation comment
+2. Wait for contributor to pick up the issue

@@ -281,7 +281,9 @@ Key questions asked:
 Maintainer decision:
 Proceed with augmentation using LGTM-style config pattern and regex-based path exclusions
 
-## Next Steps
+## Comment Posted
 
-1. Run wrapup to push branches and post augmentation comment
-2. Wait for contributor to pick up the issue
+Posted augmentation comment on: 2026-03-30
+Comment URL: https://github.com/kubernetes-sigs/prow/issues/666#issuecomment-4157059982
+
+**Status**: Complete

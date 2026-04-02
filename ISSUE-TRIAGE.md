@@ -45,9 +45,159 @@ This is a well-documented, legitimate bug in Tide's merge queue logic. The issue
 **Suggested Action**:
 - Keep open and continue triage
 
-## Findings
+## Code Research
 
-(Additional findings from triage subcommands will be added here)
+### Current Implementation
+
+**Primary Components**:
+- **Tide sync loop** (`pkg/tide/tide.go`): Periodically queries PRs, classifies them, and attempts merges
+- **GitHub merge provider** (`pkg/tide/github.go`): Executes actual merge API calls against GitHub
+- **GitHub client** (`pkg/github/client.go`): Low-level GitHub API client, defines merge error types
+
+**Architecture Overview**:
+Tide runs a periodic sync loop that: (1) queries PRs matching configured label queries, (2) classifies them by ProwJob status via `accumulate()`, (3) picks the highest-priority PR to merge via `pickHighestPriorityPR()`, (4) attempts the merge via `mergePRs()` → `tryMerge()`. Each sync cycle is stateless — no information about merge failures carries over between cycles.
+
+**Key Code Paths**:
+1. `syncSubpool()`: `pkg/tide/tide.go:1721` — entry point for per-pool sync
+2. `accumulate()`: `pkg/tide/tide.go:1077` — classifies PRs into successes/pendings/missings based solely on ProwJob status
+3. `takeAction()`: `pkg/tide/tide.go:1483` — decides merge/trigger/wait action; calls `pickHighestPriorityPR()` and `mergePRs()`
+4. `pickHighestPriorityPR()`: `pkg/tide/tide.go:912` — selects PR by priority tiers then lowest PR number
+5. `tryMerge()`: `pkg/tide/tide.go:1365` — attempts merge with retries; classifies errors as fatal (keepTrying=false) or non-fatal (keepTrying=true)
+6. `mergePRs()`: `pkg/tide/github.go:243` — loops through PRs, calls `tryMerge()`, logs `UnmergablePRError` at Debug level only
+
+**Data Flow (the bug)**:
+1. Sync cycle starts → `accumulate()` classifies PR as "success" (tests pass)
+2. `pickHighestPriorityPR()` selects this PR (lowest number, passing tests)
+3. `mergePRs()` → `tryMerge()` → GitHub API returns HTTP 405 → `UnmergablePRError`
+4. `tryMerge()` returns `keepTrying=true` (line 1415-1416) — this is the non-fatal path
+5. Error logged at Debug level (line 291 in github.go) — easily missed in production
+6. `syncSubpool()` logs the error (line 1742-1743) but takes no corrective action
+7. Next sync cycle: PR is still in pool, tests still pass → go to step 1
+8. **Infinite loop**: same PR selected every cycle, blocking all other PRs in the repo
+
+### Related Code
+
+**Error type hierarchy in `tryMerge()`** (`pkg/tide/tide.go:1365-1423`):
+- `ModifiedHeadError` → keepTrying=true (non-fatal, PR was modified)
+- `UnmergablePRBaseChangedError` → keepTrying=true (retries with backoff)
+- `UnauthorizedToPushError` → keepTrying=false (fatal, stops merge loop)
+- `MergeCommitsForbiddenError` → keepTrying=false (fatal, stops merge loop)
+- **`UnmergablePRError` → keepTrying=true** (non-fatal, but causes the retry loop bug)
+
+**`syncController` struct** (`pkg/tide/tide.go:79-98`): Has no state for tracking merge failures across sync cycles. No cooldown mechanism, no failure counters, no exclusion lists.
+
+**`UnmergablePRError`** (`pkg/github/client.go:4017-4020`): A catch-all for HTTP 405 responses from GitHub's merge API that don't match more specific error patterns. Triggers when branch protection blocks the merge (insufficient reviews, changes-requested review, etc.).
+
+### Test Coverage
+
+**Existing Tests**:
+- `pkg/tide/tide_test.go:1899` — Tests that `UnmergablePRError` in a batch doesn't stop merging other PRs in the same batch
+- Coverage assessment: **Partial** — only tests within-cycle behavior, NOT cross-cycle retry loop
+
+**Test Gaps**:
+- No test for the scenario where an unmergeable PR is selected again on the next sync cycle
+- No test verifying that other PRs in the same repo can be merged when one is stuck
+- No test for the commenter's scenario (changes-requested review + lgtm/approve labels)
+
+### Root Cause Analysis
+
+**Primary Cause**:
+`accumulate()` (line 1077) only considers ProwJob/CI status when classifying PRs. It has no awareness of merge failures. Combined with deterministic selection in `pickHighestPriorityPR()` (lowest PR number first), a PR that is unmergeable due to GitHub branch protection will be selected on every sync cycle indefinitely.
+
+**Contributing Factors**:
+1. `tryMerge()` treats `UnmergablePRError` as non-fatal (keepTrying=true), which is correct for within-batch behavior but causes the cross-cycle loop
+2. `syncController` maintains no state about merge failures between sync cycles
+3. The error is logged at Debug level, making the loop hard to detect in production
+4. `pickHighestPriorityPR()` is deterministic — always picks the same PR if nothing changes
+5. The disconnect between Tide's label-based query (approved+lgtm) and GitHub's review-count enforcement creates PRs that Tide thinks are mergeable but GitHub rejects
+
+**Reproduction Conditions**:
+- `enforce_admins: true` in branch protection (forces Tide to respect review requirements)
+- `required_approving_review_count: N` where N > 0
+- A PR with approved+lgtm labels but fewer than N GitHub approving reviews
+- Another PR in the same repo that is fully ready to merge (blocked by the stuck one)
+- Also reproducible with "changes requested" GitHub review + approved/lgtm labels (per commenter)
+
+### Proposed Solutions
+
+#### Approach 1: Temporary Cooldown for Unmergeable PRs
+
+**Description**: Add a time-based cooldown map to `syncController` that tracks PRs which failed with `UnmergablePRError`. Skip these PRs in `pickHighestPriorityPR()` or `accumulate()` for a configurable TTL (e.g., 5 minutes), allowing Tide to advance to other candidates.
+
+**Pros**:
+- Directly addresses the queue-blocking symptom
+- Self-healing: cooldown expires, PR is retried (in case reviews are added)
+- Minimal code change: add a map + TTL check + recording logic
+- Approach suggested by the issue reporter
+
+**Cons**:
+- Adds mutable state to `syncController` (needs synchronization)
+- TTL is somewhat arbitrary — too short and the loop persists, too long and legitimate retries are delayed
+- Doesn't address the root disconnect between Tide queries and GitHub merge requirements
+- Memory management needed (cleanup of stale entries)
+
+**Affected Components**:
+- `syncController` struct: add `mergeFailures` map
+- `mergePRs()` in `github.go`: record failures
+- `accumulate()` or `pickHighestPriorityPR()` in `tide.go`: filter out cooled-down PRs
+
+**Complexity**: Medium
+**Backwards Compatibility**: Fully compatible — new behavior only activates on merge failures
+
+#### Approach 2: Pre-merge Mergeability Check
+
+**Description**: Before attempting to merge a PR, query the GitHub API for the PR's `mergeable` status (or check review state). Skip PRs that GitHub reports as unmergeable, preventing the failed merge attempt entirely.
+
+**Pros**:
+- Prevents the error entirely rather than recovering from it
+- Uses GitHub's own mergeability assessment
+- No need for cooldown timers or failure tracking state
+
+**Cons**:
+- Additional API call per PR per sync cycle (rate limit impact)
+- GitHub's `mergeable` field can be `null` (mergeability not yet computed) — needs handling
+- May not cover all cases (the `mergeable` field doesn't always reflect branch protection violations)
+- Adds latency to the merge decision path
+
+**Affected Components**:
+- `pickHighestPriorityPR()` or `takeAction()`: add mergeability check
+- `github.go`: add method to query PR mergeability
+
+**Complexity**: Medium
+**Backwards Compatibility**: Fully compatible
+
+#### Approach 3: Exponential Backoff on Repeated Failures
+
+**Description**: Instead of a binary cooldown, track failure count per PR and apply exponential backoff — a PR that fails once waits 1 cycle, fails twice waits 2 cycles, etc. After enough failures, effectively deprioritize it.
+
+**Pros**:
+- Graceful degradation: first failure has minimal impact, repeated failures get progressively deprioritized
+- No arbitrary TTL to configure
+- Self-healing with adaptive timing
+
+**Cons**:
+- More complex state tracking (failure count + last attempt time)
+- Still doesn't address root cause
+- Harder to reason about behavior
+
+**Complexity**: Medium-High
+**Backwards Compatibility**: Fully compatible
+
+#### Recommendation
+
+**Preferred Approach**: Approach 1 (Temporary Cooldown) — it's the simplest effective fix, directly addresses the symptom, is self-healing, and was already proposed by the reporter. Could be combined with elevating the log level from Debug to Warning for better observability.
+
+**Key Implementation Considerations**:
+1. TTL should be configurable in Tide config (default ~5 minutes seems reasonable)
+2. Cooldown map needs mutex protection (sync cycles are concurrent per subpool)
+3. Stale entries should be pruned periodically (e.g., during each sync cycle)
+4. Log level for `UnmergablePRError` should be raised from Debug to at least Info/Warning
+
+**Testing Requirements**:
+- Test that a cooled-down PR is skipped by `pickHighestPriorityPR()`
+- Test that Tide advances to the next PR when one is in cooldown
+- Test that the cooldown expires and the PR is retried
+- Test cleanup of stale cooldown entries
 
 ## Next Steps
 

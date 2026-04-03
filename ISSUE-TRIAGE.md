@@ -139,7 +139,7 @@ Tide runs a periodic sync loop that: (1) queries PRs matching configured label q
 **Affected Components**:
 - `syncController` struct: add `mergeFailures` map
 - `mergePRs()` in `github.go`: record failures
-- `accumulate()` or `pickHighestPriorityPR()` in `tide.go`: filter out cooled-down PRs
+- `syncSubpool()` in `tide.go`: filter cooled-down PRs from `successes` between `accumulate()` and `takeAction()`
 
 **Complexity**: Medium
 **Backwards Compatibility**: Fully compatible — new behavior only activates on merge failures
@@ -185,13 +185,14 @@ Tide runs a periodic sync loop that: (1) queries PRs matching configured label q
 
 #### Recommendation
 
-**Preferred Approach**: Approach 1 (Temporary Cooldown) — it's the simplest effective fix, directly addresses the symptom, is self-healing, and was already proposed by the reporter. Could be combined with elevating the log level from Debug to Warning for better observability.
+**Preferred Approach**: Approach 1 (Temporary Cooldown) — it's the simplest effective fix, directly addresses the symptom, is self-healing, and was already proposed by the reporter.
 
 **Key Implementation Considerations**:
 1. TTL should be configurable in Tide config (default ~5 minutes seems reasonable)
 2. Cooldown map needs mutex protection (sync cycles are concurrent per subpool)
 3. Stale entries should be pruned periodically (e.g., during each sync cycle)
-4. Log level for `UnmergablePRError` should be raised from Debug to at least Info/Warning
+4. Filter benched PRs from `successes` between `accumulate()` and `takeAction()` in `syncSubpool()` — keeps `accumulate()` pure (ProwJob status only) while excluding benched PRs from all downstream logic including batches
+5. Merge errors already surface through `History.Record()` in `syncSubpool()` (line 1746-1753) — no need to change the Debug log level in `mergePRs()`
 
 **Testing Requirements**:
 - Test that a cooled-down PR is skipped by `pickHighestPriorityPR()`
@@ -259,9 +260,8 @@ The fix requires adding cross-cycle failure tracking state to `syncController` a
 
 - Should review the Tide sync loop flow documented in this triage, especially `syncSubpool()` → `takeAction()` → `mergePRs()` → `tryMerge()`
 - Look at existing test patterns in `pkg/tide/tide_test.go`, particularly the `TestMergePRs` test around line 1899
-- Key design decision: where to filter cooled-down PRs (recommendation: in `pickHighestPriorityPR()` or just before calling `mergePRs()` in `takeAction()`)
+- Filtering point: between `accumulate()` and `takeAction()` in `syncSubpool()` — filter benched PRs from `successes` list
 - The `syncController` struct at `pkg/tide/tide.go:79` is the natural place for the failure tracking map
-- Consider also raising the log level for `UnmergablePRError` from Debug to Warning in `github.go:291`
 
 ### Caveats and Considerations
 
@@ -280,7 +280,7 @@ The fix requires adding cross-cycle failure tracking state to `syncController` a
 ```
 The issue is broader than the `enforce_admins` + review count scenario described. `UnmergablePRError` is the catch-all for any HTTP 405 from GitHub's merge API that doesn't match more specific error types (`UnmergablePRBaseChangedError`, `UnauthorizedToPushError`, `MergeCommitsForbiddenError`). This means the same retry loop will occur for _any_ unmergeable condition GitHub detects: merge conflicts, unresolved conversations, changes-requested reviews (as @tuminoid confirmed), or any future 405 reasons GitHub adds. A fix should target the `UnmergablePRError` path generically, not just the review-count case.
 
-The existing test at `pkg/tide/tide_test.go:1899` ("batch merge errors but continues if a PR is unmergeable") only verifies within-batch behavior — that other PRs in the same batch can still merge when one fails. It does not test the cross-cycle retry loop described here, which is the actual bug. The merge failure is also logged at `Debug` level in `mergePRs()` (`pkg/tide/github.go:291`), making the loop difficult to detect in production logs. A fix should also raise this to at least `Warning` level.
+The existing test at `pkg/tide/tide_test.go:1899` ("batch merge errors but continues if a PR is unmergeable") only verifies within-batch behavior — that other PRs in the same batch can still merge when one fails. It does not test the cross-cycle retry loop described here, which is the actual bug. A good approach would be a temporary cooldown map in `syncController` that benches PRs after `UnmergablePRError`, filtering them from the `successes` list between `accumulate()` and `takeAction()` in `syncSubpool()`. This keeps `accumulate()` pure (ProwJob status only) while letting Tide advance to the next mergeable PR. The cooldown would expire after a configurable TTL, allowing periodic retries.
 
 /area tide
 /kind bug
@@ -292,8 +292,7 @@ The existing test at `pkg/tide/tide_test.go:1899` ("batch merge errors but conti
 **What's being added**:
 - The scope of the bug is broader than described: any HTTP 405 cause triggers the loop, not just review count + enforce_admins
 - The existing test coverage gap: there IS a test for within-batch behavior but NOT for the cross-cycle loop
-- The observability gap: error logged at Debug level makes the loop hard to detect
-- Confirmation that the commenter's scenario (changes-requested) is a natural consequence of the same bug
+- Specific implementation guidance: cooldown map filtering between `accumulate()` and `takeAction()`
 
 **Why these labels**:
 - `/area tide`: Bug is entirely within the Tide merge loop
@@ -305,6 +304,18 @@ The existing test at `pkg/tide/tide_test.go:1899` ("batch merge errors but conti
 - No `/priority`: While annoying, this has a workaround (ensure GitHub reviews match Tide label requirements). Not blocking or causing data loss.
 - No detailed fix guidance in the comment: the reporter already provided thorough pseudocode. Adding more would be redundant.
 - No reference to #134: the reporter already linked it clearly
+
+## Briefing Completed
+
+Briefed maintainer on: 2026-04-03
+
+Key questions asked:
+- Why not filter benched PRs earlier, before `takeAction()`? → Agreed: filter between `accumulate()` and `takeAction()` in `syncSubpool()` to keep `accumulate()` pure and exclude benched PRs from all downstream logic including batches
+- Is raising the Debug log level for `UnmergablePRError` necessary? → No: merge errors already surface through `History.Record()` in `syncSubpool()` (line 1746-1753), so the Debug log in `mergePRs()` is not the only visibility point. Dropped from recommendations.
+
+Maintainer decisions:
+- Filtering point: between `accumulate()` and `takeAction()` in `syncSubpool()`
+- No log level change needed
 
 ## Next Steps
 

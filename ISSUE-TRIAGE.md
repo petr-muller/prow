@@ -269,6 +269,43 @@ The fix requires adding cross-cycle failure tracking state to `syncController` a
 - The cooldown approach treats the symptom (queue blocking) but not the root cause (Tide's unawareness of GitHub review requirements). A more comprehensive fix addressing #134 would solve both issues but would be Level 3
 - The commenter's scenario (changes-requested review) should be verified to also produce `UnmergablePRError` — if it produces a different error type, the fix may need to cover additional error types
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Tide gets stuck retrying unmergeable PR instead of advancing to next candidate" is specific, mentions the component, and accurately describes the bug.
+
+### Proposed GitHub Comment
+
+```
+The issue is broader than the `enforce_admins` + review count scenario described. `UnmergablePRError` is the catch-all for any HTTP 405 from GitHub's merge API that doesn't match more specific error types (`UnmergablePRBaseChangedError`, `UnauthorizedToPushError`, `MergeCommitsForbiddenError`). This means the same retry loop will occur for _any_ unmergeable condition GitHub detects: merge conflicts, unresolved conversations, changes-requested reviews (as @tuminoid confirmed), or any future 405 reasons GitHub adds. A fix should target the `UnmergablePRError` path generically, not just the review-count case.
+
+The existing test at `pkg/tide/tide_test.go:1899` ("batch merge errors but continues if a PR is unmergeable") only verifies within-batch behavior — that other PRs in the same batch can still merge when one fails. It does not test the cross-cycle retry loop described here, which is the actual bug. The merge failure is also logged at `Debug` level in `mergePRs()` (`pkg/tide/github.go:291`), making the loop difficult to detect in production logs. A fix should also raise this to at least `Warning` level.
+
+/area tide
+/kind bug
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- The scope of the bug is broader than described: any HTTP 405 cause triggers the loop, not just review count + enforce_admins
+- The existing test coverage gap: there IS a test for within-batch behavior but NOT for the cross-cycle loop
+- The observability gap: error logged at Debug level makes the loop hard to detect
+- Confirmation that the commenter's scenario (changes-requested) is a natural consequence of the same bug
+
+**Why these labels**:
+- `/area tide`: Bug is entirely within the Tide merge loop
+- `/kind bug`: This is a bug in existing functionality, not a feature request
+- `/help-wanted`: Level 2 effort — well-defined problem with clear solution approach, suitable for a skilled contributor
+
+**What's NOT included**:
+- No `/retitle`: Current title is already excellent
+- No `/priority`: While annoying, this has a workaround (ensure GitHub reviews match Tide label requirements). Not blocking or causing data loss.
+- No detailed fix guidance in the comment: the reporter already provided thorough pseudocode. Adding more would be redundant.
+- No reference to #134: the reporter already linked it clearly
+
 ## Next Steps
 
 (Action items will be added here)

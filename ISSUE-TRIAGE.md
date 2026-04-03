@@ -199,6 +199,76 @@ Tide runs a periodic sync loop that: (1) queries PRs matching configured label q
 - Test that the cooldown expires and the PR is retried
 - Test cleanup of stale cooldown entries
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+The fix requires adding cross-cycle failure tracking state to `syncController` and wiring it through the merge and selection paths. The problem and solution are well-understood, but it touches core Tide merge logic, requires concurrency-safe state management, and needs careful testing.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-Moderate
+- **Details**: 2-3 files (`pkg/tide/tide.go`, `pkg/tide/github.go`, `pkg/tide/tide_test.go`), estimated ~100-200 lines including tests. Changes are localized to the Tide package.
+- **Level Indication**: 2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: Requires adding a mutex-protected map to `syncController`, recording failures in `mergePRs()`, and filtering in `pickHighestPriorityPR()` or `accumulate()`. The concurrency model is straightforward (single mutex around a map), but care is needed to avoid subtle issues like stale entries or map growth. No algorithmic challenges.
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Contributor needs to understand Tide's sync loop architecture, the merge flow from `takeAction()` through `mergePRs()` → `tryMerge()`, and basic Go concurrency (sync.Mutex). The code paths are well-documented in this triage. No deep Kubernetes or distributed systems knowledge needed.
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause is clearly identified (no cross-cycle failure memory). Solution approach is clear (cooldown map). The reporter even provided pseudocode. The main open question is where exactly to filter (in `accumulate()` vs `pickHighestPriorityPR()` vs `takeAction()`), but this is a minor design choice.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Existing test at `tide_test.go:1899` covers within-cycle behavior. New tests needed for: (1) PR skipped after `UnmergablePRError`, (2) next PR selected instead, (3) cooldown expiry allows retry, (4) stale entry cleanup. Can follow existing test patterns in `tide_test.go` — the test infrastructure supports mock merge functions with configurable errors.
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: New behavior only activates after a merge failure. No configuration changes required (TTL could have a sensible default). No impact on existing deployments that don't hit this bug. Optional Tide config field for TTL tuning.
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Good fit with minor extension
+- **Details**: Adding state to `syncController` follows the existing pattern (it already has `pools`, `changedFiles`, `History`). The cooldown map is a natural extension. No new architectural patterns introduced.
+- **Level Indication**: 2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: The fix is entirely internal to Tide. No new GitHub API calls, no external system changes. Works around the existing GitHub 405 response.
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `kind/bug`: This is a bug in Tide's merge queue logic
+- [x] `area/tide`: Affects the Tide component
+- [x] `help-wanted`: Well-defined, moderate scope, suitable for skilled contributors
+
+### Guidance for Contributors
+
+- Should review the Tide sync loop flow documented in this triage, especially `syncSubpool()` → `takeAction()` → `mergePRs()` → `tryMerge()`
+- Look at existing test patterns in `pkg/tide/tide_test.go`, particularly the `TestMergePRs` test around line 1899
+- Key design decision: where to filter cooled-down PRs (recommendation: in `pickHighestPriorityPR()` or just before calling `mergePRs()` in `takeAction()`)
+- The `syncController` struct at `pkg/tide/tide.go:79` is the natural place for the failure tracking map
+- Consider also raising the log level for `UnmergablePRError` from Debug to Warning in `github.go:291`
+
+### Caveats and Considerations
+
+- While this is Level 2, not Level 3, it does touch core merge logic — reviewers should be thorough
+- The cooldown approach treats the symptom (queue blocking) but not the root cause (Tide's unawareness of GitHub review requirements). A more comprehensive fix addressing #134 would solve both issues but would be Level 3
+- The commenter's scenario (changes-requested review) should be verified to also produce `UnmergablePRError` — if it produces a different error type, the fix may need to cover additional error types
+
 ## Next Steps
 
 (Action items will be added here)

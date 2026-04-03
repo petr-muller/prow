@@ -317,6 +317,11 @@ Maintainer decisions:
 - Filtering point: between `accumulate()` and `takeAction()` in `syncSubpool()`
 - No log level change needed
 
-## Next Steps
+## Wrapup
 
-(Action items will be added here)
+**Comment posted**: No (maintainer chose not to post)
+**Branches pushed**: 2026-04-03
+- `claude-maintenance-helpers`: synced with origin
+- `issue-triage-673`: pushed to origin with tracking
+
+**Full triage document**: https://github.com/petr-muller/prow/blob/issue-triage-673/ISSUE-TRIAGE.md

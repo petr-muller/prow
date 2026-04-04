@@ -596,6 +596,36 @@ func isUnmergableError(err error) bool {
 	return errors.As(err, &unmergable)
 }
 
+// benchUnmergeablePRs inspects a merge error and temporarily excludes any PRs
+// that failed with UnmergablePRError. Works for both individual merges and
+// batch merges: for a *mergeFailure it checks each per-PR error individually,
+// for a plain error it checks the error as a whole.
+func (c *syncController) benchUnmergeablePRs(sp subpool, prs []CodeReviewCommon, err error) {
+	prsByNumber := make(map[int]CodeReviewCommon, len(prs))
+	for _, pr := range prs {
+		prsByNumber[pr.Number] = pr
+	}
+
+	if mf, ok := err.(*mergeFailure); ok {
+		for _, me := range mf.errs {
+			if isUnmergableError(me.err) {
+				if pr, ok := prsByNumber[me.pr]; ok {
+					c.excludeFromMerge(sp.org, sp.repo, pr.Number, pr.HeadRefOID)
+					sp.log.WithFields(pr.logFields()).WithError(me.err).Warning("PR merge rejected by GitHub, temporarily excluding from merge queue.")
+				}
+			}
+		}
+		return
+	}
+
+	if isUnmergableError(err) {
+		for _, pr := range prs {
+			c.excludeFromMerge(sp.org, sp.repo, pr.Number, pr.HeadRefOID)
+			sp.log.WithFields(pr.logFields()).WithError(err).Warning("PR merge rejected by GitHub, temporarily excluding from merge queue.")
+		}
+	}
+}
+
 func prKey(pr *CodeReviewCommon) string {
 	return fmt.Sprintf("%s#%d", string(pr.NameWithOwner), pr.Number)
 }
@@ -1645,6 +1675,9 @@ func (c *syncController) takeAction(sp subpool, batchPending, successes, pending
 	// Merge the batch!
 	if len(batchMerges) > 0 {
 		merged, err = c.provider.mergePRs(sp, batchMerges, c.statusUpdate.dontUpdateStatus)
+		if err != nil {
+			c.benchUnmergeablePRs(sp, batchMerges, err)
+		}
 		return MergeBatch, batchMerges, err
 	}
 	// Do not merge PRs while waiting for a batch to complete. We don't want to
@@ -1653,14 +1686,7 @@ func (c *syncController) takeAction(sp subpool, batchPending, successes, pending
 		if ok, pr := pickHighestPriorityPR(sp.log, successes, sp.cc, c.isPassingTests, c.config().Tide.Priority); ok {
 			merged, err = c.provider.mergePRs(sp, []CodeReviewCommon{pr}, c.statusUpdate.dontUpdateStatus)
 			if err != nil {
-				// If the merge failed with an unmergeable error, exclude this PR
-				// at its current head SHA temporarily so Tide advances to the
-				// next candidate on the next sync cycle. If the author pushes
-				// new commits, the SHA changes and the exclusion no longer applies.
-				if isUnmergableError(err) {
-					c.excludeFromMerge(sp.org, sp.repo, pr.Number, pr.HeadRefOID)
-					sp.log.WithFields(pr.logFields()).WithError(err).Warning("PR merge rejected by GitHub, temporarily excluding from merge queue.")
-				}
+				c.benchUnmergeablePRs(sp, []CodeReviewCommon{pr}, err)
 			}
 			return Merge, []CodeReviewCommon{pr}, err
 		}

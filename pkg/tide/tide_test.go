@@ -2347,6 +2347,65 @@ func TestSyncSubpoolSkipsExcludedPRs(t *testing.T) {
 	}
 }
 
+func TestBenchUnmergeablePRs(t *testing.T) {
+	sp := subpool{
+		log: logrus.WithField("component", "tide"),
+		org: "o", repo: "r",
+	}
+
+	t.Run("mergeFailure benches only unmergeable PRs", func(t *testing.T) {
+		c := &syncController{mergeExclusions: make(map[string]int)}
+		prs := []CodeReviewCommon{
+			{Number: 1, Org: "o", Repo: "r", HeadRefOID: "sha1"},
+			{Number: 2, Org: "o", Repo: "r", HeadRefOID: "sha2"},
+			{Number: 3, Org: "o", Repo: "r", HeadRefOID: "sha3"},
+		}
+		err := &mergeFailure{errs: []mergeErr{
+			{err: github.UnmergablePRError("branch protection"), pr: 2, userFacing: true},
+			{err: errors.New("transient error"), pr: 3, userFacing: true},
+		}}
+
+		c.benchUnmergeablePRs(sp, prs, err)
+
+		if c.isExcludedFromMerge("o", "r", 1, "sha1") {
+			t.Error("PR #1 should not be benched (it merged successfully)")
+		}
+		if !c.isExcludedFromMerge("o", "r", 2, "sha2") {
+			t.Error("PR #2 should be benched (UnmergablePRError)")
+		}
+		if c.isExcludedFromMerge("o", "r", 3, "sha3") {
+			t.Error("PR #3 should not be benched (non-unmergeable error)")
+		}
+	})
+
+	t.Run("plain unmergeable error benches all PRs", func(t *testing.T) {
+		c := &syncController{mergeExclusions: make(map[string]int)}
+		prs := []CodeReviewCommon{
+			{Number: 1, Org: "o", Repo: "r", HeadRefOID: "sha1"},
+		}
+		err := github.UnmergablePRError("branch protection")
+
+		c.benchUnmergeablePRs(sp, prs, err)
+
+		if !c.isExcludedFromMerge("o", "r", 1, "sha1") {
+			t.Error("PR #1 should be benched")
+		}
+	})
+
+	t.Run("non-unmergeable error benches nothing", func(t *testing.T) {
+		c := &syncController{mergeExclusions: make(map[string]int)}
+		prs := []CodeReviewCommon{
+			{Number: 1, Org: "o", Repo: "r", HeadRefOID: "sha1"},
+		}
+
+		c.benchUnmergeablePRs(sp, prs, errors.New("some other error"))
+
+		if c.isExcludedFromMerge("o", "r", 1, "sha1") {
+			t.Error("PR #1 should not be benched for non-unmergeable error")
+		}
+	})
+}
+
 func TestIsUnmergableError(t *testing.T) {
 	tests := []struct {
 		name     string

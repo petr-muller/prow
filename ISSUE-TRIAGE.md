@@ -167,9 +167,76 @@ This aligns with the issue author's request, follows established codebase patter
 - Test custom message templates
 - Test threshold of 0 (disable behavior)
 
-## Findings
+## Effort Assessment
 
-(Further findings from triage subcommands will be added here)
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+This is a well-scoped feature request to add 2-3 optional config fields to an existing struct and wire them into nearby code. Clear patterns to follow, small scope, fully backwards compatible.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 3-4 files affected: `pkg/plugins/config.go` (add fields + defaults), `pkg/plugins/trigger/pull-request.go` (use config instead of hardcoded values), plus test files. Estimated ~50-80 lines of new/modified code.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Adding config fields to an existing struct and replacing hardcoded values with config lookups. No concurrency, no complex logic, no edge cases beyond basic validation.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go, understanding of Prow plugin config pattern. All needed patterns already exist in the same files (`JoinOrgURL`, `Welcome.MessageTemplate`, `Blunderbuss.ReviewerCount`).
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The issue clearly states what should be configurable (threshold count + message). The config struct and code locations are identified. Only minor design question: exact field naming and whether to support Go template syntax vs `%s` for messages.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Existing tests for the org invite logic can be extended. Follow the same test patterns already in `pull-request_test.go`. Add test cases for custom config values and default behavior.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: All new config fields are optional with defaults matching current hardcoded behavior. Existing configs work unchanged.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Directly follows established patterns. `JoinOrgURL` is already a configurable field in the same `Trigger` struct. `Welcome.MessageTemplate` is a precedent for configurable messages in Prow plugins.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: No external API changes needed. The GitHub Search API usage is unchanged; only the threshold comparison and message strings become config-driven.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Well-defined, small scope, clear patterns to follow, author volunteers
+- [x] `kind/feature`: New configurability for existing functionality
+- [x] `area/plugins`: Trigger plugin configuration change
+
+### Guidance for Contributors
+
+- Good starting point for new or returning Prow contributors
+- Prerequisite knowledge: Basic Go, YAML configuration
+- Key files to review:
+  - `pkg/plugins/config.go`: `Trigger` struct, `SetDefaults()`, similar patterns like `Welcome.MessageTemplate`
+  - `pkg/plugins/trigger/pull-request.go`: `orgInvitationGuidance()`, `shouldHighlightJoinOrgMessage()`
+  - `pkg/plugins/trigger/pull-request_test.go`: existing tests for org invite logic
+- The issue author (lentzi90) has offered to implement this and asks for guidance on where configuration fits — the `Trigger` struct is the answer
+
+### Caveats and Considerations
+
+- The message configurability could use simple `%s` placeholder (like current code) or Go templates (like `Welcome.MessageTemplate`). Either approach works; `%s` is simpler and consistent with the existing code in this function.
+- Consider whether threshold of 0 should disable the prominent message entirely or be treated as "always show prominent message". A value of 0 meaning "disable" is more intuitive.
 
 ## Next Steps
 

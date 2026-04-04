@@ -251,6 +251,41 @@ Well-defined feature request with clear solution approach following established 
 - The scope might expand if `/cc` (reviewer requests) is also desired to be gated — the issue currently only mentions `/assign`.
 - A community member (mohit-nagaraj) also suggested preventing reassignment of already-assigned issues — this is a separate feature and should be tracked in a separate issue.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "assign: add configuration per repo so that only org users can assign issues" is clear, specific, and follows the `component: description` convention.
+
+### Proposed GitHub Comment
+
+```
+The assign plugin is currently the only major Prow plugin without any configuration infrastructure (explicitly noted as "not configurable" in `pkg/plugins/config.go:45`). Adding per-repo config for it is straightforward because the codebase already has a well-established pattern: the Trigger plugin implements an identical `OnlyOrgMembers` boolean (in its `Trigger` struct at `config.go:508`) and uses the `IsMember()` GitHub client method to gate actions on org membership. The assign plugin can follow this pattern directly.
+
+The implementation would add an `Assign` config struct with `Repos []string` and `OnlyOrgMembers bool` fields, a lookup function following the `ApproveFor()`/`TriggerFor()` pattern (repo-level → org-level → defaults), and a membership check in the `handle()` function before calling `h.add()` at `assign.go:147`. When a non-member attempts `/assign` with `OnlyOrgMembers` enabled, the plugin would generate a comment explaining the restriction instead of silently failing. The default would be `false` to preserve backwards compatibility — flipping the default can be a separate discussion with sig-contribex.
+
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Technical context about the assign plugin lacking any config infrastructure (not obvious from the issue)
+- Pointer to the exact pattern to follow (Trigger plugin's `OnlyOrgMembers`)
+- Concrete implementation path with file references for contributors
+
+**Why these labels**:
+- `/help-wanted`: Level 2 effort assessment — well-defined, moderate scope, suitable for skilled contributors
+- `area/plugins` already applied
+- `kind/feature` already applied
+
+**What's NOT included**:
+- No `/retitle` — current title is clear and follows conventions
+- No `/area` — `area/plugins` already applied
+- No `/kind` — `kind/feature` already applied
+- No priority label — feature request, not urgent
+- The reassignment prevention idea (from mohit-nagaraj's comment) — separate feature, separate issue
+
 ## Next Steps
 
 (Action items will be added here)

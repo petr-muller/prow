@@ -171,6 +171,86 @@ Start with opt-in behavior to avoid breaking existing deployments. The default c
 - Test anyone can assign when `OnlyOrgMembers: false` (default)
 - Test comment is generated explaining rejection
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+Well-defined feature request with clear solution approach following established patterns. Touches 3 files with ~150-200 lines of new/modified code. The codebase has strong precedent (Trigger plugin's `OnlyOrgMembers`) making the pattern clear, but requires understanding plugin config architecture and testing infrastructure.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-to-Moderate
+- **Details**: 3 files affected: `pkg/plugins/config.go` (~30 LOC: struct + lookup function), `pkg/plugins/assign/assign.go` (~40 LOC: config injection + membership check), `pkg/plugins/assign/assign_test.go` (~80 LOC: new test cases). Plus config documentation updates.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple-to-Moderate
+- **Details**: The logic itself is simple (check membership, reject if not member). But integrating config plumbing into the handler requires understanding how plugins receive configuration, and the handler construction pattern needs modification to accept config.
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Needs understanding of Prow plugin configuration patterns, how `handleGenericComment` receives config, and the GitHub client interface. Can be learned from existing Trigger plugin code.
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Problem, solution approach, and config structure are all clearly described. One open question: should `/cc` (reviewer requests) also be gated? The issue author specifically mentions `/assign` only.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple-to-Moderate
+- **Details**: Existing test infrastructure (`fakeClient`) can be extended with `IsMember()` mock. Follow existing test patterns. Need 3-4 new test cases for the org membership gate.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Default `OnlyOrgMembers: false` preserves current behavior. Only orgs that explicitly opt-in will see changed behavior. No migration needed.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Directly follows established patterns from Trigger plugin (`OnlyOrgMembers` bool), Welcome plugin (per-repo config with lookup), and Approve plugin (`ApproveFor()` lookup pattern). The assign plugin is the only major plugin without configuration — adding it is natural.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: `IsMember()` API is already used throughout the codebase. No new GitHub API dependencies.
+- **Level Indication**: 1-2
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined, moderate scope, suitable for skilled contributors
+- [x] `kind/feature`: New configuration option for existing plugin
+- [x] `area/plugins`: Assign plugin enhancement
+- [ ] `good-first-issue`: Requires understanding plugin config architecture — slightly too involved for a first contribution
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and Prow's plugin system
+- Should review:
+  - `pkg/plugins/trigger/trigger.go` — the `TrustedUser()` function and `OnlyOrgMembers` usage
+  - `pkg/plugins/config.go` — existing config patterns (Trigger, Welcome, Approve structs and lookup functions)
+  - `pkg/plugins/assign/assign.go` — current handler flow
+  - `pkg/plugins/assign/assign_test.go` — existing test patterns
+- Recommended approach:
+  1. Add `Assign` config struct to `config.go` with `Repos []string` and `OnlyOrgMembers bool`
+  2. Add `AssignFor(org, repo)` lookup function following `ApproveFor()` pattern
+  3. Modify `handleGenericComment()` to pass config to handler
+  4. Add membership check in `handle()` before `h.add()` call
+  5. Generate user-friendly rejection comment for non-members
+  6. Add tests for both enabled and disabled modes
+
+### Caveats and Considerations
+
+- The issue discussion includes a question about whether this should be the default behavior. The recommended implementation starts with opt-in, but a follow-up PR could flip the default after consulting with Kubernetes sig-contribex.
+- The scope might expand if `/cc` (reviewer requests) is also desired to be gated — the issue currently only mentions `/assign`.
+- A community member (mohit-nagaraj) also suggested preventing reassignment of already-assigned issues — this is a separate feature and should be tracked in a separate issue.
+
 ## Next Steps
 
 (Action items will be added here)

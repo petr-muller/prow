@@ -100,8 +100,8 @@ type syncController struct {
 	// UnmergablePRError (e.g. due to branch protection requiring more
 	// reviews). These PRs are temporarily skipped so Tide can advance
 	// to the next mergeable PR instead of retrying the same one.
-	// Key: "org/repo#number@sha", Value: time of failure.
-	mergeExclusions   map[string]time.Time
+	// Key: "org/repo#number@sha", Value: remaining sync cycles to skip.
+	mergeExclusions   map[string]int
 	mergeExclusionsMu sync.Mutex
 }
 
@@ -498,7 +498,7 @@ func newSyncController(
 		},
 		History:         hist,
 		statusUpdate:    statusUpdate,
-		mergeExclusions: make(map[string]time.Time),
+		mergeExclusions: make(map[string]int),
 	}, nil
 }
 
@@ -512,9 +512,9 @@ func setupSyncControllerIndexes(ctx context.Context, indexer ctrlruntimeclient.F
 	return nil
 }
 
-// mergeExclusionTTL is how long a PR stays excluded after a merge failure
-// before Tide retries it.
-const mergeExclusionTTL = 5 * time.Minute
+// defaultMergeExclusionSyncs is how many sync cycles a PR stays excluded
+// after a merge failure before Tide retries it.
+const defaultMergeExclusionSyncs = 5
 
 // mergeExclusionKey returns a unique key for tracking merge exclusions.
 // The key includes the head SHA so that when an author pushes new commits,
@@ -543,7 +543,7 @@ func (c *syncController) excludeFromMerge(org, repo string, number int, sha stri
 			delete(c.mergeExclusions, key)
 		}
 	}
-	c.mergeExclusions[mergeExclusionKey(org, repo, number, sha)] = time.Now()
+	c.mergeExclusions[mergeExclusionKey(org, repo, number, sha)] = defaultMergeExclusionSyncs
 }
 
 // isExcludedFromMerge returns true if a PR at its current head SHA is
@@ -553,15 +553,26 @@ func (c *syncController) isExcludedFromMerge(org, repo string, number int, sha s
 	c.mergeExclusionsMu.Lock()
 	defer c.mergeExclusionsMu.Unlock()
 	key := mergeExclusionKey(org, repo, number, sha)
-	failedAt, ok := c.mergeExclusions[key]
+	remaining, ok := c.mergeExclusions[key]
 	if !ok {
 		return false
 	}
-	if time.Since(failedAt) >= mergeExclusionTTL {
-		delete(c.mergeExclusions, key)
-		return false
+	return remaining > 0
+}
+
+// decrementMergeExclusions reduces all exclusion counters by one and removes
+// entries that have reached zero. Should be called once at the start of each
+// sync cycle.
+func (c *syncController) decrementMergeExclusions() {
+	c.mergeExclusionsMu.Lock()
+	defer c.mergeExclusionsMu.Unlock()
+	for key, remaining := range c.mergeExclusions {
+		if remaining <= 1 {
+			delete(c.mergeExclusions, key)
+		} else {
+			c.mergeExclusions[key] = remaining - 1
+		}
 	}
-	return true
 }
 
 // isUnmergableError checks whether an error from mergePRs wraps an
@@ -619,6 +630,7 @@ func (c *syncController) Sync() error {
 		tideMetrics.syncHeartbeat.WithLabelValues("sync").Inc()
 	}()
 	defer c.changedFiles.prune()
+	c.decrementMergeExclusions()
 	c.config().BranchProtectionWarnings(c.logger, c.config().PresubmitsStatic)
 
 	c.logger.Debug("Building tide pool.")

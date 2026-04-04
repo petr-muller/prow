@@ -2376,7 +2376,7 @@ func TestIsUnmergableError(t *testing.T) {
 
 func TestMergeExclusionExpiry(t *testing.T) {
 	c := &syncController{
-		mergeExclusions: make(map[string]time.Time),
+		mergeExclusions: make(map[string]int),
 	}
 
 	// Exclude PR #1 at sha "abc123"
@@ -2390,13 +2390,18 @@ func TestMergeExclusionExpiry(t *testing.T) {
 		t.Error("PR with a new head SHA should not be excluded")
 	}
 
-	// Manually set the exclusion time to the past (beyond TTL)
-	c.mergeExclusionsMu.Lock()
-	c.mergeExclusions[mergeExclusionKey("o", "r", 1, "abc123")] = time.Now().Add(-mergeExclusionTTL - time.Second)
-	c.mergeExclusionsMu.Unlock()
+	// Decrement through all sync cycles; PR should remain excluded until counter reaches zero
+	for i := 0; i < defaultMergeExclusionSyncs-1; i++ {
+		c.decrementMergeExclusions()
+		if !c.isExcludedFromMerge("o", "r", 1, "abc123") {
+			t.Errorf("PR should still be excluded after %d decrements", i+1)
+		}
+	}
 
+	// One more decrement should expire the exclusion
+	c.decrementMergeExclusions()
 	if c.isExcludedFromMerge("o", "r", 1, "abc123") {
-		t.Error("PR should no longer be excluded after TTL expires")
+		t.Error("PR should no longer be excluded after all sync cycles elapsed")
 	}
 
 	// Verify the expired entry was cleaned up

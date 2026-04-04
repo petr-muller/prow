@@ -1650,20 +1650,7 @@ func (c *syncController) takeAction(sp subpool, batchPending, successes, pending
 	// Do not merge PRs while waiting for a batch to complete. We don't want to
 	// invalidate the old batch result.
 	if len(successes) > 0 && len(batchPending) == 0 {
-		// Filter out PRs that recently failed to merge (e.g. due to branch
-		// protection rejecting the merge). This prevents Tide from getting
-		// stuck retrying the same unmergeable PR every sync cycle while
-		// other mergeable PRs wait behind it.
-		// See https://github.com/kubernetes-sigs/prow/issues/673
-		eligible := make([]CodeReviewCommon, 0, len(successes))
-		for _, pr := range successes {
-			if c.isExcludedFromMerge(sp.org, sp.repo, pr.Number, pr.HeadRefOID) {
-				sp.log.WithFields(pr.logFields()).Debug("Skipping PR temporarily excluded from merging due to recent merge failure.")
-				continue
-			}
-			eligible = append(eligible, pr)
-		}
-		if ok, pr := pickHighestPriorityPR(sp.log, eligible, sp.cc, c.isPassingTests, c.config().Tide.Priority); ok {
+		if ok, pr := pickHighestPriorityPR(sp.log, successes, sp.cc, c.isPassingTests, c.config().Tide.Priority); ok {
 			merged, err = c.provider.mergePRs(sp, []CodeReviewCommon{pr}, c.statusUpdate.dontUpdateStatus)
 			if err != nil {
 				// If the merge failed with an unmergeable error, exclude this PR
@@ -1896,8 +1883,24 @@ func (c *syncController) syncSubpool(sp subpool, blocks []blockers.Blocker) (Poo
 	sp.log.WithField("num_prs", len(sp.prs)).WithField("num_prowjobs", len(sp.pjs)).Info("Syncing subpool")
 	successes, pendings, missings, missingSerialTests := c.accumulate(sp.presubmits, sp.prs, sp.pjs, sp.sha)
 	batchMerge, batchPending := c.accumulateBatch(sp)
+
+	// Filter out PRs that recently failed to merge (e.g. due to branch
+	// protection rejecting the merge). This prevents Tide from getting
+	// stuck retrying the same unmergeable PR every sync cycle while
+	// other mergeable PRs wait behind it.
+	// See https://github.com/kubernetes-sigs/prow/issues/673
+	eligible := make([]CodeReviewCommon, 0, len(successes))
+	for _, pr := range successes {
+		if c.isExcludedFromMerge(sp.org, sp.repo, pr.Number, pr.HeadRefOID) {
+			sp.log.WithFields(pr.logFields()).Debug("Skipping PR temporarily excluded from merging due to recent merge failure.")
+			continue
+		}
+		eligible = append(eligible, pr)
+	}
+
 	sp.log.WithFields(logrus.Fields{
 		"prs-passing":   prNumbers(successes),
+		"prs-eligible":  prNumbers(eligible),
 		"prs-pending":   prNumbers(pendings),
 		"prs-missing":   prNumbers(missings),
 		"batch-passing": prNumbers(batchMerge),
@@ -1912,7 +1915,7 @@ func (c *syncController) syncSubpool(sp subpool, blocks []blockers.Blocker) (Poo
 	if len(blocks) > 0 {
 		act = PoolBlocked
 	} else {
-		act, targets, err = c.takeAction(sp, batchPending, successes, pendings, missings, batchMerge, missingSerialTests)
+		act, targets, err = c.takeAction(sp, batchPending, eligible, pendings, missings, batchMerge, missingSerialTests)
 		if err != nil {
 			if mf, ok := err.(*mergeFailure); ok {
 				errorString = mf.historyMessage()

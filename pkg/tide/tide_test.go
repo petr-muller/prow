@@ -2197,10 +2197,12 @@ func testTakeAction(clients localgit.Clients, t *testing.T) {
 	}
 }
 
-func TestTakeActionSkipsExcludedPRs(t *testing.T) {
+func TestSyncSubpoolSkipsExcludedPRs(t *testing.T) {
 	// This test verifies that when a PR fails to merge with UnmergablePRError
 	// (e.g. due to branch protection requiring more reviews), Tide excludes it
 	// on the next sync cycle and advances to the next mergeable PR.
+	// The exclusion filtering happens in syncSubpool between accumulate and
+	// takeAction.
 	// See https://github.com/kubernetes-sigs/prow/issues/673
 	sleep = func(time.Duration) {}
 	defer func() { sleep = time.Sleep }()
@@ -2221,20 +2223,7 @@ func TestTakeActionSkipsExcludedPRs(t *testing.T) {
 	// Create two PRs: #1 (unmergeable) and #2 (mergeable).
 	// pickHighestPriorityPR picks lowest-numbered first, so #1 will always
 	// be picked before #2 unless excluded.
-	sp := subpool{
-		log:        logrus.WithField("component", "tide"),
-		presubmits: map[int][]config.Presubmit{},
-		cc: map[int]contextChecker{
-			1: &config.TideContextPolicy{},
-			2: &config.TideContextPolicy{},
-		},
-		org:    "o",
-		repo:   "r",
-		branch: defaultBranch,
-		sha:    defaultBranch,
-	}
-
-	var successes []CodeReviewCommon
+	var prs []CodeReviewCommon
 	for _, i := range []int{1, 2} {
 		if err := lg.CheckoutNewBranch("o", "r", fmt.Sprintf("pr-%d", i)); err != nil {
 			t.Fatalf("Error checking out new branch: %v", err)
@@ -2252,8 +2241,7 @@ func TestTakeActionSkipsExcludedPRs(t *testing.T) {
 		pr.Commits.Nodes = []struct {
 			Commit Commit
 		}{{Commit: Commit{OID: oid}}}
-		sp.prs = append(sp.prs, *CodeReviewCommonFromPullRequest(&pr))
-		successes = append(successes, *CodeReviewCommonFromPullRequest(&pr))
+		prs = append(prs, *CodeReviewCommonFromPullRequest(&pr))
 	}
 
 	ca := &config.Agent{}
@@ -2273,7 +2261,7 @@ func TestTakeActionSkipsExcludedPRs(t *testing.T) {
 	mgr1 := newFakeManager(t, ctx)
 	c, err := newSyncController(ctx, log, mgr1, ghProvider1, ca.Config, gc, nil, false, &statusUpdate{
 		dontUpdateStatus: &threadSafePRSet{},
-		newPoolPending:   make(chan bool),
+		newPoolPending:   make(chan bool, 1),
 	})
 	if err != nil {
 		t.Fatalf("failed to construct sync controller: %v", err)
@@ -2282,24 +2270,48 @@ func TestTakeActionSkipsExcludedPRs(t *testing.T) {
 		provider:        ghProvider1,
 		nextChangeCache: make(map[changeCacheKey][]string),
 	}
-
-	act, targets, err := c.takeAction(sp, nil, successes, nil, nil, nil, nil)
-	if act != Merge {
-		t.Errorf("Sync 1: expected Merge action, got %v", act)
+	hist, err := history.New(100, nil, "")
+	if err != nil {
+		t.Fatalf("Failed to create history client: %v", err)
 	}
-	if err == nil {
-		t.Fatal("Sync 1: expected error from takeAction, got nil")
+	c.History = hist
+
+	sp := subpool{
+		log:        logrus.WithField("component", "tide"),
+		presubmits: map[int][]config.Presubmit{},
+		cc: map[int]contextChecker{
+			1: &config.TideContextPolicy{},
+			2: &config.TideContextPolicy{},
+		},
+		org:    "o",
+		repo:   "r",
+		branch: defaultBranch,
+		sha:    defaultBranch,
+		prs:    prs,
+	}
+
+	pool1, err := c.syncSubpool(sp, nil)
+	if pool1.Action != Merge {
+		t.Errorf("Sync 1: expected Merge action, got %v", pool1.Action)
+	}
+	// syncSubpool filters operator errors; UnmergablePRError is user-facing
+	// only, so it appears in Pool.Error but not as a returned error.
+	if err != nil {
+		t.Errorf("Sync 1: expected no operator error, got: %v", err)
+	}
+	if pool1.Error == "" {
+		t.Error("Sync 1: expected merge failure recorded in Pool.Error")
 	}
 	// Should have tried to merge PR #1 (lowest number)
-	if len(targets) != 1 || targets[0].Number != 1 {
-		t.Errorf("Sync 1: expected target PR #1, got %v", targets)
+	if len(pool1.Target) != 1 || pool1.Target[0].Number != 1 {
+		t.Errorf("Sync 1: expected target PR #1, got %v", pool1.Target)
 	}
 	if fgc1.merged != 0 {
 		t.Errorf("Sync 1: expected 0 merges (PR #1 should fail), got %d", fgc1.merged)
 	}
 
 	// Verify PR #1 is now excluded at its current SHA
-	pr1SHA := successes[0].HeadRefOID
+	pr1SHA := prs[0].HeadRefOID
 	if !c.isExcludedFromMerge("o", "r", 1, pr1SHA) {
 		t.Error("Sync 1: PR #1 should be excluded from merging after UnmergablePRError")
 	}
@@ -2308,20 +2320,30 @@ func TestTakeActionSkipsExcludedPRs(t *testing.T) {
 	fgc2 := fgc{mergeErrs: map[int]error{1: github.UnmergablePRError("required review count not met")}}
 	ghProvider2 := newGitHubProvider(log, &fgc2, gc, ca.Config, nil, false)
 	c.provider = ghProvider2
+	c.changedFiles = &changedFilesAgent{
+		provider:        ghProvider2,
+		nextChangeCache: make(map[changeCacheKey][]string),
+	}
 
-	act, targets, err = c.takeAction(sp, nil, successes, nil, nil, nil, nil)
-	if act != Merge {
-		t.Errorf("Sync 2: expected Merge action, got %v", act)
+	pool2, err := c.syncSubpool(sp, nil)
+	if pool2.Action != Merge {
+		t.Errorf("Sync 2: expected Merge action, got %v", pool2.Action)
 	}
 	if err != nil {
 		t.Errorf("Sync 2: expected no error (PR #2 should merge), got: %v", err)
 	}
 	// Should have tried to merge PR #2 since PR #1 is excluded
-	if len(targets) != 1 || targets[0].Number != 2 {
-		t.Errorf("Sync 2: expected target PR #2, got %v", targets)
+	if len(pool2.Target) != 1 || pool2.Target[0].Number != 2 {
+		t.Errorf("Sync 2: expected target PR #2, got %v", pool2.Target)
 	}
 	if fgc2.merged != 1 {
 		t.Errorf("Sync 2: expected 1 merge (PR #2), got %d", fgc2.merged)
+	}
+
+	// Verify that SuccessPRs still includes the benched PR (it passed tests,
+	// it's just temporarily excluded from merging)
+	if len(pool2.SuccessPRs) != 2 {
+		t.Errorf("Sync 2: expected 2 SuccessPRs (including benched PR #1), got %d", len(pool2.SuccessPRs))
 	}
 }
 

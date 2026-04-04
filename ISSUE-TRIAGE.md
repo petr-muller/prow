@@ -238,6 +238,45 @@ This is a well-scoped feature request to add 2-3 optional config fields to an ex
 - The message configurability could use simple `%s` placeholder (like current code) or Go templates (like `Welcome.MessageTemplate`). Either approach works; `%s` is simpler and consistent with the existing code in this function.
 - Consider whether threshold of 0 should disable the prominent message entirely or be treated as "always show prominent message". A value of 0 meaning "disable" is more intuitive.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: "Make org invite functionality configurable"
+- **Proposed**: "trigger: make org invite message and PR threshold configurable"
+- **Rationale**: Adds the component name (trigger plugin) and specifies both configurable aspects (message + threshold) for clarity
+
+### Proposed GitHub Comment
+
+```
+/retitle trigger: make org invite message and PR threshold configurable
+
+The configuration for this lives in the `Trigger` struct in `pkg/plugins/config.go`, which already has a `JoinOrgURL` field for the same feature. The hardcoded values that need to become configurable are in `pkg/plugins/trigger/pull-request.go`: the threshold constant `mergedPRCountForProminentJoinOrgMessage = 3` (line 43) and the two message strings in `orgInvitationGuidance()` (lines 324 and 327). There are established patterns to follow: `Blunderbuss.ReviewerCount` uses a `*int` for optional count config, and `Welcome.MessageTemplate` uses a plain string for configurable messages.
+
+For the message templates, the current code uses `fmt.Sprintf` with a `%s` placeholder for the join URL, so using the same approach (a string field with `%s` placeholder) would be simplest and consistent. Setting the threshold to 0 could serve as a way to disable the prominent message entirely, which would address the "different process altogether" scenario mentioned in the issue.
+
+/area plugins
+/kind feature
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Specific file paths and line numbers for the code that needs to change
+- Pointer to existing configuration patterns to follow (answering the author's question about "where the configuration would fit")
+- Design suggestion for threshold=0 behavior
+
+**Why these labels**:
+- `/area plugins`: The trigger plugin is the affected component
+- `/kind feature`: This is a new configurability feature, not a bug
+- `/good-first-issue`: Level 1 effort — well-scoped, clear patterns, small change
+
+**What's NOT included**:
+- Detailed implementation plan — the author is experienced and asked for guidance on where config fits, not a full spec
+- Priority label — this is an enhancement, not urgent
+- The full list of test requirements — would be over-prescriptive for a good-first-issue
+
 ## Next Steps
 
 (Action items will be added here)

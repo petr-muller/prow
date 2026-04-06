@@ -108,186 +108,218 @@ When a non-org-member opens a PR, the trigger plugin posts a welcome message tha
 
 ### Proposed Solutions
 
-#### Approach 1: Add Config Fields to Trigger Struct
+#### Approach 1: Flat Config Fields on Trigger Struct
 
-**Description**: Add new fields to the existing `Trigger` config struct for the threshold count and message templates. Use the established patterns already in the codebase.
+**Description**: Add flat fields directly to the existing `Trigger` config struct.
+
+**Pros**: Minimal code change, follows `JoinOrgURL` precedent
+**Cons**: Doesn't support opt-out cleanly, mixes org-invite concerns with other trigger config
+**Complexity**: Low
+
+#### Approach 2: Nested OrgInvite Config Struct (Recommended — per prior maintainer feedback)
+
+**Description**: Introduce a dedicated `OrgInvite` struct nested inside `Trigger`, with explicit opt-out support and layered config resolution (global → org → repo).
+
+**Config shape**:
+```yaml
+triggers:
+  - repos: ["my-org"]
+    org_invite:
+      disabled: false
+      merged_pr_threshold: 5
+      prominent_message: "Consider [joining the org](%s) for contributor access."
+```
+
+**Struct fields**:
+- `Disabled bool` — opt out entirely
+- `MergedPRsThreshold *int` — threshold for prominent message (default 3, pointer to distinguish unset)
+- `ProminentMessage string` — custom prominent message (`%s` placeholder for join URL)
+- `Message string` — custom regular message (`%s` placeholder for join URL)
 
 **Changes**:
-- `pkg/plugins/config.go`: Add fields to `Trigger` struct:
-  - `OrgInviteMinMergedPRs *int` — threshold (default 3)
-  - `OrgInviteProminentMessage string` — prominent tip message (with `%s` placeholder for URL)
-  - `OrgInviteMessage string` — regular message (with `%s` placeholder for URL)
-- `pkg/plugins/config.go`: Update `SetDefaults()` to apply defaults
-- `pkg/plugins/trigger/pull-request.go`: Read from config instead of hardcoded values
-- Tests: Update to cover configurable values
+- `pkg/plugins/config.go`: Add `OrgInvite` struct, nest in `Trigger`, update `SetDefaults()`, extend `TriggerFor()` with field-level merging
+- `pkg/plugins/trigger/pull-request.go`: Read from `OrgInvite` config instead of hardcoded values
+- Tests: Cover default behavior, custom values, opt-out, and layered override scenarios
 
 **Pros**:
-- Follows existing patterns (`JoinOrgURL`, `Welcome.MessageTemplate`, `Blunderbuss.ReviewerCount`)
-- Minimal code change, well-scoped
-- Backwards compatible — omitted config means current behavior preserved
+- Clean separation of org-invite config from other trigger concerns
+- Explicit opt-out with `disabled: true`
+- Layered config allows org-wide defaults with per-repo overrides
+- Follows established patterns (`Blunderbuss.ReviewerCount`, `CherryPickUnapproved.Comment`)
 
 **Cons**:
-- Message templates with `%s` placeholder are fragile (user could forget the placeholder)
+- More complex than flat fields — needs field-level merge logic in `TriggerFor()`
+- Open question: should existing `JoinOrgURL` move into the new struct for consistency?
 
-**Complexity**: Low
-**Backwards Compatibility**: Full — all new fields optional with defaults matching current behavior
-
-#### Approach 2: Disable-Only Configuration
-
-**Description**: Instead of making everything configurable, just add an option to disable the prominent message entirely and let orgs use their own external tooling for invitations.
-
-**Pros**:
-- Simpler implementation
-- Less surface area for misconfiguration
-
-**Cons**:
-- Doesn't address the threshold configurability request
-- Doesn't address message customization request
-- Less useful to the issue author
-
-**Complexity**: Very Low
-**Backwards Compatibility**: Full
+**Complexity**: Medium
+**Backwards Compatibility**: Full — defaults preserve current behavior
 
 #### Recommendation
 
-**Preferred Approach**: Approach 1 (Add Config Fields to Trigger Struct)
+**Preferred Approach**: Approach 2 (Nested OrgInvite Struct)
 
-This aligns with the issue author's request, follows established codebase patterns, and is straightforward to implement. The `Welcome.MessageTemplate` pattern is a direct precedent for configurable messages in plugin configuration.
+This was the direction established during prior maintainer review of this issue. The layered config resolution is the main complexity driver but aligns with how Prow config is meant to work.
 
 **Key Implementation Considerations**:
-1. Config fields should go in `Trigger` struct alongside existing `JoinOrgURL`
-2. Use `*int` pointer pattern for threshold to distinguish "not set" from "set to 0"
-3. Consider whether to allow setting threshold to 0 to effectively disable the feature
-4. Message templates should document the `%s` placeholder for the join URL
-5. Tests should verify default behavior when config is omitted
+1. Use `*int` for threshold (like `Blunderbuss.ReviewerCount`) — pointer distinguishes "not set" from zero
+2. Defaults in `SetDefaults()` preserve current behavior when no config provided
+3. `TriggerFor()` needs extension for field-level merging of the `OrgInvite` struct
+4. Consider whether `JoinOrgURL` should stay where it is (backwards compat) or move into `OrgInvite` (consistency)
+5. `disabled: true` at repo level should suppress all org invite messaging
 
 **Testing Requirements**:
-- Test that omitted config preserves current behavior (threshold=3, default messages)
-- Test custom threshold values
-- Test custom message templates
-- Test threshold of 0 (disable behavior)
+- Default behavior when no config provided (threshold=3, default messages)
+- Custom threshold and message values
+- Opt-out with `disabled: true`
+- Layered override scenarios (global set + repo override, org set + repo opt-out)
 
 ## Effort Assessment
 
-**Effort Level**: 1 - Easy (good-first-issue)
+**Effort Level**: 2 - Moderate (help-wanted)
+
+*Revised from initial Level 1 assessment after incorporating prior maintainer feedback requiring nested config struct, opt-out support, and global/org/repo layered config with field-level merging.*
 
 ### Summary
 
-This is a well-scoped feature request to add 2-3 optional config fields to an existing struct and wire them into nearby code. Clear patterns to follow, small scope, fully backwards compatible.
+Introducing a dedicated `OrgInvite` config struct within trigger configuration, with support for opt-out and layered resolution at global/org/repo levels. The struct and field patterns are established, but the layered config merging in `TriggerFor()` adds moderate complexity requiring familiarity with Prow's config resolution.
 
 ### Factor Analysis
 
 #### Scope of Changes
-- **Assessment**: Small
-- **Details**: 3-4 files affected: `pkg/plugins/config.go` (add fields + defaults), `pkg/plugins/trigger/pull-request.go` (use config instead of hardcoded values), plus test files. Estimated ~50-80 lines of new/modified code.
-- **Level Indication**: 1-2
+- **Assessment**: Moderate
+- **Details**: 4-6 files modified (`config.go`, `pull-request.go`, `pull-request_test.go`, `config_test.go`, `plugin-config-documented.yaml`, possibly `trigger.go`), estimated ~150-250 lines including config merge logic and tests.
+- **Level Indication**: 2-3
 
 #### Complexity
-- **Assessment**: Simple
-- **Details**: Adding config fields to an existing struct and replacing hardcoded values with config lookups. No concurrency, no complex logic, no edge cases beyond basic validation.
-- **Level Indication**: 1-2
+- **Assessment**: Moderate
+- **Details**: The struct and fields are straightforward, but implementing layered config resolution (global → org → repo) with field-level merging requires careful design. Need to handle: which fields are "set" vs "default", how to merge partial overrides, and how opt-out at one level interacts with settings at another.
+- **Level Indication**: 2-3
 
 #### Required Expertise
-- **Assessment**: Minimal
-- **Details**: Basic Go, understanding of Prow plugin config pattern. All needed patterns already exist in the same files (`JoinOrgURL`, `Welcome.MessageTemplate`, `Blunderbuss.ReviewerCount`).
-- **Level Indication**: 1-2
+- **Assessment**: Moderate
+- **Details**: Needs understanding of Prow's `TriggerFor()` config resolution and how to extend it with field-level merging. Contributor should review how existing trigger config matching works.
+- **Level Indication**: 2-3
 
 #### Clarity and Certainty
 - **Assessment**: Well-defined
-- **Details**: The issue clearly states what should be configurable (threshold count + message). The config struct and code locations are identified. Only minor design question: exact field naming and whether to support Go template syntax vs `%s` for messages.
+- **Details**: Requirements are clear after prior maintainer input: nested struct, opt-out, layered config. Design direction is settled.
 - **Level Indication**: 1-2
 
 #### Testing Requirements
-- **Assessment**: Simple
-- **Details**: Existing tests for the org invite logic can be extended. Follow the same test patterns already in `pull-request_test.go`. Add test cases for custom config values and default behavior.
-- **Level Indication**: 1-2
+- **Assessment**: Moderate
+- **Details**: Need tests for: default behavior, custom threshold, custom messages, opt-out, and layered override scenarios (global set + repo override, org set + repo opt-out, etc.)
+- **Level Indication**: 2-3
 
 #### Backwards Compatibility
 - **Assessment**: Fully compatible
-- **Details**: All new config fields are optional with defaults matching current hardcoded behavior. Existing configs work unchanged.
+- **Details**: All new config is optional with defaults preserving current behavior. Existing deployments are unaffected.
 - **Level Indication**: 1-2
 
 #### Architectural Alignment
-- **Assessment**: Perfect fit
-- **Details**: Directly follows established patterns. `JoinOrgURL` is already a configurable field in the same `Trigger` struct. `Welcome.MessageTemplate` is a precedent for configurable messages in Prow plugins.
-- **Level Indication**: 1-2
+- **Assessment**: Good fit
+- **Details**: Nested config structs and layered resolution align with how Prow config is meant to work, though the trigger plugin may need new merge logic that doesn't exist yet for this specific config.
+- **Level Indication**: 2-3
 
 #### External Dependencies
 - **Assessment**: None
-- **Details**: No external API changes needed. The GitHub Search API usage is unchanged; only the threshold comparison and message strings become config-driven.
+- **Details**: No external API changes needed.
 - **Level Indication**: 1-3
 
 ### Recommended Labels
 
-- [x] `good-first-issue`: Well-defined, small scope, clear patterns to follow, author volunteers
-- [x] `kind/feature`: New configurability for existing functionality
-- [x] `area/plugins`: Trigger plugin configuration change
+- [x] `help-wanted`: Moderate complexity, well-defined but requires Prow config familiarity
+- [x] `kind/feature`: Adding configurability to existing functionality
+- [x] `area/plugins`: Change is in the trigger plugin
+- [ ] `good-first-issue`: Layered config resolution elevates this beyond good-first-issue
 
 ### Guidance for Contributors
 
-- Good starting point for new or returning Prow contributors
-- Prerequisite knowledge: Basic Go, YAML configuration
-- Key files to review:
-  - `pkg/plugins/config.go`: `Trigger` struct, `SetDefaults()`, similar patterns like `Welcome.MessageTemplate`
-  - `pkg/plugins/trigger/pull-request.go`: `orgInvitationGuidance()`, `shouldHighlightJoinOrgMessage()`
-  - `pkg/plugins/trigger/pull-request_test.go`: existing tests for org invite logic
-- The issue author (lentzi90) has offered to implement this and asks for guidance on where configuration fits — the `Trigger` struct is the answer
+- Review `pkg/plugins/config.go` for the `Trigger` struct, `SetDefaults()`, and `TriggerFor()` resolution
+- Design an `OrgInvite` struct with `Disabled bool`, `MergedPRsThreshold *int`, and message `string` fields
+- Implement field-level merging so repo-level config overrides org-level, which overrides global
+- Follow `Blunderbuss.ReviewerCount *int` pattern for optional numeric fields
+- The issue author (@lentzi90) has volunteered to implement this
 
 ### Caveats and Considerations
 
-- The message configurability could use simple `%s` placeholder (like current code) or Go templates (like `Welcome.MessageTemplate`). Either approach works; `%s` is simpler and consistent with the existing code in this function.
-- Consider whether threshold of 0 should disable the prominent message entirely or be treated as "always show prominent message". A value of 0 meaning "disable" is more intuitive.
+- The layered config resolution is the main complexity driver — the struct itself is simple
+- Need to decide whether `JoinOrgURL` (already in `Trigger`) should move into the new struct for consistency, or stay where it is for backwards compatibility
+- `Disabled: true` at repo level should be absolute (no invite message at all)
 
 ## Proposed Issue Augmentation
 
 ### Title Change
 
-- **Current**: "Make org invite functionality configurable"
-- **Proposed**: "trigger: make org invite message and PR threshold configurable"
-- **Rationale**: Adds the component name (trigger plugin) and specifies both configurable aspects (message + threshold) for clarity
+- **No change needed**: Current title "Make org invite functionality configurable" is clear and accurate.
 
 ### Proposed GitHub Comment
 
 ```
-/retitle trigger: make org invite message and PR threshold configurable
+The values you'd like to make configurable live in `pkg/plugins/trigger/pull-request.go`: the threshold is the constant `mergedPRCountForProminentJoinOrgMessage = 3` (line 43), and the two message variants are in the `orgInvitationGuidance()` function (lines 322-328) — one prominent tip box for authors above the threshold and a simpler one-liner for everyone else.
 
-The configuration for this lives in the `Trigger` struct in `pkg/plugins/config.go`, which already has a `JoinOrgURL` field for the same feature. The hardcoded values that need to become configurable are in `pkg/plugins/trigger/pull-request.go`: the threshold constant `mergedPRCountForProminentJoinOrgMessage = 3` (line 43) and the two message strings in `orgInvitationGuidance()` (lines 324 and 327). There are established patterns to follow: `Blunderbuss.ReviewerCount` uses a `*int` for optional count config, and `Welcome.MessageTemplate` uses a plain string for configurable messages.
+We'd like the implementation to use a dedicated config struct (e.g., `OrgInvite`) nested inside the `plugins.Trigger` struct in `pkg/plugins/config.go` (line 489), rather than adding flat fields. The struct should support:
 
-For the message templates, the current code uses `fmt.Sprintf` with a `%s` placeholder for the join URL, so using the same approach (a string field with `%s` placeholder) would be simplest and consistent. Setting the threshold to 0 could serve as a way to disable the prominent message entirely, which would address the "different process altogether" scenario mentioned in the issue.
+- **Threshold**: a `*int` field for the merged PR count (like `Blunderbuss.ReviewerCount` at line 168 — pointer distinguishes "not set" from zero). Default: 3.
+- **Message(s)**: `string` field(s) for custom message text (like `CherryPickUnapproved.Comment` at line 835). Use `%s` as a placeholder for the join-org URL. The prominent message currently mentions `/lgtm` rights and sponsor recommendations that don't apply to all orgs, so making at least that one configurable is important.
+- **Opt-out**: a way to disable the org invite functionality entirely (e.g., `disabled: true`).
+- **Layered config**: the struct should be resolvable at global, org, and repo levels, where more specific levels override less specific ones. Review how `TriggerFor()` resolves config today and extend it with field-level merging for the new struct.
+
+Set defaults in the `SetDefaults()` method (around line 1026) to preserve current behavior when no config is provided. Example YAML shape:
+
+```yaml
+triggers:
+  - repos: ["my-org"]
+    org_invite:
+      disabled: false
+      merged_pr_threshold: 5
+      prominent_message: "Consider [joining the org](%s) for contributor access."
+```
 
 /area plugins
 /kind feature
-/good-first-issue
+/help-wanted
 ```
 
 ### Rationale
 
 **What's being added**:
-- Specific file paths and line numbers for the code that needs to change
-- Pointer to existing configuration patterns to follow (answering the author's question about "where the configuration would fit")
-- Design suggestion for threshold=0 behavior
+- Where the hardcoded values live (exact file paths and line numbers)
+- Design direction: nested struct, opt-out support, layered config resolution
+- Which existing patterns to follow (Blunderbuss for threshold, CherryPickUnapproved for message)
+- Example YAML shape for the configuration
+- How defaults should work to preserve backwards compatibility
 
 **Why these labels**:
-- `/area plugins`: The trigger plugin is the affected component
-- `/kind feature`: This is a new configurability feature, not a bug
-- `/good-first-issue`: Level 1 effort — well-scoped, clear patterns, small change
+- `/area plugins`: The trigger plugin lives in `pkg/plugins/trigger/`
+- `/kind feature`: This is an enhancement request for configurability
+- `/help-wanted`: Level 2 effort — layered config resolution adds moderate complexity beyond a simple good-first-issue
 
 **What's NOT included**:
-- Detailed implementation plan — the author is experienced and asked for guidance on where config fits, not a full spec
-- Priority label — this is an enhancement, not urgent
-- The full list of test requirements — would be over-prescriptive for a good-first-issue
+- No `/retitle` — existing title is already clear
+- No priority label — this is an enhancement, not blocking anyone
+- No implementation code — guidance only, respecting that the author wants to do the work
+
+## Prior Triage Synthesis
+
+This triage incorporates findings from a prior triage attempt (remote `issue-triage-670` branch, created 2026-04-02). Key changes from synthesis:
+
+- **Effort revised**: Level 1 → Level 2 based on prior maintainer feedback requiring nested struct and layered config
+- **Solution revised**: Flat fields → nested `OrgInvite` struct with opt-out and field-level merging in `TriggerFor()`
+- **Title**: Kept original (prior triage also concluded no change needed)
+- **Labels revised**: `good-first-issue` → `help-wanted` to match Level 2
 
 ## Briefing Completed
 
-Briefed maintainer on: 2026-04-04
+Briefed maintainer on: 2026-04-06 (re-briefing after synthesis with prior triage)
 
 Key questions asked:
-- None
+- (pending — briefing slides follow)
 
 Maintainer decision:
-- No questions, proceed with wrapup
+- (pending)
 
 ## Next Steps
 
+- Complete re-briefing
 - Post augmentation comment to the issue
 - Wait for lentzi90 to submit a PR

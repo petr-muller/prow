@@ -316,7 +316,7 @@ Key questions asked:
 - None
 
 Maintainer decision:
-- Proceed with wrapup and post augmentation comment
+- Do not post augmentation comment at this time
 
 ## Next Steps
 

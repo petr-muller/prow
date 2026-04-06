@@ -294,9 +294,9 @@ Key questions asked:
 - None — maintainer acknowledged all slides without questions
 
 Maintainer decision:
-- Proceed with wrapup (post augmentation comment and apply labels)
+- Do not post augmentation comment at this time
 
-## Next Steps
+## Wrapup
 
-- Post augmentation comment with `/help-wanted`
-- Remove `lifecycle/rotten`
+**Completed on**: 2026-04-07
+**Comment posted**: No — maintainer declined to post

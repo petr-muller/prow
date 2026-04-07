@@ -71,7 +71,11 @@ While reviewers are working, tell the user:
 >
 > I'll walk you through each perspective as they complete.
 
-### Step 3: Interactive Walkthrough
+**For the gate subcommand**: Skip the interactive walkthrough (Step 3) entirely and proceed directly to Step 4 (Gate Advisor Synthesis). Do NOT present individual reviewer findings or pause for questions.
+
+### Step 3: Interactive Walkthrough (default subcommand only)
+
+**Skip this step entirely for the gate subcommand.**
 
 Present each reviewer's findings **one at a time**, in the following order. Wait for each reviewer's background agent to complete before presenting. Between each presentation, **pause and explicitly invite questions** before moving on.
 
@@ -132,16 +136,15 @@ Wait for the user to respond. Same as above.
 
 ### Step 4: Advisor Synthesis
 
-After the user has been walked through all three perspectives and has no more questions, spawn a **final agent** (foreground, not background) using the Agent tool with `subagent_type: "general-purpose"`.
-
 **Choose the advisor based on the subcommand**:
 
-- **Default (no subcommand)**: Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/advisor.md`
-- **gate subcommand**: Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/gate-advisor.md`
+#### Default (no subcommand)
 
-Pass the advisor instructions as the agent's prompt, along with the **full findings from all three reviewers**.
+After the user has been walked through all three perspectives and has no more questions, spawn a **final agent** (foreground, not background) using the Agent tool with `subagent_type: "general-purpose"`.
 
-**For the default subcommand**, present the advisor's recommendation:
+Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/advisor.md` and pass them as the agent's prompt, along with the **full findings from all three reviewers**.
+
+Present the advisor's recommendation:
 
 > ---
 > ### Maintainer Advisor — Final Recommendation
@@ -150,7 +153,13 @@ Pass the advisor instructions as the agent's prompt, along with the **full findi
 >
 > ---
 
-**For the gate subcommand**, present the gate decision:
+#### Gate subcommand
+
+Once all three reviewer agents have completed, **immediately** spawn a **final agent** (foreground, not background) using the Agent tool with `subagent_type: "general-purpose"`. Do not wait for user interaction — feed all three sets of findings directly to the gate advisor.
+
+Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/gate-advisor.md` and pass them as the agent's prompt, along with the **full findings from all three reviewers**.
+
+Present the gate decision:
 
 > ---
 > ### Merge Gate Decision

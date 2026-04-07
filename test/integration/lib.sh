@@ -28,6 +28,27 @@ readonly _KIND_CONTEXT="kind-${_KIND_CLUSTER_NAME}"
 readonly LOCAL_DOCKER_REGISTRY_NAME="${_KIND_CLUSTER_NAME}-registry"
 readonly LOCAL_DOCKER_REGISTRY_PORT="5001"
 
+# When "docker" is actually podman, configure localhost:$LOCAL_DOCKER_REGISTRY_PORT
+# as an insecure (HTTP) registry. Podman defaults to HTTPS for all registries,
+# but the local kind registry runs plain HTTP. We create a temporary config that
+# includes the system defaults and adds the insecure override, scoped to this
+# process tree via the CONTAINERS_REGISTRIES_CONF environment variable.
+if [[ "$(docker --version 2>&1)" == *podman* ]]; then
+  _podman_registries_conf="$(mktemp "${TMPDIR:-/tmp}/prow-registries-XXXXXX.conf")"
+  trap 'rm -f "${_podman_registries_conf}"' EXIT
+  # Inherit system-wide registries config.
+  if [[ -f /etc/containers/registries.conf ]]; then
+    cat /etc/containers/registries.conf > "${_podman_registries_conf}"
+  fi
+  cat >> "${_podman_registries_conf}" <<REGISTRIES_EOF
+
+[[registry]]
+location = "localhost:${LOCAL_DOCKER_REGISTRY_PORT}"
+insecure = true
+REGISTRIES_EOF
+  export CONTAINERS_REGISTRIES_CONF="${_podman_registries_conf}"
+fi
+
 # These are the components to test (by default). These are the services that
 # must be deployed into the test cluster in order to test all integration tests.
 #
@@ -133,6 +154,10 @@ declare -ra PROW_DEPLOYMENT_ORDER=(
   WAIT_FOR_RESOURCE_secrets,cookie,default
   WAIT_FOR_RESOURCE_secrets,github-oauth-config,default
 
+  # Wait for the nginx ingress controller to be ready before creating ingress
+  # resources. The admission webhook will reject ingress creation if the
+  # controller pod is not yet serving.
+  WAIT_NGINX
   200_ingress.yaml
   WAIT_FOR_RESOURCE_ingresses,strip-path-prefix,default
   WAIT_FOR_RESOURCE_ingresses,no-strip-path-prefix,default
@@ -325,6 +350,10 @@ declare -ra PROW_DEPLOYMENT_ORDER_CORE=(
   WAIT_FOR_RESOURCE_secrets,cookie,default
   WAIT_FOR_RESOURCE_secrets,github-oauth-config,default
 
+  # Wait for the nginx ingress controller to be ready before creating ingress
+  # resources. The admission webhook will reject ingress creation if the
+  # controller pod is not yet serving.
+  WAIT_NGINX
   200_ingress.yaml
   WAIT_FOR_RESOURCE_ingresses,strip-path-prefix,default
   WAIT_FOR_RESOURCE_ingresses,no-strip-path-prefix,default

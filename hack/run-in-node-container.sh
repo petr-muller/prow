@@ -50,7 +50,7 @@ fi
 # exist in /etc/passwd in the node image and yarn will try to read from / and
 # fail instead if we don't.
 "${DOCKER[@]}" run \
-    --rm -i \
+    --rm \
     ${DOCKER_USER} \
     -e HOME=/tmp \
     -v "${REPO_ROOT:?}:${REPO_ROOT:?}" -w "${REPO_ROOT}" \

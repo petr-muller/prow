@@ -114,6 +114,22 @@ function main() {
     "${SCRIPT_ROOT}/teardown.sh" -kind-cluster
     create_cluster "${fakepubsub_node_port:-30303}" "${http_host_port:-80}" "${https_host_port:-443}"
   fi
+
+  # Rootless podman containers cannot load the ip_tables kernel module, so the
+  # legacy iptables binary fails. Switch the iptables alternative to iptables-nft
+  # which uses the nftables backend and works without module loading. This must
+  # happen before kube-proxy starts using iptables rules.
+  if [[ "$(docker --version 2>&1)" == *podman* ]]; then
+    for node in $(kind get nodes --name "${_KIND_CLUSTER_NAME}"); do
+      log "Switching iptables to nft backend on ${node}"
+      docker exec "${node}" update-alternatives --set iptables /usr/sbin/iptables-nft
+      docker exec "${node}" update-alternatives --set ip6tables /usr/sbin/ip6tables-nft
+    done
+    # Restart kube-proxy to pick up the new iptables backend
+    do_kubectl rollout restart daemonset/kube-proxy -n kube-system
+    do_kubectl rollout status daemonset/kube-proxy -n kube-system --timeout=60s
+  fi
+
   setup_cluster
 
   # Use nginx as a reverse proxy and load balancer for the cluster. We don't
@@ -182,8 +198,16 @@ EOF
 # pulls of localhost:PORT images through the in-cluster registry container.
 function setup_cluster() {
   log "Setting up local registry for cluster"
-  # Ignore the error, as the network may already be connected.
-  docker network connect "kind" "${LOCAL_DOCKER_REGISTRY_NAME}" 2>/dev/null || true
+  if ! docker network connect "kind" "${LOCAL_DOCKER_REGISTRY_NAME}" 2>/dev/null; then
+    # With rootless podman, network connect fails because the registry uses
+    # pasta networking. Recreate the registry on the kind bridge network.
+    log "Recreating registry on the kind network"
+    docker rm -f "${LOCAL_DOCKER_REGISTRY_NAME}" 2>/dev/null || true
+    docker run \
+      -d --restart=always -p "127.0.0.1:${LOCAL_DOCKER_REGISTRY_PORT}:5000" \
+      --network kind --name "${LOCAL_DOCKER_REGISTRY_NAME}" \
+      registry:2
+  fi
 
   # Write a hosts.toml into every node so that containerd routes pulls of
   # localhost:PORT to the registry container. This is the approach recommended

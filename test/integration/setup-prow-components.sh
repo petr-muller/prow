@@ -178,8 +178,6 @@ function main() {
   fi
 
   deploy_prow "${fakepubsub_node_port:-30303}"
-
-  wait_for_nginx
 }
 
 function build_prow_images() {
@@ -358,6 +356,9 @@ function deploy_item() {
     WAIT_FOR_RESOURCE_*)
       wait_for_resource_args="${item#WAIT_FOR_RESOURCE_}"
       wait_for_resource "${wait_for_resource_args}"
+      ;;
+    WAIT_NGINX)
+      wait_for_nginx
       ;;
     WAIT_*)
       component="${item#WAIT_}"

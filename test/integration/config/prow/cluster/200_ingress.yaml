@@ -17,28 +17,28 @@ spec:
       paths:
       # Prow components.
       - path: /deck(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: deck
             port:
               number: 80
       - path: /deck-tenanted(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: deck-tenanted
             port:
               number: 80
       - path: /webhook-server(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: webhook-server
             port:
               number: 80
       - path: /moonraker(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: moonraker
@@ -46,21 +46,21 @@ spec:
               number: 80
       # Fakes.
       - path: /fakeghserver(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: fakeghserver
             port:
               number: 80
       - path: /fakegitserver(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: fakegitserver
             port:
               number: 80
       - path: /fakegerritserver(/|$)(.*)
-        pathType: Prefix
+        pathType: ImplementationSpecific
         backend:
           service:
             name: fakegerritserver

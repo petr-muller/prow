@@ -1,15 +1,25 @@
 ---
 name: maintainer-review
-description: Reviews a PR from multiple maintainer perspectives by spawning parallel sub-agent reviewers, then walks the maintainer through each perspective interactively. Use when the user asks to review a PR as a maintainer or mentions /maintainer-review.
+description: Reviews a PR from multiple maintainer perspectives by spawning parallel sub-agent reviewers, then walks the maintainer through each perspective interactively. Use when the user asks to review a PR as a maintainer or mentions /maintainer-review. Supports a "gate" subcommand for LGTM'd PRs.
 ---
 
 # Maintainer Review
 
-Reviews a pull request from multiple maintainer perspectives in parallel, then presents findings as an interactive walkthrough — one perspective at a time — with opportunity for questions after each. Finally, a senior maintainer advisor synthesizes all perspectives into an actionable recommendation.
+Reviews a pull request from multiple maintainer perspectives in parallel, then presents findings as an interactive walkthrough — one perspective at a time — with opportunity for questions after each.
+
+## Subcommands
+
+This skill supports two modes of operation:
+
+- **(default)**: Full maintainer review. A senior maintainer advisor synthesizes all perspectives into an actionable recommendation.
+- **gate**: Merge gate check for PRs that have already been LGTM'd by a trusted reviewer. Same three reviewers run, but the advisor focuses strictly on finding reasons to **block** the merge. The bar for blocking is high: critical bugs, serious regressions, or deployment-breaking incompatibilities. Everything else is noted but does not block.
+
+When the user invokes `/maintainer-review gate <number>`, use the gate subcommand. Otherwise, use the default.
 
 ## Parameters
 
 - `pr_number` (required): The PR number to review (e.g., 123)
+- `subcommand` (optional): `gate` — if specified, use the gate advisor instead of the default advisor
 
 ## Instructions
 
@@ -120,18 +130,32 @@ When the Deployment Risk agent completes, present its findings:
 
 Wait for the user to respond. Same as above.
 
-### Step 4: Maintainer Advisor Synthesis
+### Step 4: Advisor Synthesis
 
 After the user has been walked through all three perspectives and has no more questions, spawn a **final agent** (foreground, not background) using the Agent tool with `subagent_type: "general-purpose"`.
 
-Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/advisor.md` and pass them as the agent's prompt, along with the **full findings from all three reviewers**.
+**Choose the advisor based on the subcommand**:
 
-Present the advisor's recommendation to the user:
+- **Default (no subcommand)**: Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/advisor.md`
+- **gate subcommand**: Read the advisor instructions from `.claude/skills/maintainer-review/reviewers/gate-advisor.md`
+
+Pass the advisor instructions as the agent's prompt, along with the **full findings from all three reviewers**.
+
+**For the default subcommand**, present the advisor's recommendation:
 
 > ---
 > ### Maintainer Advisor — Final Recommendation
 >
 > {The advisor's structured output}
+>
+> ---
+
+**For the gate subcommand**, present the gate decision:
+
+> ---
+> ### Merge Gate Decision
+>
+> {The gate advisor's structured output}
 >
 > ---
 

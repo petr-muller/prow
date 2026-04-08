@@ -97,6 +97,10 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 				JoinOrgURL:     "https://github.com/kubernetes/community/blob/master/community-membership.md",
 				OnlyOrgMembers: true,
 				IgnoreOkToTest: true,
+				OrgInvite: plugins.OrgInviteConfig{
+					MergedPRThreshold: func() *int { v := 5; return &v }(),
+					Message:           "Consider [joining the org]({join_org_url}) for contributor access.",
+				},
 			},
 		},
 	})

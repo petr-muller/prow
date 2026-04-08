@@ -479,6 +479,24 @@ type AssignOnLabel struct {
 	Label string `json:"label"`
 }
 
+// OrgInviteConfig holds configuration for the org invite functionality
+// that is shown to non-org members when they open a PR.
+type OrgInviteConfig struct {
+	// Disabled disables the prominent org invite functionality entirely.
+	// When true, only the regular "join the org" message is shown without
+	// querying for merged PRs.
+	Disabled bool `json:"disabled,omitempty"`
+	// MergedPRThreshold is the number of merged PRs after which the user gets
+	// a prominent message about joining the org. Default: 3.
+	// Use a pointer so that we can distinguish between "not set" (use default)
+	// and "explicitly set to 0".
+	MergedPRThreshold *int `json:"merged_pr_threshold,omitempty"`
+	// Message is a custom message template for the prominent org invite.
+	// Supports {join_org_url} as a placeholder for the org join URL.
+	// Default: ">[!TIP]\n>**We noticed you've done this a few times! Consider [joining the org]({join_org_url}) ..."
+	Message string `json:"message,omitempty"`
+}
+
 // Trigger specifies a configuration for a single trigger.
 //
 // The configuration for the trigger plugin is defined as a list of these structures.
@@ -507,6 +525,9 @@ type Trigger struct {
 	IgnoreOkToTest bool `json:"ignore_ok_to_test,omitempty"`
 	// TriggerGitHubWorkflows enables workflows run by github to be triggered by prow.
 	TriggerGitHubWorkflows bool `json:"trigger_github_workflows,omitempty"`
+	// OrgInvite holds configuration for the prominent org invite message
+	// shown to non-org members who have multiple merged PRs.
+	OrgInvite OrgInviteConfig `json:"org_invite,omitempty"`
 }
 
 // Heart contains the configuration for the heart plugin.

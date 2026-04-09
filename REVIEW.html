@@ -1,0 +1,729 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #677 Review: Add org invite configuration options</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --fg: #e6edf3;
+    --muted: #8b949e;
+    --border: #30363d;
+    --card-bg: #161b22;
+    --add-bg: #12261e;
+    --add-border: #238636;
+    --del-bg: #2d1215;
+    --del-border: #da3633;
+    --accent: #58a6ff;
+    --warn: #d29922;
+    --info: #3fb950;
+    --note-bg: #1c2128;
+    --checkbox-accent: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--fg);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1100px;
+    margin: 0 auto;
+  }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  h1 { font-size: 1.6rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin: 2rem 0 0.75rem; border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1.05rem; margin: 1.25rem 0 0.5rem; color: var(--accent); }
+
+  .meta { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .meta span { margin-right: 1.5rem; }
+  .label {
+    display: inline-block;
+    font-size: 0.75rem;
+    padding: 0.1rem 0.5rem;
+    border-radius: 1rem;
+    border: 1px solid var(--border);
+    margin-right: 0.4rem;
+    color: var(--muted);
+  }
+
+  .summary-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .summary-card p { margin: 0.4rem 0; }
+
+  /* Review items */
+  .review-item {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .review-item-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .review-item-header:hover { background: rgba(88,166,255,0.04); }
+  .review-item input[type="checkbox"] {
+    margin-top: 0.3rem;
+    accent-color: var(--checkbox-accent);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .review-item input[type="checkbox"]:checked + .review-item-content .item-title {
+    text-decoration: line-through;
+    color: var(--muted);
+  }
+  .review-item-content { flex: 1; }
+  .item-title { font-weight: 600; font-size: 0.95rem; }
+  .item-severity {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 1rem;
+    flex-shrink: 0;
+    margin-top: 0.2rem;
+  }
+  .sev-actionable { background: rgba(210,153,34,0.15); color: var(--warn); border: 1px solid rgba(210,153,34,0.3); }
+  .sev-suggestion { background: rgba(88,166,255,0.1); color: var(--accent); border: 1px solid rgba(88,166,255,0.2); }
+  .sev-nit { background: rgba(139,148,158,0.1); color: var(--muted); border: 1px solid rgba(139,148,158,0.2); }
+  .sev-positive { background: rgba(63,185,80,0.1); color: var(--info); border: 1px solid rgba(63,185,80,0.2); }
+  .sev-converging { background: rgba(210,80,34,0.15); color: #f0883e; border: 1px solid rgba(210,80,34,0.3); }
+
+  .item-body {
+    padding: 0 1rem 0.85rem 2.75rem;
+    font-size: 0.9rem;
+    color: #c9d1d9;
+  }
+  .item-body p { margin: 0.3rem 0; }
+  .item-file {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--muted);
+    margin-bottom: 0.3rem;
+  }
+
+  /* Diff blocks */
+  .diff-container {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin: 1rem 0;
+    overflow: hidden;
+  }
+  .diff-file-header {
+    background: rgba(88,166,255,0.08);
+    padding: 0.5rem 1rem;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.8rem;
+    font-weight: 600;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .diff-file-header:hover { background: rgba(88,166,255,0.12); }
+  .diff-file-header .toggle-icon { color: var(--muted); font-size: 0.75rem; }
+  .diff-content {
+    overflow-x: auto;
+  }
+  .diff-content.collapsed { display: none; }
+  pre.diff {
+    margin: 0;
+    padding: 0.75rem 1rem;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.8rem;
+    line-height: 1.5;
+    white-space: pre;
+    overflow-x: auto;
+  }
+  .diff-line { display: block; }
+  .diff-add { background: var(--add-bg); color: #7ee787; }
+  .diff-del { background: var(--del-bg); color: #f97583; }
+  .diff-hunk { color: var(--accent); font-style: italic; }
+  .diff-ctx { color: var(--muted); }
+
+  /* Notes area */
+  .notes-section {
+    margin-top: 2rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+  }
+  .notes-section h3 { margin-top: 0; color: var(--fg); }
+  .notes-section textarea {
+    width: 100%;
+    min-height: 120px;
+    background: var(--bg);
+    color: var(--fg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem;
+    font-family: inherit;
+    font-size: 0.9rem;
+    resize: vertical;
+    margin-top: 0.5rem;
+  }
+  .notes-section textarea:focus { outline: 1px solid var(--accent); border-color: var(--accent); }
+
+  /* Verdict section */
+  .verdict-section {
+    margin-top: 1.5rem;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+  }
+  .verdict-options { display: flex; gap: 0.75rem; margin-top: 0.5rem; flex-wrap: wrap; }
+  .verdict-btn {
+    padding: 0.5rem 1.25rem;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: var(--bg);
+    color: var(--fg);
+    cursor: pointer;
+    font-size: 0.9rem;
+    transition: all 0.15s;
+  }
+  .verdict-btn:hover { border-color: var(--accent); }
+  .verdict-btn.selected { border-color: var(--accent); background: rgba(88,166,255,0.1); font-weight: 600; }
+  .verdict-btn.approve:hover, .verdict-btn.approve.selected { border-color: var(--info); background: rgba(63,185,80,0.15); color: var(--info); }
+  .verdict-btn.request-changes:hover, .verdict-btn.request-changes.selected { border-color: #da3633; background: rgba(218,54,51,0.1); color: #f97583; }
+  .verdict-btn.comment:hover, .verdict-btn.comment.selected { border-color: var(--warn); background: rgba(210,153,34,0.1); color: var(--warn); }
+
+  /* Progress bar */
+  .progress-bar {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    margin: 1rem 0;
+    overflow: hidden;
+  }
+  .progress-fill {
+    height: 100%;
+    background: var(--info);
+    border-radius: 2px;
+    transition: width 0.3s ease;
+  }
+  .progress-text { font-size: 0.8rem; color: var(--muted); }
+
+  /* Existing comment */
+  .existing-comment {
+    background: var(--note-bg);
+    border-left: 3px solid var(--accent);
+    padding: 0.6rem 1rem;
+    margin: 0.5rem 0;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.85rem;
+  }
+  .existing-comment .commenter { font-weight: 600; color: var(--accent); }
+
+  /* Advisor recommendation */
+  .advisor-card {
+    background: var(--card-bg);
+    border: 2px solid var(--info);
+    border-radius: 6px;
+    padding: 1.25rem;
+    margin: 1.5rem 0;
+  }
+  .advisor-card h3 { margin-top: 0; color: var(--info); }
+  .advisor-verdict {
+    font-size: 1.1rem;
+    font-weight: 700;
+    color: var(--info);
+    margin: 0.5rem 0;
+  }
+  .advisor-card ul { margin: 0.5rem 0 0.5rem 1.5rem; }
+  .advisor-card li { margin: 0.3rem 0; }
+
+  /* Perspective sections */
+  .perspective-section {
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .perspective-section h3 { margin-top: 0; }
+  .perspective-verdict {
+    display: inline-block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    padding: 0.2rem 0.6rem;
+    border-radius: 4px;
+    margin-left: 0.5rem;
+  }
+  .pv-approve { background: rgba(63,185,80,0.15); color: var(--info); }
+  .pv-low { background: rgba(63,185,80,0.15); color: var(--info); }
+  .perspective-section ul { margin: 0.5rem 0 0.5rem 1.5rem; }
+  .perspective-section li { margin: 0.3rem 0; font-size: 0.9rem; }
+
+  /* Converging concerns */
+  .converging-card {
+    background: rgba(210,80,34,0.06);
+    border: 1px solid rgba(210,80,34,0.25);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin: 1rem 0;
+  }
+  .converging-card h3 { margin-top: 0; color: #f0883e; }
+  .converging-card ul { margin: 0.5rem 0 0.5rem 1.5rem; }
+  .converging-card li { margin: 0.4rem 0; font-size: 0.9rem; }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--muted);
+    font-size: 0.8rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #677: Add org invite configuration options</h1>
+<div class="meta">
+  <span>Author: <a href="https://github.com/lentzi90">lentzi90</a> (Lennart Jern)</span>
+  <span>+281 / -9</span>
+  <span>Fixes: <a href="https://github.com/kubernetes-sigs/prow/issues/670">#670</a></span>
+  <br>
+  <span class="label">area/plugins</span>
+  <span class="label">size/L</span>
+  <span class="label">cncf-cla: yes</span>
+</div>
+
+<div class="summary-card">
+  <p><strong>What this does:</strong> Makes the prominent "join the org" message (from PR #627) configurable via a new <code>OrgInviteConfig</code> struct nested inside the existing <code>Trigger</code> config.</p>
+  <p><strong>New config fields:</strong>
+    <code>disabled</code> (skip prominent message),
+    <code>merged_pr_threshold</code> (customize PR count, default 3),
+    <code>message</code> (custom template with <code>{join_org_url}</code> placeholder).</p>
+  <p><strong>Files changed:</strong> <code>config.go</code>, <code>pull-request.go</code>, <code>pull-request_test.go</code>, <code>trigger.go</code></p>
+</div>
+
+<!-- Progress -->
+<div class="progress-text">Review progress: <span id="progress-count">0</span> / <span id="progress-total">0</span> items reviewed</div>
+<div class="progress-bar"><div class="progress-fill" id="progress-fill" style="width:0%"></div></div>
+
+<!-- Advisor Recommendation -->
+<div class="advisor-card">
+  <h3>Maintainer Advisor &mdash; Final Recommendation</h3>
+  <div class="advisor-verdict">APPROVE WITH SUGGESTIONS</div>
+  <p>All three independent reviewers reached APPROVE. The PR is a clean, additive, backwards-compatible change with good test coverage and zero-value safety. The converging concerns below are minor hardening and consistency improvements &mdash; none represent correctness bugs or deployment risks.</p>
+  <p style="margin-top:0.75rem; font-size:0.9rem; color:var(--muted);"><strong>Suggested PR comment:</strong> <em>"This is a clean, well-tested, backwards-compatible addition. Approving with two minor suggestions: (1) add validation in validateTrigger() to reject negative MergedPRThreshold values, and (2) replace the IIFE pointer construction in the help provider with ptr.To(5) for consistency. Neither is blocking. Nice work."</em></p>
+</div>
+
+<!-- Converging Concerns -->
+<div class="converging-card">
+  <h3>Converging Concerns (flagged by 2+ reviewers)</h3>
+  <ul>
+    <li><strong>No validation for negative <code>MergedPRThreshold</code></strong> &mdash; flagged by <strong>all three</strong> reviewers. A negative threshold makes the prominent message appear unconditionally. Add a check in <code>validateTrigger()</code> to reject negative values.</li>
+    <li><strong>IIFE pattern instead of <code>ptr.To(5)</code></strong> &mdash; flagged by <strong>Code Quality + Maintainability</strong>. The test file already uses <code>ptr.To()</code>; the help provider example should too.</li>
+  </ul>
+</div>
+
+<!-- Multi-Perspective Reviews -->
+<h2>Multi-Perspective Reviews</h2>
+
+<div class="perspective-section">
+  <h3>1/3 &mdash; Code Quality <span class="perspective-verdict pv-approve">APPROVE</span></h3>
+  <ul>
+    <li><strong>No critical issues</strong> &mdash; code is correct, idiomatic, and well-tested</li>
+    <li>Negative threshold validation: no check for negative <code>MergedPRThreshold</code> values &mdash; benign (behaves like threshold=0) but likely a config mistake</li>
+    <li><code>ptr.To(5)</code> should replace verbose IIFE in <code>trigger.go:101</code></li>
+    <li>Good use of <code>*int</code> pattern, consistent with <code>Blunderbuss.ReviewerCount</code></li>
+    <li><code>Disabled</code> short-circuits early, avoiding unnecessary GitHub API calls</li>
+    <li>Thorough test coverage: table-driven for all paths including nil/zero/positive thresholds, disabled mode, custom messages, search-skip verification</li>
+    <li><code>{join_org_url}</code> via <code>strings.ReplaceAll</code> is safe &mdash; <code>joinOrgURL</code> comes from trusted configuration</li>
+  </ul>
+</div>
+
+<div class="perspective-section">
+  <h3>2/3 &mdash; Maintainability <span class="perspective-verdict pv-approve">APPROVE</span> <span class="perspective-verdict pv-low">BURDEN: LOW</span></h3>
+  <ul>
+    <li>Small, self-contained config struct with clear defaults and straightforward control flow</li>
+    <li><strong>Templating inconsistency:</strong> <code>Message</code> uses <code>{join_org_url}</code> with <code>strings.ReplaceAll</code>, while existing <code>Welcome.MessageTemplate</code> uses Go <code>text/template</code> syntax &mdash; a future maintainer may be confused about which convention to follow</li>
+    <li><strong>Default message drift:</strong> doc comment on <code>Message</code> shows the default text, but the actual default lives in <code>pull-request.go</code> &mdash; they could diverge over time. Consider defining the default as a constant.</li>
+    <li><code>effectiveMergedPRThreshold</code> helper keeps nil-checks centralized</li>
+    <li><code>OrgInvite</code> nests inside <code>Trigger</code>, respecting the existing config hierarchy</li>
+    <li>Cleanly revertible &mdash; removing the struct naturally falls back to pre-PR behavior</li>
+    <li>Tests are behavior-focused rather than implementation-focused</li>
+  </ul>
+</div>
+
+<div class="perspective-section">
+  <h3>3/3 &mdash; Deployment Risk <span class="perspective-verdict pv-low">RISK: LOW</span></h3>
+  <ul>
+    <li><strong>No breaking changes</strong> &mdash; no fields renamed/removed, no struct tags changed, no defaults altered</li>
+    <li>All new fields are optional with <code>omitempty</code> tags; zero-value preserves existing behavior</li>
+    <li>No config migration needed &mdash; operators upgrade without touching configs</li>
+    <li>Fully rollback-safe, no ordering dependencies</li>
+    <li>Disabled mode is a net positive for API rate limiting &mdash; skips GitHub Search API call entirely</li>
+    <li>Negative threshold misconfiguration would silently show prominent message for all PRs</li>
+    <li>New <code>k8s.io/utils/ptr</code> import is test-only</li>
+  </ul>
+</div>
+
+<!-- Existing Review Comments -->
+<h2>Existing Review Comments</h2>
+<div class="existing-comment">
+  <span class="commenter">@stmcginnis</span> on <code>trigger.go:101</code>:
+  "We could use <code>ptr.To(5)</code> here instead of the closure."
+</div>
+
+<!-- Review Checklist -->
+<h2>Review Checklist</h2>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Use ptr.To() in helpProvider</div>
+    </div>
+    <span class="item-severity sev-converging">converging &middot; 2 reviewers</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/trigger/trigger.go:101</div>
+    <p>The inline closure <code>func() *int { v := 5; return &amp;v }()</code> should use <code>ptr.To(5)</code> from <code>k8s.io/utils/ptr</code> &mdash; already used in the test file. Flagged by Code Quality, Maintainability, and stmcginnis.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">No validation for negative threshold</div>
+    </div>
+    <span class="item-severity sev-converging">converging &middot; 3 reviewers</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:1447 (validateTrigger)</div>
+    <p>A negative <code>MergedPRThreshold</code> would make <code>len(issues) >= negative</code> always true, showing the prominent message to everyone. Flagged independently by all three reviewers. Add a check in <code>validateTrigger()</code> to reject negative values with a clear error message.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Templating convention inconsistency</div>
+    </div>
+    <span class="item-severity sev-suggestion">suggestion</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:494 vs Welcome.MessageTemplate</div>
+    <p><code>Message</code> uses <code>{join_org_url}</code> with <code>strings.ReplaceAll</code>, while the existing <code>Welcome.MessageTemplate</code> in the same config file uses Go <code>text/template</code> (<code>{{.AuthorLogin}}</code>). A brief code comment explaining why the simpler approach was chosen here (single variable) would help future maintainers.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Default message drift risk</div>
+    </div>
+    <span class="item-severity sev-suggestion">suggestion</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:494 / pkg/plugins/trigger/pull-request.go:341</div>
+    <p>The doc comment on <code>Message</code> duplicates the default text that lives in <code>pull-request.go</code>. If either is changed without the other, they'll diverge. Consider defining the default as a named constant or simplifying the doc comment to say "If empty, a default TIP message is used."</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Disabled + custom Message interaction</div>
+    </div>
+    <span class="item-severity sev-suggestion">suggestion</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/trigger/pull-request.go:332-341</div>
+    <p>When <code>Disabled: true</code>, the custom <code>Message</code> is silently ignored because the disabled check returns early. This is reasonable but could surprise users who set both. Worth a note in the struct doc comment: <em>"When true, MergedPRThreshold and Message are ignored."</em></p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Field naming: Disabled vs DisableProminentMessage</div>
+    </div>
+    <span class="item-severity sev-nit">nit</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:485</div>
+    <p><code>Disabled</code> doesn't disable org invite guidance entirely &mdash; it only disables the <em>prominent</em> version (the regular message is still shown). A more self-documenting name like <code>DisableProminentMessage</code> might prevent confusion, though this is a minor naming preference.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Custom message without {join_org_url} placeholder</div>
+    </div>
+    <span class="item-severity sev-nit">nit</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:494</div>
+    <p>A custom <code>Message</code> without the <code>{join_org_url}</code> placeholder works fine (no link rendered). The doc comment could note that the placeholder is optional, so users know they can omit it intentionally.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Pointer type for threshold is well-chosen</div>
+    </div>
+    <span class="item-severity sev-positive">positive</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:490</div>
+    <p>Using <code>*int</code> to distinguish "not set" from "explicitly 0" is the right design choice, with a clear comment explaining why. The <code>effectiveMergedPRThreshold</code> helper keeps the nil-check in one place.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Test coverage is thorough</div>
+    </div>
+    <span class="item-severity sev-positive">positive</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/trigger/pull-request_test.go</div>
+    <p>Three new table-driven test functions cover the threshold helper, highlight logic with custom thresholds (including edge cases like 0 and nil), and the full guidance function with disabled/custom/default paths. The <code>expectNoSearch</code> assertion for the disabled path verifies no unnecessary API call is made.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Backward compatibility preserved</div>
+    </div>
+    <span class="item-severity sev-positive">positive</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go, pkg/plugins/trigger/pull-request.go</div>
+    <p>Zero-value <code>OrgInviteConfig{}</code> preserves existing behavior exactly: not disabled, nil threshold falls back to default 3, empty message uses the built-in TIP block. Existing tests pass with <code>OrgInviteConfig{}</code> confirming no regression.</p>
+  </div>
+</div>
+
+<div class="review-item">
+  <label class="review-item-header">
+    <input type="checkbox" onchange="updateProgress()">
+    <div class="review-item-content">
+      <div class="item-title">Config layering works via TriggerFor</div>
+    </div>
+    <span class="item-severity sev-positive">positive</span>
+  </label>
+  <div class="item-body">
+    <div class="item-file">pkg/plugins/config.go:1034</div>
+    <p>Nesting <code>OrgInvite</code> inside <code>Trigger</code> means it automatically benefits from the existing <code>TriggerFor(org, repo)</code> resolution, supporting per-repo and per-org overrides without new plumbing.</p>
+  </div>
+</div>
+
+<!-- Diff -->
+<h2>Full Diff</h2>
+
+<div class="diff-container">
+  <div class="diff-file-header" onclick="toggleDiff(this)">
+    <span>pkg/plugins/config.go</span>
+    <span class="toggle-icon">collapse</span>
+  </div>
+  <div class="diff-content">
+    <pre class="diff"><span class="diff-hunk">@@ -479,6 +479,24 @@ type AssignOnLabel struct {</span>
+<span class="diff-ctx"> 	Label string `json:"label"`</span>
+<span class="diff-ctx"> }</span>
+<span class="diff-ctx"> </span>
+<span class="diff-add">+// OrgInviteConfig holds configuration for the org invite functionality</span>
+<span class="diff-add">+// that is shown to non-org members when they open a PR.</span>
+<span class="diff-add">+type OrgInviteConfig struct {</span>
+<span class="diff-add">+	// Disabled disables the prominent org invite functionality entirely.</span>
+<span class="diff-add">+	// When true, only the regular "join the org" message is shown without</span>
+<span class="diff-add">+	// querying for merged PRs.</span>
+<span class="diff-add">+	Disabled bool `json:"disabled,omitempty"`</span>
+<span class="diff-add">+	// MergedPRThreshold is the number of merged PRs after which the user gets</span>
+<span class="diff-add">+	// a prominent message about joining the org. Default: 3.</span>
+<span class="diff-add">+	// Use a pointer so that we can distinguish between "not set" (use default)</span>
+<span class="diff-add">+	// and "explicitly set to 0".</span>
+<span class="diff-add">+	MergedPRThreshold *int `json:"merged_pr_threshold,omitempty"`</span>
+<span class="diff-add">+	// Message is a custom message template for the prominent org invite.</span>
+<span class="diff-add">+	// Supports {join_org_url} as a placeholder for the org join URL.</span>
+<span class="diff-add">+	// Default: "&gt;[!TIP]\n&gt;**We noticed you've done this a few times! ..."</span>
+<span class="diff-add">+	Message string `json:"message,omitempty"`</span>
+<span class="diff-add">+}</span>
+<span class="diff-add">+</span>
+<span class="diff-ctx"> // Trigger specifies a configuration for a single trigger.</span>
+<span class="diff-ctx"> //</span>
+<span class="diff-ctx"> // The configuration for the trigger plugin is defined as a list of ...</span>
+<span class="diff-hunk">@@ -507,6 +525,9 @@ type Trigger struct {</span>
+<span class="diff-ctx"> 	IgnoreOkToTest bool `json:"ignore_ok_to_test,omitempty"`</span>
+<span class="diff-ctx"> 	// TriggerGitHubWorkflows enables ...</span>
+<span class="diff-ctx"> 	TriggerGitHubWorkflows bool `json:"trigger_github_workflows,omitempty"`</span>
+<span class="diff-add">+	// OrgInvite holds configuration for the prominent org invite message</span>
+<span class="diff-add">+	// shown to non-org members who have multiple merged PRs.</span>
+<span class="diff-add">+	OrgInvite OrgInviteConfig `json:"org_invite,omitempty"`</span>
+<span class="diff-ctx"> }</span></pre>
+  </div>
+</div>
+
+<div class="diff-container">
+  <div class="diff-file-header" onclick="toggleDiff(this)">
+    <span>pkg/plugins/trigger/pull-request.go</span>
+    <span class="toggle-icon">collapse</span>
+  </div>
+  <div class="diff-content">
+    <pre class="diff"><span class="diff-hunk">@@ -43,6 +44,15 @@ const (</span>
+<span class="diff-ctx"> 	mergedPRCountForProminentJoinOrgMessage = 3</span>
+<span class="diff-ctx"> )</span>
+<span class="diff-ctx"> </span>
+<span class="diff-add">+// effectiveMergedPRThreshold returns the configured merged PR threshold,</span>
+<span class="diff-add">+// or the default (mergedPRCountForProminentJoinOrgMessage) when not configured.</span>
+<span class="diff-add">+func effectiveMergedPRThreshold(cfg plugins.OrgInviteConfig) int {</span>
+<span class="diff-add">+	if cfg.MergedPRThreshold != nil {</span>
+<span class="diff-add">+		return *cfg.MergedPRThreshold</span>
+<span class="diff-add">+	}</span>
+<span class="diff-add">+	return mergedPRCountForProminentJoinOrgMessage</span>
+<span class="diff-add">+}</span>
+<span class="diff-add">+</span>
+<span class="diff-hunk">@@ -279,7 +289,7 @@</span>
+<span class="diff-del">-		membershipGuidance := orgInvitationGuidance(c, org, pr.User, joinOrgURL)</span>
+<span class="diff-add">+		membershipGuidance := orgInvitationGuidance(c, org, pr.User, joinOrgURL, trigger.OrgInvite)</span>
+<span class="diff-hunk">@@ -319,15 +329,22 @@</span>
+<span class="diff-del">-func orgInvitationGuidance(c Client, org string, author github.User, joinOrgURL string) string {</span>
+<span class="diff-del">-	if shouldHighlightJoinOrgMessage(c, org, author) {</span>
+<span class="diff-add">+func orgInvitationGuidance(c Client, org string, author github.User, joinOrgURL string, cfg plugins.OrgInviteConfig) string {</span>
+<span class="diff-add">+	if cfg.Disabled {</span>
+<span class="diff-add">+		return fmt.Sprintf("Regular contributors should [join the org](%s)...", joinOrgURL)</span>
+<span class="diff-add">+	}</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+	if shouldHighlightJoinOrgMessage(c, org, author, cfg) {</span>
+<span class="diff-add">+		if cfg.Message != "" {</span>
+<span class="diff-add">+			return strings.ReplaceAll(cfg.Message, "{join_org_url}", joinOrgURL)</span>
+<span class="diff-add">+		}</span>
+<span class="diff-ctx"> 		return fmt.Sprintf("&gt;[!TIP]\n&gt;**We noticed you've done this a few ...</span>
+<span class="diff-ctx"> 	}</span>
+<span class="diff-ctx"> 	return fmt.Sprintf("Regular contributors should [join the org](%s)...", joinOrgURL)</span>
+<span class="diff-ctx"> }</span>
+<span class="diff-ctx"> </span>
+<span class="diff-del">-func shouldHighlightJoinOrgMessage(c Client, org string, author github.User) bool {</span>
+<span class="diff-add">+func shouldHighlightJoinOrgMessage(c Client, org string, author github.User, cfg plugins.OrgInviteConfig) bool {</span>
+<span class="diff-ctx"> 	...</span>
+<span class="diff-del">-	return len(issues) &gt;= mergedPRCountForProminentJoinOrgMessage</span>
+<span class="diff-add">+	return len(issues) &gt;= effectiveMergedPRThreshold(cfg)</span>
+<span class="diff-ctx"> }</span></pre>
+  </div>
+</div>
+
+<div class="diff-container">
+  <div class="diff-file-header" onclick="toggleDiff(this)">
+    <span>pkg/plugins/trigger/pull-request_test.go (+228 lines)</span>
+    <span class="toggle-icon">collapse</span>
+  </div>
+  <div class="diff-content">
+    <pre class="diff"><span class="diff-ctx"> Existing tests updated: OrgInviteConfig{} passed to all call sites</span>
+<span class="diff-ctx"> </span>
+<span class="diff-add">+func TestShouldHighlightJoinOrgMessageCustomThreshold(t *testing.T) {</span>
+<span class="diff-add">+  // Table-driven: threshold 5 with 3 PRs (false), 5 with 5 (true),</span>
+<span class="diff-add">+  //   threshold 1 with 1 (true), threshold 0 with 0 (true),</span>
+<span class="diff-add">+  //   nil threshold with 3 (true, default), nil with 2 (false)</span>
+<span class="diff-add">+}</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+func TestOrgInvitationGuidance(t *testing.T) {</span>
+<span class="diff-add">+  // Table-driven: disabled (no search), custom msg above threshold,</span>
+<span class="diff-add">+  //   default msg above threshold, below threshold (regular msg)</span>
+<span class="diff-add">+}</span>
+<span class="diff-add">+</span>
+<span class="diff-add">+func TestEffectiveMergedPRThreshold(t *testing.T) {</span>
+<span class="diff-add">+  // Table-driven: nil=3, explicit 5, explicit 0, explicit 1</span>
+<span class="diff-add">+}</span></pre>
+  </div>
+</div>
+
+<div class="diff-container">
+  <div class="diff-file-header" onclick="toggleDiff(this)">
+    <span>pkg/plugins/trigger/trigger.go</span>
+    <span class="toggle-icon">collapse</span>
+  </div>
+  <div class="diff-content">
+    <pre class="diff"><span class="diff-hunk">@@ -97,6 +97,10 @@ func helpProvider(...) {</span>
+<span class="diff-ctx"> 				IgnoreOkToTest: true,</span>
+<span class="diff-add">+				OrgInvite: plugins.OrgInviteConfig{</span>
+<span class="diff-add">+					MergedPRThreshold: func() *int { v := 5; return &amp;v }(),</span>
+<span class="diff-add">+					Message:           "Consider [joining the org]({join_org_url}) ...",</span>
+<span class="diff-add">+				},</span>
+<span class="diff-ctx"> 			},</span></pre>
+  </div>
+</div>
+
+<!-- Your Notes -->
+<h2>Your Review Notes</h2>
+<div class="notes-section">
+  <h3>Notes</h3>
+  <textarea id="review-notes" placeholder="Write your review notes here..."></textarea>
+</div>
+
+<!-- Verdict -->
+<div class="verdict-section">
+  <h3>Verdict</h3>
+  <div class="verdict-options">
+    <button class="verdict-btn approve" onclick="selectVerdict(this, 'approve')">Approve</button>
+    <button class="verdict-btn comment" onclick="selectVerdict(this, 'comment')">Comment</button>
+    <button class="verdict-btn request-changes" onclick="selectVerdict(this, 'request-changes')">Request Changes</button>
+  </div>
+</div>
+
+<footer>
+  PR #677 &middot; kubernetes-sigs/prow &middot; Review prepared 2026-04-09
+</footer>
+
+<script>
+function updateProgress() {
+  const checks = document.querySelectorAll('.review-item input[type="checkbox"]');
+  const total = checks.length;
+  const checked = Array.from(checks).filter(c => c.checked).length;
+  document.getElementById('progress-count').textContent = checked;
+  document.getElementById('progress-total').textContent = total;
+  document.getElementById('progress-fill').style.width = total > 0 ? (checked / total * 100) + '%' : '0%';
+}
+
+function toggleDiff(header) {
+  const content = header.nextElementSibling;
+  const icon = header.querySelector('.toggle-icon');
+  content.classList.toggle('collapsed');
+  icon.textContent = content.classList.contains('collapsed') ? 'expand' : 'collapse';
+}
+
+function selectVerdict(btn, verdict) {
+  document.querySelectorAll('.verdict-btn').forEach(b => b.classList.remove('selected'));
+  btn.classList.add('selected');
+}
+
+// Initialize progress
+updateProgress();
+</script>
+</body>
+</html>

@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #667 Review — Local Development Helpers</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --cyan: #39c5cf;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1020px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+    color: #fff;
+  }
+  h1 small {
+    font-weight: 400;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    display: block;
+    margin-top: 0.25rem;
+  }
+  h2 {
+    font-size: 1.15rem;
+    color: var(--accent);
+    margin: 2rem 0 0.75rem;
+  }
+  h3 {
+    font-size: 1rem;
+    color: var(--text);
+    margin: 1.25rem 0 0.5rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.55em;
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-right: 0.35em;
+    position: relative;
+    top: -1px;
+  }
+  .badge-bug        { background: var(--red);    color: #fff; }
+  .badge-suggestion  { background: var(--yellow); color: #000; }
+  .badge-nit         { background: var(--text-muted); color: #000; }
+  .badge-good        { background: var(--green);  color: #000; }
+  .badge-converging  { background: var(--orange); color: #fff; }
+  .badge-deploy      { background: var(--purple); color: #fff; }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .finding summary {
+    cursor: pointer;
+    font-weight: 600;
+    list-style: none;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .finding summary::before {
+    content: '\25B8';
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    transition: transform 0.15s;
+  }
+  .finding[open] summary::before { content: '\25BE'; }
+  .finding .body {
+    margin-top: 0.75rem;
+    padding-top: 0.75rem;
+    border-top: 1px solid var(--border);
+    color: var(--text);
+  }
+  .finding .body p { margin-bottom: 0.6rem; }
+  .finding .body ul { margin: 0.4rem 0 0.6rem 1.25rem; }
+  .finding .body li { margin-bottom: 0.3rem; }
+
+  .reviewer-tags {
+    margin-left: auto;
+    display: flex;
+    gap: 0.3rem;
+    flex-shrink: 0;
+  }
+  .reviewer-tag {
+    font-size: 0.65rem;
+    font-weight: 500;
+    padding: 0.1em 0.45em;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    background: transparent;
+  }
+
+  .loc {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.82rem;
+    color: var(--cyan);
+    background: rgba(56,197,207,0.1);
+    padding: 0.1em 0.4em;
+    border-radius: 3px;
+  }
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    margin: 0.5rem 0;
+    line-height: 1.5;
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+  }
+  .checklist {
+    list-style: none;
+    margin: 1rem 0;
+  }
+  .checklist li {
+    padding: 0.35rem 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .checklist input[type="checkbox"] {
+    margin-top: 0.3rem;
+    accent-color: var(--green);
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+  .overview-table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  .overview-table th,
+  .overview-table td {
+    text-align: left;
+    padding: 0.4rem 0.75rem;
+    border: 1px solid var(--border);
+  }
+  .overview-table th {
+    background: var(--surface);
+    color: var(--text-muted);
+    font-weight: 600;
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+
+  .verdict-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-left: 4px solid var(--green);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+  }
+  .verdict-box h3 {
+    margin-top: 0;
+    color: var(--green);
+  }
+  .verdict-box p { margin-bottom: 0.5rem; }
+
+  .section-positive .body { border-top-color: var(--green); }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>
+  PR #667 — Add helpers to reduce friction in local development
+  <small>Author: stmcginnis (Sean McGinnis) &middot; +1149 / &minus;13 &middot; size/XXL &middot; Multi-perspective maintainer review</small>
+</h1>
+
+<!-- ================================================================ -->
+<div class="verdict-box">
+  <h3>Recommendation: APPROVE WITH SUGGESTIONS</h3>
+  <p>
+    All three reviewers issued COMMENT verdicts &mdash; none requested changes.
+    The PR delivers meaningful DX improvements by building on existing integration
+    test infrastructure rather than creating a parallel system. Concerns raised are
+    real but non-blocking or addressable with minor fixes.
+  </p>
+</div>
+
+<!-- ================================================================ -->
+<h2>Files changed</h2>
+<table class="overview-table">
+  <thead><tr><th>File</th><th>What</th></tr></thead>
+  <tbody>
+    <tr><td><code>.gitignore</code></td><td>Ignore <code>tilt-settings.yaml</code> and <code>tilt.d/*.tiltfile</code></td></tr>
+    <tr><td><code>Makefile</code></td><td>New targets: <code>dev</code>, <code>dev-full</code>, <code>dev-tilt</code>, <code>dev-teardown</code></td></tr>
+    <tr><td><code>Tiltfile</code></td><td>Tilt configuration for auto-rebuild/redeploy (Starlark)</td></tr>
+    <tr><td><code>hack/dev-env.sh</code></td><td>Main dev environment orchestrator</td></tr>
+    <tr><td><code>hack/phony.sh</code></td><td>Convenience wrapper for sending fake webhooks</td></tr>
+    <tr><td><code>hack/tilt-apply-config.sh</code></td><td>Applies Prow configmaps on config change</td></tr>
+    <tr><td><code>hack/tilt-build.sh</code></td><td>Builds a single Prow image for Tilt</td></tr>
+    <tr><td><code>site/.../build-test-update.md</code></td><td>Doc update: link to local dev + phony.sh</td></tr>
+    <tr><td><code>site/.../getting-started-develop.md</code></td><td>Doc update: link to local dev guide</td></tr>
+    <tr><td><code>site/.../local-dev-tilt.md</code></td><td>New doc: Tilt workflow guide</td></tr>
+    <tr><td><code>site/.../local-dev.md</code></td><td>New doc: local dev environment guide</td></tr>
+    <tr><td><code>site/.../test/integration/_index.md</code></td><td>Updated: adding-a-component instructions for core profile</td></tr>
+    <tr><td><code>test/integration/lib.sh</code></td><td>Core arrays + <code>$0</code>&rarr;<code>BASH_SOURCE</code> fix</td></tr>
+    <tr><td><code>test/integration/setup-kind-cluster.sh</code></td><td>Configurable host ports; containerd v2 registry config</td></tr>
+    <tr><td><code>test/integration/setup-prow-components.sh</code></td><td><code>-profile=</code> flag; core/full dispatch</td></tr>
+    <tr><td><code>tilt.d/.gitkeep</code></td><td>Placeholder for personal Tiltfile overrides</td></tr>
+  </tbody>
+</table>
+
+<!-- ================================================================ -->
+<h2>Review checklist</h2>
+<ul class="checklist">
+  <li><input type="checkbox"><span>All findings reviewed and dispositioned</span></li>
+  <li><input type="checkbox"><span>Tested <code>make dev</code> on a clean checkout</span></li>
+  <li><input type="checkbox"><span>Tested <code>make dev</code> &rarr; <code>make dev-tilt</code> inner loop</span></li>
+  <li><input type="checkbox"><span>Tested <code>make dev-teardown</code></span></li>
+  <li><input type="checkbox"><span>Verified <code>hack/phony.sh</code> sends a webhook successfully</span></li>
+  <li><input type="checkbox"><span>Verified <code>make integration</code> still passes (no regression from lib.sh / setup-kind-cluster.sh changes)</span></li>
+  <li><input type="checkbox"><span>Verified containerd registry approach works with CI kind version</span></li>
+  <li><input type="checkbox"><span>Docs render correctly in Hugo</span></li>
+</ul>
+
+<!-- ================================================================ -->
+<h2>Converging concerns</h2>
+<p style="color:var(--text-muted); margin-bottom:0.75rem; font-size:0.9rem;">
+  Issues flagged independently by two or more reviewers. These carry the most weight.
+</p>
+
+<!-- ---- CONVERGE 1 ---- -->
+<details class="finding" open>
+  <summary>
+    <span class="badge badge-converging">2+ reviewers</span>
+    Phantom <code>-add=</code> flag reference in <code>lib.sh</code>
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Code Quality</span>
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      <span class="loc">test/integration/lib.sh:281</span> &mdash; Comment on
+      <code>PROW_COMPONENTS_CORE</code> says components
+      &ldquo;can be added individually with <code>hack/dev-env.sh -add=</code>&rdquo;,
+      but <code>dev-env.sh</code> has no <code>-add</code> flag.
+    </p>
+    <p>
+      Appears to be a leftover from an earlier design iteration.
+      Remove the reference or implement the flag.
+    </p>
+  </div>
+</details>
+
+<!-- ---- CONVERGE 2 ---- -->
+<details class="finding" open>
+  <summary>
+    <span class="badge badge-converging">2+ reviewers</span>
+    Triple source of truth for component definitions
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Code Quality</span>
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      Component definitions now live in three places that must be kept in sync:
+    </p>
+    <ul>
+      <li><span class="loc">test/integration/lib.sh</span> &mdash; <code>PROW_IMAGES</code>, <code>PROW_COMPONENTS</code>, <code>PROW_DEPLOYMENT_ORDER</code></li>
+      <li><span class="loc">test/integration/lib.sh</span> &mdash; <code>PROW_COMPONENTS_CORE</code>, <code>PROW_DEPLOYMENT_ORDER_CORE</code></li>
+      <li><span class="loc">Tiltfile</span> &mdash; <code>COMPONENT_DEFS</code></li>
+    </ul>
+    <p>
+      The Starlark/bash split makes this unavoidable, but cross-reference
+      comments in each location would prevent silent drift. The <code>deck-tenanted</code>
+      mismatch (see below) is already an instance of this going wrong.
+    </p>
+  </div>
+</details>
+
+<!-- ================================================================ -->
+<h2>Findings by severity</h2>
+
+<!-- ---- BUG 1 ---- -->
+<details class="finding" open>
+  <summary>
+    <span class="badge badge-bug">Bug</span>
+    <code>deck-tenanted</code> inconsistency between Tiltfile and core profile
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Code Quality</span>
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      The Tiltfile unconditionally registers <code>deck-tenanted</code> as a workload
+      (<span class="loc">Tiltfile:218</span>) and applies
+      <code>deck_tenant_deployment.yaml</code>. However,
+      <code>PROW_DEPLOYMENT_ORDER_CORE</code> in
+      <span class="loc">test/integration/lib.sh</span> does <em>not</em> include
+      <code>deck_tenant_deployment.yaml</code> or <code>WAIT_deck-tenanted</code>.
+    </p>
+    <p>
+      <strong>Impact</strong>: <code>make dev</code> + <code>tilt up</code> will have
+      Tilt trying to manage a workload that doesn't exist in the cluster,
+      causing errors or an unexpected deployment.
+    </p>
+    <p>
+      <strong>Fix</strong>: either add <code>deck_tenant_deployment.yaml</code> + its
+      wait to <code>PROW_DEPLOYMENT_ORDER_CORE</code>, or gate the Tiltfile's
+      deck-tenanted registration behind the <code>extra_components</code> mechanism.
+    </p>
+  </div>
+</details>
+
+<!-- ---- BUG 2 ---- -->
+<details class="finding" open>
+  <summary>
+    <span class="badge badge-bug">Bug</span>
+    Tiltfile <code>prow_component</code> doc/code mismatch
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Code Quality</span>
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      <span class="loc">site/content/en/docs/local-dev-tilt.md:135&ndash;140</span> shows this
+      example for personal Tiltfile overrides:
+    </p>
+    <pre><code># tilt.d/narrow-hook-deps.tiltfile
+prow_component('hook', ['cmd/hook/', 'pkg/github/', 'pkg/plugins/'])</code></pre>
+    <p>
+      But the actual function at <span class="loc">Tiltfile:184</span> only accepts a
+      single <code>name</code> argument:
+    </p>
+    <pre><code>def prow_component(name):
+    ...</code></pre>
+    <p>
+      Anyone following the docs gets a runtime error from Tilt. Either add an
+      optional <code>override_src_dirs</code> parameter, or change the example to
+      modify <code>COMPONENT_DEFS</code> directly.
+    </p>
+  </div>
+</details>
+
+<!-- ---- SUGGESTION 1 ---- -->
+<details class="finding">
+  <summary>
+    <span class="badge badge-suggestion">Suggestion</span>
+    <code>hack/phony.sh</code> &mdash; silent failure and hardcoded context
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Code Quality</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p><strong>Silent HMAC failure</strong> &mdash;
+      <span class="loc">hack/phony.sh:24</span>: If <code>kubectl</code> fails (cluster
+      not running, secret missing), <code>base64 -d</code> silently produces empty output.
+      The script proceeds with an empty HMAC, resulting in a confusing
+      &ldquo;unauthorized&rdquo; error instead of a clear message.
+    </p>
+    <pre><code>HMAC=$(kubectl --context=kind-kind-prow-integration \
+    get secret hmac-token -o jsonpath='{.data.hmac}' | base64 -d) || {
+  echo &gt;&amp;2 "Failed to read HMAC token. Is the dev cluster running? (make dev)"
+  exit 1
+}</code></pre>
+    <p><strong>Hardcoded context</strong> &mdash; Uses <code>kind-kind-prow-integration</code>
+      literally instead of sourcing <code>lib.sh</code> and using <code>_KIND_CONTEXT</code>
+      / <code>do_kubectl</code>, unlike the other new scripts. Would break if cluster name
+      ever changes.
+    </p>
+  </div>
+</details>
+
+<!-- ---- SUGGESTION 2 ---- -->
+<details class="finding">
+  <summary>
+    <span class="badge badge-suggestion">Suggestion</span>
+    Shared cluster name between dev and integration environments
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Deployment Risk</span>
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      Dev and integration environments share the kind cluster name
+      <code>kind-prow-integration</code>. Running <code>make dev</code> creates the
+      cluster with ports 8080/8443; a subsequent <code>make integration</code>
+      sees the cluster as running, skips creation, then tests fail reaching
+      services on port 80.
+    </p>
+    <p>
+      The docs warn about this, but the failure mode is not graceful &mdash; no
+      error message, just confusing test failures. Consider:
+    </p>
+    <ul>
+      <li>Using a separate cluster name for dev, or</li>
+      <li>Making <code>setup-kind-cluster.sh</code> port-aware when reusing an existing cluster</li>
+    </ul>
+  </div>
+</details>
+
+<!-- ---- SUGGESTION 3 ---- -->
+<details class="finding">
+  <summary>
+    <span class="badge badge-suggestion">Suggestion</span>
+    <code>PROW_DEPLOYMENT_ORDER_CORE</code> duplication in <code>lib.sh</code>
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      <code>PROW_DEPLOYMENT_ORDER_CORE</code> (~80 lines) is a near-complete copy of
+      the first ~75% of <code>PROW_DEPLOYMENT_ORDER</code>. Changes to infrastructure
+      entries (CRDs, secrets, ingress, fakes) or YAML file renames require
+      updating both arrays in lockstep.
+    </p>
+    <p>
+      Not blocking for this PR, but a follow-up could tag entries and derive
+      the core list programmatically, or compose the deployment order from
+      reusable blocks (infrastructure, core-fakes, core-services, extra-services).
+      At minimum, add cross-reference comments in both arrays.
+    </p>
+  </div>
+</details>
+
+<!-- ---- SUGGESTION 4 ---- -->
+<details class="finding">
+  <summary>
+    <span class="badge badge-suggestion">Suggestion</span>
+    Double argument parsing loop in <code>setup-prow-components.sh</code>
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Maintainability</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      <span class="loc">test/integration/setup-prow-components.sh</span> &mdash;
+      <code>-profile=</code> is parsed in a first pass over all arguments, then all
+      arguments are parsed again in a second pass. Functionally correct, but
+      unusual &mdash; a future contributor might add new flags to only one loop.
+      A comment explaining the two-pass rationale would help.
+    </p>
+  </div>
+</details>
+
+<!-- ---- DEPLOY 1 ---- -->
+<details class="finding">
+  <summary>
+    <span class="badge badge-deploy">Deploy</span>
+    Containerd registry config change affects <code>make integration</code>
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Deployment Risk</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p>
+      <span class="loc">test/integration/setup-kind-cluster.sh</span> replaces the
+      deprecated inline <code>registry.mirrors</code> containerd config with
+      <code>config_path = "/etc/containerd/certs.d"</code> + <code>hosts.toml</code>
+      files written via <code>docker exec</code>.
+    </p>
+    <p>
+      This is the officially recommended approach and required for containerd
+      v2.2+, but it applies to <strong>all</strong> <code>setup-kind-cluster.sh</code>
+      invocations, including <code>make integration</code>.
+    </p>
+    <ul>
+      <li>Verify CI kind image ships containerd &ge; 1.5</li>
+      <li>Developers with pre-existing kind clusters must <code>teardown.sh -kind-cluster</code>
+          and recreate &mdash; the new <code>hosts.toml</code> files are ignored without
+          <code>config_path</code> in containerd config. This is not documented.</li>
+    </ul>
+  </div>
+</details>
+
+<!-- ---- NIT 1 ---- -->
+<details class="finding">
+  <summary>
+    <span class="badge badge-nit">Nit</span>
+    <code>trap</code> quoting in <code>tilt-build.sh</code>
+    <span class="reviewer-tags">
+      <span class="reviewer-tag">Code Quality</span>
+    </span>
+  </summary>
+  <div class="body">
+    <p><span class="loc">hack/tilt-build.sh:52</span>:</p>
+    <pre><code>trap "rm -f ${tmpfile}" EXIT</code></pre>
+    <p>
+      Expands <code>${tmpfile}</code> at definition time. Matches the existing pattern in
+      <code>setup-prow-components.sh</code> (with <code># shellcheck disable=SC2064</code>),
+      but the disable comment is missing here. Add it to signal intent.
+    </p>
+  </div>
+</details>
+
+<!-- ================================================================ -->
+<h2>Positive observations</h2>
+
+<details class="finding section-positive" open>
+  <summary>
+    <span class="badge badge-good">Good</span>
+    Highlights (all three reviewers agree)
+  </summary>
+  <div class="body">
+    <ul>
+      <li>
+        <strong>Reuses integration test infra</strong> &mdash; builds on existing
+        <code>test/integration/</code> scripts rather than duplicating cluster setup logic.
+        Fixes to integration tests automatically benefit the dev environment.
+      </li>
+      <li>
+        <strong><code>BASH_SOURCE</code> fix</strong> in <code>lib.sh</code> &mdash;
+        correct and necessary since the file is <code>source</code>d from scripts in
+        different directories. Produces identical results for all existing callers.
+      </li>
+      <li>
+        <strong>Safe defaults</strong> &mdash; <code>_PROFILE="full"</code> preserves
+        existing <code>make integration</code> behavior. New flags default to pre-existing
+        values (80, 443).
+      </li>
+      <li>
+        <strong>Unprivileged ports</strong> &mdash; defaulting to 8080/8443 avoids the
+        root requirement on Linux.
+      </li>
+      <li>
+        <strong>Extensibility</strong> &mdash; <code>tilt-settings.yaml</code> overrides and
+        <code>tilt.d/</code> personal Tiltfiles are well-designed escape hatches.
+      </li>
+      <li>
+        <strong><code>allow_k8s_contexts</code></strong> in the Tiltfile prevents accidental
+        deployment to a production cluster.
+      </li>
+      <li>
+        <strong><code>print_connection_info</code></strong> &mdash; excellent UX; gives
+        developers copy-pasteable commands for every common task.
+      </li>
+      <li>
+        <strong>No security concerns</strong> &mdash; no hardcoded credentials; HMAC tokens
+        read from the cluster at runtime; local registry is HTTP-only on localhost.
+      </li>
+      <li>
+        <strong>Comprehensive docs</strong> &mdash; both <code>local-dev.md</code> and
+        <code>local-dev-tilt.md</code> are thorough and well-organized.
+      </li>
+      <li>
+        <strong>Forward-compatible containerd config</strong> &mdash; adopts the kind-recommended
+        <code>hosts.toml</code> approach required for containerd v2.2+.
+      </li>
+    </ul>
+  </div>
+</details>
+
+<!-- ================================================================ -->
+<h2>PR comment draft</h2>
+<details class="finding">
+  <summary>Ready-to-post summary</summary>
+  <div class="body">
+    <pre style="white-space:pre-wrap;">This is a solid PR that delivers real developer experience value by building on existing infrastructure rather than creating a parallel system. Approving with suggestions. The main things I'd like to see addressed (non-blocking, can be follow-up): fix the incorrect `prow_component` multi-arg example in the docs, remove the stale `-add=` flag reference in `lib.sh`, and consider gating the `deck-tenanted` workload in the Tiltfile on the active profile to avoid confusing Tilt errors in core-only setups. The containerd registry config change is the right approach but please verify CI kind image compatibility before merging.</pre>
+  </div>
+</details>
+
+<footer>
+  Multi-perspective maintainer review generated 2026-04-03 &middot;
+  Reviewers: Code Quality, Maintainability, Deployment Risk + Advisor synthesis &middot;
+  PR: <a href="https://github.com/kubernetes-sigs/prow/pull/667" style="color:var(--accent)">kubernetes-sigs/prow#667</a>
+</footer>
+
+</body>
+</html>

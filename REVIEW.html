@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #674 Review - tide: skip unmergeable PRs instead of retrying indefinitely</title>
+<style>
+  :root {
+    --bg: #1a1b26;
+    --surface: #24283b;
+    --surface2: #2f3348;
+    --border: #3b4261;
+    --text: #c0caf5;
+    --text-muted: #565f89;
+    --text-bright: #e0e6ff;
+    --accent: #7aa2f7;
+    --green: #9ece6a;
+    --yellow: #e0af68;
+    --red: #f7768e;
+    --orange: #ff9e64;
+    --purple: #bb9af7;
+    --cyan: #7dcfff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { color: var(--text-bright); font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { color: var(--accent); font-size: 1.2rem; margin: 2rem 0 1rem; border-bottom: 1px solid var(--border); padding-bottom: 0.5rem; }
+  h3 { color: var(--text-bright); font-size: 1rem; margin: 1.25rem 0 0.5rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: var(--surface2);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    font-size: 0.88em;
+    color: var(--cyan);
+  }
+  .meta {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .meta span { margin-right: 1.5rem; }
+  .meta .label {
+    display: inline-block;
+    background: var(--surface2);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.1em 0.6em;
+    font-size: 0.8rem;
+    margin-right: 0.4rem;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.2em 0.8em;
+    border-radius: 4px;
+    font-weight: 600;
+    font-size: 0.85rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .verdict-approve { background: rgba(158,206,106,0.15); color: var(--green); border: 1px solid rgba(158,206,106,0.3); }
+  .verdict-comment { background: rgba(224,175,104,0.15); color: var(--yellow); border: 1px solid rgba(224,175,104,0.3); }
+  .verdict-changes { background: rgba(247,118,142,0.15); color: var(--red); border: 1px solid rgba(247,118,142,0.3); }
+  .risk-low { background: rgba(158,206,106,0.15); color: var(--green); border: 1px solid rgba(158,206,106,0.3); }
+  .risk-medium { background: rgba(224,175,104,0.15); color: var(--yellow); border: 1px solid rgba(224,175,104,0.3); }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 0.75rem;
+  }
+  .card-header h3 { margin: 0; }
+  ul { padding-left: 1.5rem; margin: 0.5rem 0; }
+  li { margin-bottom: 0.4rem; }
+  .file-ref { color: var(--purple); font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }
+  .section-icon { margin-right: 0.4rem; }
+  .converge-badge {
+    display: inline-block;
+    background: rgba(187,154,247,0.15);
+    color: var(--purple);
+    border: 1px solid rgba(187,154,247,0.3);
+    border-radius: 3px;
+    padding: 0.1em 0.5em;
+    font-size: 0.75rem;
+    font-weight: 600;
+    margin-left: 0.5rem;
+    vertical-align: middle;
+  }
+  .maintainer-comment {
+    background: var(--surface);
+    border-left: 3px solid var(--orange);
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .maintainer-comment .author {
+    font-weight: 600;
+    color: var(--orange);
+    margin-bottom: 0.25rem;
+  }
+  .community-comment {
+    background: var(--surface);
+    border-left: 3px solid var(--text-muted);
+    padding: 1rem 1.25rem;
+    margin: 0.75rem 0;
+    border-radius: 0 6px 6px 0;
+  }
+  .community-comment .author {
+    font-weight: 600;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+  }
+  .finding { margin-bottom: 0.75rem; }
+  .finding-title { font-weight: 600; color: var(--text-bright); }
+  .summary-box {
+    background: rgba(122,162,247,0.08);
+    border: 1px solid rgba(122,162,247,0.25);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin: 1rem 0;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--text-muted); font-size: 0.85rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.05em; }
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li { padding: 0.3rem 0; }
+  .checklist li::before { content: "\2610\00a0"; color: var(--text-muted); }
+  .checklist-done li::before { content: "\2611\00a0"; color: var(--green); }
+  .toc { margin: 1rem 0 2rem; }
+  .toc a { display: block; padding: 0.3rem 0; color: var(--text-muted); font-size: 0.9rem; }
+  .toc a:hover { color: var(--accent); }
+  hr { border: none; border-top: 1px solid var(--border); margin: 2rem 0; }
+  .revision-note {
+    background: rgba(255,158,100,0.08);
+    border: 1px solid rgba(255,158,100,0.25);
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #674: tide: skip unmergeable PRs instead of retrying indefinitely</h1>
+<div class="meta">
+  <span><strong>Author:</strong> <a href="https://github.com/kaovilai">kaovilai</a> (Tiger Kaovilai)</span>
+  <span><strong>Branch:</strong> tide-skip-unmergeable-prs &rarr; main</span>
+  <br>
+  <span><strong>Files:</strong> +318 / -3</span>
+  <span><strong>Reviewed:</strong> 2026-04-07 (rev 2)</span>
+  <br style="margin-top:0.5rem">
+  <span class="label">area/tide</span>
+  <span class="label">size/L</span>
+  <span class="label">cncf-cla: no</span>
+  <span class="label">ok-to-test</span>
+</div>
+
+<div class="revision-note">
+  <strong>Revision 2</strong> (2026-04-07) &mdash; Re-reviewed using Claude Opus 4.6, strictly against the PR as submitted
+  on GitHub (commit <code>05cb1b7ed</code>). Previous review (rev 1, 2026-04-03) is superseded.
+  PR discussion section updated to include all comments through 2026-04-06.
+</div>
+
+<nav class="toc">
+  <strong style="color:var(--text-bright)">Contents</strong>
+  <a href="#overview">1. Overview &amp; Changed Files</a>
+  <a href="#existing">2. PR Discussion Timeline</a>
+  <a href="#quality">3. Code Quality</a>
+  <a href="#maintainability">4. Maintainability</a>
+  <a href="#deployment">5. Deployment Risk</a>
+  <a href="#converging">6. Converging Concerns</a>
+  <a href="#recommendation">7. Recommendation</a>
+  <a href="#checklist">8. Review Checklist</a>
+</nav>
+
+<h2 id="overview">1. Overview &amp; Changed Files</h2>
+
+<div class="summary-box">
+  When a PR fails to merge with <code>UnmergablePRError</code> (e.g. branch protection requires more reviews),
+  Tide now temporarily excludes that PR from the merge queue for 5 minutes. This allows other mergeable PRs to
+  proceed instead of blocking the entire queue. The exclusion key includes the PR's head SHA, so pushing new
+  commits automatically clears the exclusion.
+  <br><br>
+  <strong>Fixes:</strong> <a href="https://github.com/kubernetes-sigs/prow/issues/673">#673</a> &nbsp;
+  <strong>Related:</strong> <a href="https://github.com/kubernetes-sigs/prow/issues/134">#134</a>
+</div>
+
+<table>
+  <thead><tr><th>File</th><th>Changes</th><th>What</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><span class="file-ref">pkg/tide/tide.go</span></td>
+      <td>+108 / -3</td>
+      <td>
+        Add <code>mergeExclusions</code> map to <code>syncController</code>,
+        <code>excludeFromMerge()</code> / <code>isExcludedFromMerge()</code> helpers with 5-min TTL,
+        <code>isUnmergableError()</code> unwrapper,
+        filtering in <code>takeAction()</code>
+      </td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/tide/tide_test.go</span></td>
+      <td>+210 / -0</td>
+      <td>
+        <code>TestTakeActionSkipsExcludedPRs</code> (end-to-end two-cycle),
+        <code>TestIsUnmergableError</code> (table-driven),
+        <code>TestMergeExclusionExpiry</code> (TTL + SHA invalidation)
+      </td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="existing">2. PR Discussion Timeline</h2>
+
+<div class="maintainer-comment">
+  <div class="author">petr-muller (maintainer) &mdash; 2026-04-01</div>
+  <p>Posted <code>/ok-to-test</code>. Provided initial review with four design points:</p>
+  <ol style="padding-left:1.25rem">
+    <li><strong>Sync-count TTL instead of wall-clock:</strong> Prefer counting "next N syncs" over a 5-minute constant. If someone's sync period is &gt;5m, the wall-clock TTL is ineffective.</li>
+    <li><strong>Back-off with upper bound:</strong> If a PR fails again after retry, it should wait longer. Can be a follow-up.</li>
+    <li><strong>Filter excluded PRs earlier:</strong> Current filtering only covers the <code>Merge</code> action path, not <code>MergeBatch</code>. The benched PR shouldn't enter the candidate set at all.</li>
+    <li><strong>Bench PRs failing in <code>MergeBatch</code> too:</strong> Currently only individual merge failures trigger exclusion. Batch failures should also exclude the problematic PR.</li>
+  </ol>
+  <p style="margin-top:0.75rem">Also flagged: <strong>AI co-author commit trailer</strong> violates current <a href="https://www.kubernetes.dev/docs/guide/pull-requests/#ai-guidance">Kubernetes contributor guidelines</a>.</p>
+</div>
+
+<div class="community-comment">
+  <div class="author">stmcginnis (member) &mdash; 2026-04-02</div>
+  <p>Concern about the PR being too AI-driven. The author should be demonstrably involved rather than having Claude do everything.</p>
+</div>
+
+<div class="community-comment">
+  <div class="author">kaovilai (author) &mdash; 2026-04-03</div>
+  <p>Pushed back on AI usage concerns: stated they review changes before posting, disclose AI usage intentionally,
+  and that drafting PRs demonstrates human involvement. Said they would not make further amendments until there is
+  agreement on expectations.</p>
+</div>
+
+<div class="maintainer-comment">
+  <div class="author">petr-muller (maintainer) &mdash; 2026-04-04</div>
+  <p>Clarified the ask: only concrete requirement is removing the <code>Co-Authored-By: Claude</code> trailer per
+  Kubernetes guidelines. Reiterated review points (1), (2), (3), (4) with priorities:
+  (3) is the main ask, (4) would be great, (1) is preferred but negotiable, (2) is just thoughts.</p>
+</div>
+
+<div class="community-comment">
+  <div class="author">kaovilai (author) &mdash; 2026-04-04</div>
+  <p>Acknowledged point (3) but said it's tricky given limited familiarity with the tide codebase, might take a few
+  weeks. Open to maintainer opening a separate PR if they already know how it should be done. Not attached to
+  having their PR be the one that merges.</p>
+</div>
+
+<div class="maintainer-comment">
+  <div class="author">petr-muller (maintainer) &mdash; 2026-04-04</div>
+  <p>Shared a branch (<a href="https://github.com/petr-muller/prow/commits/tide-skip-unmergeable-prs/">petr-muller/prow:tide-skip-unmergeable-prs</a>)
+  with sketched work addressing points (1), (3), and (4) on top of the author's commit.</p>
+</div>
+
+<div class="community-comment">
+  <div class="author">jarias-lfx &mdash; 2026-04-06</div>
+  <p>Ran <code>/easycla</code> to re-trigger CLA check. EasyCLA status check is currently <strong>FAILURE</strong>.</p>
+</div>
+
+<h2 id="quality">3. Code Quality</h2>
+
+<div class="card">
+  <div class="card-header">
+    <h3>Senior Go Engineer Perspective</h3>
+    <span class="verdict verdict-approve">Approve</span>
+  </div>
+
+  <h3>Critical Issues</h3>
+  <p style="color:var(--green)">None.</p>
+
+  <h3>Improvements (non-blocking)</h3>
+  <ul>
+    <li class="finding">
+      <span class="finding-title">No periodic cleanup of expired entries</span>
+      <span class="converge-badge">3/3 reviewers</span> &mdash;
+      If a PR is excluded then removed from the pool (closed, labels changed), its map entry lingers until restart.
+      Entries are tiny and the expected cardinality is low, so this is theoretical. A periodic sweep at the start
+      of <code>Sync()</code> would close the gap.
+    </li>
+    <li class="finding">
+      <span class="finding-title"><code>sync.Mutex</code> vs <code>sync.RWMutex</code></span> &mdash;
+      <code>isExcludedFromMerge</code> is called per-PR per-sync and the common case (not found) is read-only.
+      Technically correct since it also deletes expired entries, but <code>RWMutex</code> with escalation would
+      be more idiomatic. Very minor given low contention.
+    </li>
+    <li class="finding">
+      <span class="finding-title">Batch merges not covered by exclusion logic</span>
+      <span class="converge-badge">3/3 reviewers</span> &mdash;
+      The <code>batchMerges</code> path at the top of <code>takeAction</code> does not filter out excluded PRs or
+      record exclusions on failure. If a PR fails individual merge due to branch protection, it could still enter
+      a batch merge and fail there.
+    </li>
+    <li class="finding">
+      <span class="finding-title"><code>isUnmergableError</code> semantics with batches</span> &mdash;
+      Returns <code>true</code> if <em>any</em> error in a <code>mergeFailure</code> is unmergeable. Correct for
+      the single-PR merge path (only caller), but could be misleading if reused for batch merges since it would
+      flag the whole batch without identifying which PR caused it.
+    </li>
+  </ul>
+
+  <h3>Positive Observations</h3>
+  <ul>
+    <li>SHA-keyed exclusion design is elegant &mdash; auto-invalidates on new commits without explicit cleanup logic</li>
+    <li>Proactive prefix-based cleanup in <code>excludeFromMerge</code> prevents unbounded map growth from repeated pushes</li>
+    <li><code>isUnmergableError</code> correctly handles the error wrapping chain: direct type assertion for
+        <code>*mergeFailure</code> (which doesn't implement <code>Unwrap()</code>), then <code>errors.As</code>
+        for <code>UnmergablePRError</code> (which may be wrapped by <code>fmt.Errorf</code>)</li>
+    <li>Thorough test coverage: integration two-cycle test, table-driven error detection with positive and negative cases, TTL expiry with cleanup verification</li>
+    <li>Excellent comments and documentation throughout, with issue references</li>
+  </ul>
+</div>
+
+<h2 id="maintainability">4. Maintainability</h2>
+
+<div class="card">
+  <div class="card-header">
+    <h3>Long-term Maintainer Perspective</h3>
+    <div>
+      <span class="verdict verdict-approve">Approve</span>
+      <span class="verdict risk-low" style="margin-left:0.5rem">Burden: Low</span>
+    </div>
+  </div>
+
+  <h3>Concerns</h3>
+  <ul>
+    <li class="finding">
+      <span class="finding-title">Batch merge asymmetry</span>
+      <span class="converge-badge">3/3 reviewers</span> &mdash;
+      Exclusions only apply to the single-PR <code>Merge</code> path, not <code>MergeBatch</code>. A comment
+      explaining whether this is intentional or a known gap would help future maintainers. If intentional, explain
+      why; if a gap, file a follow-up.
+    </li>
+    <li class="finding">
+      <span class="finding-title">No periodic sweep</span>
+      <span class="converge-badge">3/3 reviewers</span> &mdash;
+      Expired entries only cleaned on read (<code>isExcludedFromMerge</code>) or re-exclusion
+      (<code>excludeFromMerge</code>). Negligible with 5-min TTL but could matter if TTL is increased.
+    </li>
+    <li class="finding">
+      <span class="finding-title"><code>time.Now()</code> direct usage</span> &mdash;
+      Makes time-dependent behavior hard to test without manipulating internal map state directly (which the
+      tests do). Pre-existing pattern in the codebase, so not a regression.
+    </li>
+    <li class="finding">
+      <span class="finding-title">Hard-coded TTL</span> &mdash;
+      5 minutes is fine for most deployments, but a comment explaining the design choice (and that it could be
+      made configurable in the future) would help.
+    </li>
+  </ul>
+
+  <h3>Positive Patterns</h3>
+  <ul>
+    <li>Self-contained: isolated to a single controller struct, no cross-package coupling</li>
+    <li>SHA-based invalidation avoids explicit cleanup logic for the common case (author pushes new commits)</li>
+    <li>TTL is a discoverable package-level constant, easy to find and tune</li>
+    <li>Clear comments explaining "why" throughout, with issue references</li>
+    <li>Cleanly revertible &mdash; removing the map, methods, and filtering restores original behavior</li>
+    <li>Tests are behavior-oriented rather than implementation-coupled</li>
+  </ul>
+</div>
+
+<h2 id="deployment">5. Deployment Risk</h2>
+
+<div class="card">
+  <div class="card-header">
+    <h3>Platform Operator Perspective</h3>
+    <span class="verdict risk-low">Risk: Low</span>
+  </div>
+
+  <h3>Breaking Changes</h3>
+  <p style="color:var(--green)">None. No config fields, CLI flags, API endpoints, or serialization formats changed.</p>
+
+  <h3>Behavioral Changes</h3>
+  <ul>
+    <li>Unmergeable PRs skipped for 5 minutes instead of retried every sync cycle (the intended fix). Strictly
+        an improvement &mdash; the PR can't merge anyway during the exclusion window.</li>
+    <li>New <code>Warning</code>-level log when a PR is excluded, <code>Debug</code>-level when skipping. Low
+        volume (at most once per unmergeable PR per 5-min window). Operators with log-based alerting on Tide
+        warnings should be aware.</li>
+    <li>Batch merges are <strong>not covered</strong> &mdash; exclusion only applies to the single-PR merge path.</li>
+  </ul>
+
+  <h3>Upgrade/Rollback</h3>
+  <ul>
+    <li>No config migration required</li>
+    <li>Safe to roll back at any time (reverts to retry-every-cycle behavior)</li>
+    <li>Exclusion state is in-memory only, cleared on pod restart (desirable)</li>
+    <li>No HA concerns: per-instance tracking, worst case is a harmless duplicate retry</li>
+  </ul>
+
+  <h3>Risk Mitigations</h3>
+  <ul>
+    <li>SHA-based invalidation auto-clears on new pushes</li>
+    <li>TTL-based expiry &mdash; worst case is 5-min delay</li>
+    <li>Narrow error matching &mdash; only <code>UnmergablePRError</code>, not network errors or other failures</li>
+    <li>Prefix-based cleanup prevents unbounded map growth from SHA changes</li>
+  </ul>
+</div>
+
+<h2 id="converging">6. Converging Concerns</h2>
+
+<p style="color:var(--text-muted);margin-bottom:1rem">Issues independently identified by multiple reviewers carry the highest confidence:</p>
+
+<table>
+  <thead><tr><th>Concern</th><th>Flagged By</th><th>Severity</th></tr></thead>
+  <tbody>
+    <tr>
+      <td><strong>Batch merge path not covered</strong> &mdash; exclusion filtering only applies to single-PR
+          <code>Merge</code>, not <code>MergeBatch</code>. PRs excluded from individual merge can still enter
+          and block batches. No exclusions recorded on batch merge failures either.</td>
+      <td>All 3 reviewers + petr-muller</td>
+      <td><span class="verdict verdict-comment">Design gap</span></td>
+    </tr>
+    <tr>
+      <td><strong>No periodic cleanup sweep</strong> &mdash; entries for PRs that leave the pool linger until
+          process restart. Negligible at 5-min TTL and low cardinality.</td>
+      <td>All 3 reviewers</td>
+      <td><span class="verdict risk-low">Minor</span></td>
+    </tr>
+    <tr>
+      <td><strong>Wall-clock TTL vs sync-count</strong> &mdash; if sync period &gt; 5m, the TTL expires before
+          the next sync even checks. Sync-count-based approach would be more robust and easier to test.</td>
+      <td>petr-muller + Maintainability</td>
+      <td><span class="verdict verdict-comment">Design</span></td>
+    </tr>
+    <tr>
+      <td><strong>Observability</strong> &mdash; a Prometheus gauge for active exclusions would help operators
+          detect systematic branch protection misconfigurations.</td>
+      <td>Maintainability + Deployment Risk</td>
+      <td><span class="verdict risk-low">Nice-to-have</span></td>
+    </tr>
+  </tbody>
+</table>
+
+<h2 id="recommendation">7. Recommendation</h2>
+
+<div class="summary-box">
+  <span class="verdict verdict-comment" style="font-size:1rem;margin-bottom:0.75rem;display:inline-block">Approve with Suggestions</span>
+
+  <p style="margin-top:0.75rem">
+    All three reviewers independently reached APPROVE. The core approach is sound &mdash; temporarily benching
+    unmergeable PRs is the right fix for the queue-blocking problem. The implementation is clean, well-tested,
+    and low-risk. The converging concerns are real but represent incremental hardening rather than correctness issues.
+  </p>
+
+  <h3 style="margin-top:1rem">Should address (from maintainer feedback + converging concerns)</h3>
+  <ol style="padding-left:1.25rem">
+    <li><strong>Sync-count TTL</strong> instead of wall-clock 5 minutes &mdash; more robust and testable</li>
+    <li><strong>Filter excluded PRs earlier</strong> (after <code>accumulate</code>, before <code>takeAction</code>)
+        so they don't enter batch candidates either</li>
+    <li><strong>Record exclusions from batch merge failures</strong> too, with per-PR granularity</li>
+    <li><strong>Remove AI co-author trailer</strong> per Kubernetes contributor guidelines</li>
+  </ol>
+
+  <h3 style="margin-top:1rem">Nice to have (non-blocking)</h3>
+  <ul>
+    <li>Add a comment near the batch merge path explaining scope of exclusions</li>
+    <li>Periodic cleanup sweep of the exclusion map (~5 lines in <code>Sync()</code>)</li>
+    <li>Use <code>sync.RWMutex</code> for the read-heavy check path</li>
+    <li>Prometheus gauge for active exclusion count (follow-up)</li>
+    <li>Consider making exclusion duration configurable via <code>config.Tide</code> (follow-up)</li>
+  </ul>
+
+  <h3 style="margin-top:1rem">Maintainer's sketched work</h3>
+  <p>Items (1), (2), and (3) from "should address" have been sketched out by the maintainer on
+  <a href="https://github.com/petr-muller/prow/commits/tide-skip-unmergeable-prs/">petr-muller/prow:tide-skip-unmergeable-prs</a>,
+  building on top of the author's commit.</p>
+</div>
+
+<h2 id="checklist">8. Review Checklist</h2>
+
+<ul class="checklist checklist-done">
+  <li>Verify comment on <span class="file-ref">tide.go:101</span> now says <code>org/repo#number@sha</code> (Copilot fix) &mdash; done</li>
+  <li>Verify <code>excludeFromMerge</code> does prefix-based cleanup of old SHA entries (Copilot fix) &mdash; done</li>
+  <li>Check <code>isUnmergableError</code>: type assertion vs <code>errors.As</code> for <code>*mergeFailure</code> &mdash; correct as-is</li>
+  <li>Confirm tests pass: <code>go test ./pkg/tide/ -run "TestTakeAction|TestIsUnmergable|TestMergeExclusion"</code> &mdash; pass</li>
+  <li>Check that existing <code>TestTakeActionV2</code> tests still pass (no regressions) &mdash; pass</li>
+</ul>
+
+<p style="margin-top:0.75rem"><strong>Still open:</strong></p>
+<ul class="checklist">
+  <li>Author to remove <code>Co-Authored-By: Claude</code> trailer per Kubernetes AI guidelines</li>
+  <li>Author to address sync-count TTL, earlier filtering, and batch merge coverage (or adopt maintainer's branch)</li>
+  <li>CLA check currently failing &mdash; needs to be resolved</li>
+</ul>
+
+<hr>
+<p style="color:var(--text-muted);font-size:0.8rem;text-align:center;margin-top:1rem">
+  Generated 2026-04-07 (rev 2) &middot; PR <a href="https://github.com/kubernetes-sigs/prow/pull/674">#674</a> &middot;
+  kubernetes-sigs/prow
+</p>
+
+</body>
+</html>

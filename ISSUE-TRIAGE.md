@@ -168,7 +168,85 @@ If the community strongly wants Prow integration, Approach 2 (external plugin) i
 - If implemented as a plugin: unit tests for allowlist parsing, integration tests for license resolution, e2e tests with mock GitHub API
 - If implemented as a script: standard script testing patterns
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+While the Prow plugin plumbing itself is well-understood, the core challenge is license resolution — a complex domain requiring SPDX analysis, module metadata fetching, and transitive dependency handling. The architectural question (plugin vs. external tool vs. CI script) adds design uncertainty. This is not a good-first-issue regardless of approach chosen.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Large (if plugin) / Small (if CI script recommendation)
+- **Details**: A new plugin would require 5+ new files (plugin code, config, tests, docs, plugin-imports registration). A CI script approach requires no Prow code changes but needs documentation.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: High
+- **Details**: The fundamental challenge is license resolution: fetching module metadata, detecting license files in module sources, classifying licenses against SPDX identifiers, handling transitive dependencies, edge cases (vendored deps, replaced modules, multi-license packages). This is why go-licenses and skywalking-eyes are substantial projects themselves.
+- **Level Indication**: 3-4
+
+#### Required Expertise
+- **Assessment**: Deep
+- **Details**: Requires expertise in Go module system internals, license classification (SPDX), Prow plugin architecture, and understanding of supply chain compliance requirements. Domain expertise in software licensing is non-trivial.
+- **Level Indication**: 3-4
+
+#### Clarity and Certainty
+- **Assessment**: Significant uncertainty
+- **Details**: The fundamental design question (should this be a Prow plugin at all?) is unresolved. A maintainer has already pushed back on the plugin approach. The issue also doesn't specify: allowlist format, handling of transitive deps, what constitutes "incompatible", how to handle license detection failures.
+- **Level Indication**: 3-4
+
+#### Testing Requirements
+- **Assessment**: Complex
+- **Details**: License resolution testing requires mock module proxies, test Go modules with various license types, SPDX classification validation, and edge case coverage (no license file, dual-licensed, vendor directory). Integration tests with GitHub API needed if plugin approach.
+- **Level Indication**: 3-4
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: New feature, entirely opt-in regardless of approach. No impact on existing deployments.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Questionable fit
+- **Details**: Prow plugins handle GitHub webhook events and perform GitHub API operations. License compliance analysis is a domain-specific static analysis task that doesn't naturally fit the webhook-driven model. Existing analogues (boilerplate check, verify-licenses.sh in Kubernetes) are standalone scripts, not plugins. A maintainer has already noted this may not be the right location.
+- **Level Indication**: 3-4
+
+#### External Dependencies
+- **Assessment**: Heavy external dependency
+- **Details**: License resolution inherently depends on fetching module metadata from Go module proxy, reading license files from module sources, and potentially querying license databases. The author noted that existing tools (go-licenses) are effectively unmaintained. Building this from scratch is substantial; depending on external tools raises supply chain concerns the author wants to avoid.
+- **Level Indication**: 3-4
+
+### Recommended Labels
+
+- [x] `kind/feature`: New capability request
+- [x] `area/plugins`: Relates to plugin system
+- [ ] `good-first-issue`: Far too complex and uncertain
+- [ ] `help-wanted`: Design questions need resolution before implementation can begin
+
+### Guidance for Contributors
+
+**For Level 3 (Large)**:
+- Requires design discussion with maintainers before any implementation
+- Key unresolved questions:
+  1. Should this be a Prow plugin, external plugin, or CI script pattern?
+  2. Which license detection library/approach to use?
+  3. How to handle transitive dependency licenses?
+  4. What allowlist/denylist format to standardize on?
+- Should review existing approaches: Kubernetes `hack/verify-licenses.sh`, go-licenses, skywalking-eyes
+- Consider starting with a KEP/design doc to get maintainer alignment
+- Consult with Prow maintainers (stmcginnis has already weighed in)
+
+### Caveats and Considerations
+
+The effort level depends heavily on which approach is chosen:
+- **If "recommend CI script" (Approach 3)**: The Prow-side effort is Level 1 (documentation only), but the overall ecosystem effort remains Level 3
+- **If internal plugin (Approach 1)**: Level 3-4, substantial new code with license detection complexity
+- **If external plugin (Approach 2)**: Level 3, similar complexity but better architectural isolation
+
+The maintainer feedback suggests the community may lean toward Approach 3, which would reduce this to a documentation/guidance issue rather than a code change.
+
 ## Next Steps
 
-- Assess effort
 - Augment the issue with findings

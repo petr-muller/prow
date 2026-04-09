@@ -1,0 +1,325 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #675 Review: Hierarchical trusted_apps config</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --accent2: #f77f00;
+    --green: #06d6a0;
+    --text: #e0e0e0;
+    --text-muted: #8a8a9a;
+    --border: #2a2a4a;
+    --code-bg: #0d1117;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+  }
+  .container { max-width: 900px; margin: 0 auto; }
+  header {
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 1.5rem;
+    margin-bottom: 2rem;
+  }
+  header h1 {
+    font-size: 1.8rem;
+    color: #fff;
+    margin-bottom: 0.3rem;
+  }
+  header .meta {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+  }
+  header .meta a {
+    color: var(--accent2);
+    text-decoration: none;
+  }
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-right: 0.3rem;
+    vertical-align: middle;
+  }
+  .badge-branch { background: var(--surface2); color: #7ec8e3; }
+  .badge-commits { background: #1b4332; color: var(--green); }
+
+  .summary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .summary h2 { font-size: 1.1rem; color: var(--accent2); margin-bottom: 0.5rem; }
+  .summary p { color: var(--text-muted); }
+
+  .section { margin-bottom: 2rem; }
+  .section h2 {
+    font-size: 1.3rem;
+    color: #fff;
+    margin-bottom: 1rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .finding {
+    background: var(--surface);
+    border-left: 4px solid var(--accent);
+    border-radius: 0 8px 8px 0;
+    padding: 1.2rem 1.5rem;
+    margin-bottom: 1rem;
+  }
+  .finding.nit { border-left-color: var(--text-muted); }
+  .finding.positive { border-left-color: var(--green); }
+  .finding .tag {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.1rem 0.5rem;
+    border-radius: 3px;
+    margin-bottom: 0.5rem;
+  }
+  .finding .tag-issue { background: rgba(233,69,96,0.2); color: var(--accent); }
+  .finding .tag-nit { background: rgba(138,138,154,0.2); color: var(--text-muted); }
+  .finding .tag-good { background: rgba(6,214,160,0.15); color: var(--green); }
+  .finding h3 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 0.4rem;
+  }
+  .finding p { color: var(--text-muted); margin-bottom: 0.5rem; }
+  .finding .location {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: var(--accent2);
+    margin-bottom: 0.4rem;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.85rem;
+    line-height: 1.5;
+    margin-top: 0.5rem;
+  }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    background: var(--code-bg);
+    padding: 0.1rem 0.3rem;
+    border-radius: 3px;
+    font-size: 0.9em;
+  }
+
+  .commits {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  .commit {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    display: flex;
+    align-items: baseline;
+    gap: 0.8rem;
+  }
+  .commit .sha {
+    font-family: 'JetBrains Mono', 'Fira Code', monospace;
+    font-size: 0.8rem;
+    color: var(--accent2);
+    flex-shrink: 0;
+  }
+  .commit .msg { font-size: 0.9rem; }
+
+  .files-changed {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-top: 0.3rem;
+  }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-muted);
+    font-size: 0.8rem;
+    text-align: center;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>PR #675 Review: Hierarchical trusted_apps config</h1>
+  <div class="meta">
+    <span class="badge badge-branch">PM2602</span>
+    <span class="badge badge-commits">2 commits</span>
+    &mdash; reviewed 2026-04-07
+  </div>
+</header>
+
+<div class="summary">
+  <h2>Overview</h2>
+  <p>
+    Replaces the flat <code>[]string</code> TrustedApps field with a structured <code>TrustedApp</code> type
+    supporting hierarchical resolution (global &rarr; org &rarr; repo) with <code>locked</code> and
+    <code>untrusted</code> modifiers. Includes backward-compatible JSON/YAML unmarshaling and an optional
+    <code>checkconfig</code> warning for locked-app violations. Well-designed, well-tested. Two issues and a nit below.
+  </p>
+</div>
+
+<div class="section">
+  <h2>Commits</h2>
+  <div class="commits">
+    <div class="commit">
+      <span class="sha">b6cec47e1</span>
+      <div>
+        <div class="msg">trigger: add hierarchical trusted_apps config with global/org/repo levels</div>
+        <div class="files-changed">8 files changed, +674 &minus;29</div>
+      </div>
+    </div>
+    <div class="commit">
+      <span class="sha">39d6e929e</span>
+      <div>
+        <div class="msg">checkconfig: add optional validate-locked-trusted-apps warning</div>
+        <div class="files-changed">3 files changed, +218</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Issues</h2>
+
+  <div class="finding">
+    <span class="tag tag-issue">Issue</span>
+    <h3>1. <code>locked: true</code> at repo level is silently accepted but meaningless</h3>
+    <div class="location">pkg/plugins/config.go &mdash; resolveTrustedApps(), validateTrustedApps()</div>
+    <p>
+      <code>resolveTrustedApps</code> correctly doesn't propagate <code>locked</code> from repo-level entries
+      (there is no lower level to lock against), but <code>validateTrustedApps</code> doesn't warn about it.
+      A user setting <code>locked: true</code> on a repo-level trigger gets no feedback that it has no effect.
+    </p>
+    <p>Consider adding a validation warning, or at minimum documenting this behavior.</p>
+  </div>
+
+  <div class="finding">
+    <span class="tag tag-issue">Issue</span>
+    <h3>2. Multiple matching triggers at same level: subtle app merging vs. first-match for other fields</h3>
+    <div class="location">pkg/plugins/config.go &mdash; TriggerFor()</div>
+    <p>
+      If two trigger entries both match the same org, their <code>TrustedApps</code> are merged
+      (via <code>append</code>), but only the first trigger's other fields (<code>OnlyOrgMembers</code>,
+      <code>TrustedOrg</code>, etc.) are used. This is likely intentional and matches the pre-existing
+      behavior for non-trusted-apps fields, but it's a subtle contract worth a code comment.
+    </p>
+    <pre>// Single pass: find the most specific trigger and collect trusted apps at each level.
+var repoMatch, orgMatch *Trigger
+var globalApps, orgApps, repoApps TrustedApps
+for _, trigger := range c.Triggers {
+    repos := sets.New[string](trigger.Repos...)
+    switch {
+    case len(trigger.Repos) == 0:
+        globalApps = append(globalApps, trigger.TrustedApps...)
+    case repos.Has(fullName):
+        repoApps = append(repoApps, trigger.TrustedApps...)
+        if repoMatch == nil {
+            repoMatch = &amp;trigger  // first match wins for non-app fields
+        }
+    // ...</pre>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Nits</h2>
+
+  <div class="finding nit">
+    <span class="tag tag-nit">Nit</span>
+    <h3>3. Test indentation: extra tab</h3>
+    <div class="location">pkg/plugins/config_test.go &mdash; TestResolveTrustedApps</div>
+    <p>The <code>got</code> line has an extra level of indentation compared to the line above:</p>
+    <pre>        trigger := tc.config.TriggerFor(tc.org, tc.repo)
+            got := trigger.GetTrustedApps()  // extra tab</pre>
+  </div>
+
+  <div class="finding nit">
+    <span class="tag tag-nit">Nit</span>
+    <h3>4. Constant alignment</h3>
+    <div class="location">cmd/checkconfig/main.go:128</div>
+    <p>
+      <code>validateLockedTrustedAppsWarning</code> uses a double-tab alignment that doesn't match
+      the surrounding constants (single tab + spaces for alignment).
+    </p>
+  </div>
+</div>
+
+<div class="section">
+  <h2>Things done well</h2>
+
+  <div class="finding positive">
+    <span class="tag tag-good">Good</span>
+    <h3>Backward-compatible unmarshaling</h3>
+    <p>
+      Custom <code>UnmarshalJSON</code> handles legacy strings, new objects, and mixed arrays elegantly.
+      Since <code>sigs.k8s.io/yaml</code> delegates to JSON internally, no separate YAML unmarshaler
+      is needed &mdash; and this is verified by <code>TestTrustedAppsUnmarshalYAML</code>.
+    </p>
+  </div>
+
+  <div class="finding positive">
+    <span class="tag tag-good">Good</span>
+    <h3><code>GetTrustedApps()</code> accessor pattern</h3>
+    <p>
+      The unexported <code>resolvedTrustedApps</code> field with a public getter forces all callers
+      through <code>TriggerFor</code> resolution. This makes it hard to accidentally use unresolved apps.
+    </p>
+  </div>
+
+  <div class="finding positive">
+    <span class="tag tag-good">Good</span>
+    <h3>Optional checkconfig warning (not error)</h3>
+    <p>
+      <code>ValidateLockedTrustedApps</code> as an optional warning is the right severity &mdash;
+      locked entries simply take precedence, so the config isn't broken, just potentially confusing.
+    </p>
+  </div>
+
+  <div class="finding positive">
+    <span class="tag tag-good">Good</span>
+    <h3>Comprehensive test coverage</h3>
+    <p>
+      Tests cover all resolution scenarios: global-only, org overrides, repo overrides, locked preventing
+      overrides at both levels, three-level merging, non-matching orgs, empty config, legacy/new/mixed
+      unmarshaling formats, validation of duplicates and empty names.
+    </p>
+  </div>
+</div>
+
+<footer>
+  Review generated with Claude Code &mdash; 2026-04-07
+</footer>
+
+</div>
+</body>
+</html>

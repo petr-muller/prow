@@ -247,6 +247,47 @@ The effort level depends heavily on which approach is chosen:
 
 The maintainer feedback suggests the community may lean toward Approach 3, which would reduce this to a documentation/guidance issue rather than a code change.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: "ci: add plugin for Go dependency license check"
+- **Proposed**: "Add Go dependency license compliance check"
+- **Rationale**: Remove "ci:" prefix (not a conventional prefix in this repo's issues), and drop "plugin" since the implementation approach is debatable — the issue is about the capability, not the mechanism.
+
+### Proposed GitHub Comment
+
+```
+/retitle Add Go dependency license compliance check
+
+It's worth noting that Prow's existing "license check" (the `licensecheck` presubmit job visible on prow.k8s.io) is a **source file boilerplate/header check** — it verifies that source files contain the correct copyright header text. That's fundamentally different from what's being requested here: validating that the _licenses of imported Go modules_ are compatible with a project's license policy. These are separate concerns and there's no overlap in implementation.
+
+For context on architectural fit: Prow's built-in plugins (`pkg/plugins/`) are webhook-driven — they react to GitHub events like PR creation and run synchronously in the hook process. License compliance analysis is more of a static analysis task (parse `go.mod`, resolve module metadata, classify licenses against SPDX identifiers, check against allowlist). The closest analogue in the Kubernetes ecosystem is `hack/verify-licenses.sh` in kubernetes/kubernetes, which runs as a standalone CI script, not a webhook plugin. Similarly, the boilerplate check in this repo is a standalone script (`hack/boilerplate/verify_boilerplate.py`), not a plugin. The core challenge here is the license resolution itself — handling transitive dependencies, vendored modules, dual-licensed packages, and missing license files — which is why dedicated tools like go-licenses and skywalking-eyes exist as substantial projects.
+
+As @stmcginnis noted, a ProwJob running an existing license scanning tool (or a custom script similar to Kubernetes' `hack/verify-licenses.sh`) may be the most practical approach. If tighter GitHub integration is desired (labels, PR comments), an external plugin would be more appropriate than a built-in plugin, since license resolution can be slow and should be isolated from the hook process. A design discussion or proposal document would help align on the right approach before implementation begins.
+
+/kind feature
+```
+
+### Rationale
+
+**What's being added**:
+- Clarification that the existing "license check" is a boilerplate check, not dependency license compliance (the author's confusion is understandable)
+- Architectural context explaining why plugin vs. CI script matters, with references to existing patterns
+- Acknowledgment of the core complexity (license resolution) and pointer to analogous solutions
+- Guidance on next steps (design discussion needed)
+
+**Why these labels**:
+- `/kind feature`: This is a new capability request, not a bug
+- No `/area` label: The issue isn't about a specific existing component — it's a request for new functionality whose location is TBD
+- No difficulty label: Level 3 — too complex for good-first-issue or help-wanted
+
+**What's NOT included**:
+- No `/area plugins` label: While the author suggested a plugin, the discussion shows this may not be the right approach. Labeling it as a plugin issue would prematurely constrain the solution space
+- No priority label: This is a feature request without clear urgency
+- No `/help-wanted`: Design questions need resolution before contributors can meaningfully work on this
+
 ## Next Steps
 
-- Augment the issue with findings
+- Brief maintainer on findings
+- Wrapup: push branches and post comment

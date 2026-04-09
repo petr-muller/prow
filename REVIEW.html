@@ -1,0 +1,413 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #237 Review — Add Orgs sharding for Blunderbuss</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --red: #f85149;
+    --orange: #d29922;
+    --green: #3fb950;
+    --purple: #bc8cff;
+    --cyan: #39c5cf;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; margin-bottom: 0.75rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--text); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  p, li { margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  code { font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace; font-size: 0.9em; }
+  .meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .meta span { margin-right: 1.5rem; }
+
+  .verdict-banner {
+    background: var(--surface);
+    border: 1px solid var(--red);
+    border-left: 4px solid var(--red);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin: 1.5rem 0;
+  }
+  .verdict-banner .label {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--red);
+    font-weight: 600;
+  }
+  .verdict-banner .text { margin-top: 0.4rem; }
+  .verdict-banner .risk {
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+    color: var(--orange);
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card h3 { margin-top: 0; }
+
+  .severity-critical { border-left: 4px solid var(--red); }
+  .severity-medium { border-left: 4px solid var(--orange); }
+  .severity-low { border-left: 4px solid var(--green); }
+  .severity-info { border-left: 4px solid var(--purple); }
+  .severity-design { border-left: 4px solid var(--cyan); }
+
+  .tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .tag-critical { background: rgba(248,81,73,0.15); color: var(--red); }
+  .tag-concern  { background: rgba(210,153,34,0.15); color: var(--orange); }
+  .tag-suggestion { background: rgba(63,185,80,0.15); color: var(--green); }
+  .tag-positive { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .tag-design { background: rgba(57,197,207,0.15); color: var(--cyan); }
+  .tag-convergent { background: rgba(248,81,73,0.25); color: var(--red); border: 1px solid rgba(248,81,73,0.4); }
+  .tag-history { background: rgba(210,153,34,0.25); color: var(--orange); border: 1px solid rgba(210,153,34,0.4); }
+
+  .file-ref {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85rem;
+    color: var(--accent);
+    background: rgba(88,166,255,0.1);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li {
+    padding: 0.4rem 0;
+    padding-left: 1.75rem;
+    position: relative;
+  }
+  .checklist li::before {
+    content: '';
+    position: absolute;
+    left: 0;
+    top: 0.55rem;
+    width: 1rem;
+    height: 1rem;
+    border: 2px solid var(--border);
+    border-radius: 3px;
+  }
+
+  details { margin-bottom: 0.75rem; }
+  details summary {
+    cursor: pointer;
+    font-weight: 600;
+    padding: 0.4rem 0;
+    color: var(--text);
+  }
+  details summary:hover { color: var(--accent); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.04em; }
+
+  .comment-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    margin-top: 1.5rem;
+    white-space: pre-wrap;
+    font-size: 0.9rem;
+    line-height: 1.5;
+  }
+  .comment-box .copy-hint {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.75rem;
+    font-style: italic;
+  }
+
+  .history-note {
+    background: rgba(210,153,34,0.08);
+    border: 1px solid rgba(210,153,34,0.3);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  .history-note strong { color: var(--orange); }
+
+  .design-callout {
+    background: rgba(57,197,207,0.08);
+    border: 1px solid rgba(57,197,207,0.3);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  .deployment-notes {
+    background: rgba(63,185,80,0.08);
+    border: 1px solid rgba(63,185,80,0.3);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #237 — Add Orgs sharding for Blunderbuss</h1>
+<div class="meta">
+  <span>Author: <strong>dhaiducek</strong></span>
+  <span>Branch: <code>shard-blunderbuss-migrated</code></span>
+  <span>+630 / -40 across 8 files</span>
+  <span>Migrated from <a href="https://github.com/kubernetes/test-infra/pull/29405">test-infra#29405</a></span>
+</div>
+
+<div class="verdict-banner">
+  <div class="label">Recommendation: Request Changes</div>
+  <div class="text">The overall approach is sound and follows established patterns. Three correctness gaps must be addressed, plus a design question about config resolution semantics.</div>
+  <div class="risk">Deployment Risk: MEDIUM &mdash; no breaking changes for existing configs, but the full-replacement semantic and handleStatus gap create risk for adopters of the new feature.</div>
+</div>
+
+<div class="history-note">
+  <strong>Prior review history:</strong> jmguzik reviewed in Mar 2025 and flagged the nil guard issue. The author acknowledged it ("Oops &mdash; no it doesn't! Let me fix these. Good catch.") but never pushed the fix. PR has been open since Aug 2024 and gone stale 4 times.
+</div>
+
+<!-- ============================================================ -->
+<h2>Required Changes</h2>
+
+<div class="card severity-critical">
+  <h3><span class="tag tag-critical">Critical</span> <span class="tag tag-convergent">All 3 reviewers</span> <code>handleStatusEvent</code> ignores org/repo sharding</h3>
+  <p><span class="file-ref">pkg/plugins/blunderbuss/blunderbuss.go:256</span></p>
+  <p><code>handleStatusEvent</code> passes the full <code>Blunderbuss</code> struct to <code>handleStatus</code> instead of using <code>BlunderbussFor(se.Repo.Owner.Login, se.Repo.Name)</code>. Status-triggered reviewer assignment always uses global config, silently ignoring org/repo overrides.</p>
+  <p>The other two handlers (<code>handlePullRequestEvent</code> at line 167 and <code>handleGenericCommentEvent</code> at line 210) were correctly updated. This one was missed.</p>
+  <details>
+    <summary>Design tension</summary>
+    <p><code>handleStatus</code> currently accepts <code>plugins.Blunderbuss</code> and accesses config fields (<code>IgnoreDrafts</code>, <code>IgnoreAuthors</code>, <code>ReviewerCount</code>, <code>WaitForStatus</code>, etc.) via the embedded pointer. It iterates over matching PRs from a SHA. The fix isn't a simple parameter swap &mdash; the function may need restructuring since it checks <code>WaitForStatus</code> as a precondition.</p>
+  </details>
+  <h3>Fix</h3>
+  <ul>
+    <li>Change <code>handleStatus</code> to accept <code>BlunderbussConfig</code> instead of <code>Blunderbuss</code></li>
+    <li>Have <code>handleStatusEvent</code> call <code>BlunderbussFor(se.Repo.Owner.Login, se.Repo.Name)</code></li>
+  </ul>
+</div>
+
+<div class="card severity-critical">
+  <h3><span class="tag tag-critical">Critical</span> <span class="tag tag-convergent">2 reviewers</span> <span class="tag tag-history">Previously flagged</span> Nil pointer dereference in <code>BlunderbussFor</code></h3>
+  <p><span class="file-ref">pkg/plugins/config.go:944</span></p>
+  <p>The fallback return <code>return *c.Blunderbuss.BlunderbussConfig</code> dereferences without a nil check. While <code>setDefaults()</code> initializes the pointer during normal config loading, <code>BlunderbussFor</code> can be called before that &mdash; tests already do this (e.g., <code>blunderbuss_test.go:761</code> calls <code>BlunderbussFor</code> directly without <code>setDefaults()</code>).</p>
+  <p>This was flagged by jmguzik in Mar 2025. The author acknowledged it but the fix was never pushed.</p>
+  <h3>Fix</h3>
+  <ul>
+    <li>Add a nil guard: if <code>c.Blunderbuss.BlunderbussConfig == nil</code>, return a zero-value <code>BlunderbussConfig{}</code></li>
+  </ul>
+</div>
+
+<div class="card severity-medium">
+  <h3><span class="tag tag-concern">Concern</span> <span class="tag tag-convergent">2 reviewers</span> <code>validateBlunderbuss</code> skips sharded configs</h3>
+  <p><span class="file-ref">pkg/plugins/config.go:1268-1273</span></p>
+  <p>Validation only checks <code>ReviewerCount</code> at the top level. Org/repo-level sharded configs are not validated. A user could set <code>request_count: -1</code> in an org override and it would pass silently.</p>
+  <h3>Fix</h3>
+  <ul>
+    <li>Iterate over <code>Blunderbuss.Orgs</code> and their <code>Repos</code>, applying the same <code>ReviewerCount</code> validation at each level</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>Design Question: Full Replacement vs Cascading Defaults</h2>
+
+<div class="card severity-design">
+  <h3><span class="tag tag-design">Design</span> <span class="tag tag-convergent">2 reviewers</span> <code>BlunderbussFor</code> uses full replacement, not field-level merge</h3>
+  <p><span class="file-ref">pkg/plugins/config.go:928-945</span></p>
+  <p><code>BlunderbussFor()</code> returns the most specific config wholesale. If global sets <code>request_count: 3</code> and a repo override only sets <code>ignore_authors: ["bot"]</code>, the repo gets <code>request_count: 0</code> (zero value), not 3.</p>
+
+  <div class="design-callout">
+    <p><strong>This differs from the Bugzilla pattern.</strong> <code>ResolveBugzillaOptions</code> cascades defaults from parent scopes. The current behavior means operators must duplicate all desired fields at every override level &mdash; error-prone for large installations.</p>
+    <p>The test <code>TestHandlePullRequestShardedConfig</code> demonstrates this: the repo config sets only <code>IgnoreAuthors</code>, so <code>ReviewerCount</code> is nil, causing zero reviewers to be requested. The test passes because it expects 0 &mdash; but this is arguably a foot-gun.</p>
+  </div>
+
+  <p><strong>Recommendation:</strong> This is non-blocking if the behavior is explicitly documented with a code comment. But consider implementing cascading defaults in a follow-up.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Suggestions (non-blocking)</h2>
+
+<div class="card severity-low">
+  <h3><span class="tag tag-suggestion">Suggestion</span> Add direct unit tests for <code>BlunderbussFor</code></h3>
+  <p>Currently only exercised indirectly through handler tests. A focused table-driven test in <code>config_test.go</code> would cover edge cases: no Orgs map, org exists but no repo match and no org-level config, nil <code>BlunderbussConfig</code> at various levels.</p>
+</div>
+
+<div class="card severity-low">
+  <h3><span class="tag tag-suggestion">Suggestion</span> Pointer/value embedding asymmetry</h3>
+  <p><code>BlunderbussOrgConfig</code> embeds <code>*BlunderbussConfig</code> (pointer) while <code>BlunderbussRepoConfig</code> embeds <code>BlunderbussConfig</code> (value). The asymmetry is unexplained. A brief comment on <code>BlunderbussRepoConfig</code> would help future contributors.</p>
+</div>
+
+<div class="card severity-low">
+  <h3><span class="tag tag-suggestion">Suggestion</span> Defensive copy in <code>mergeFrom</code></h3>
+  <p><span class="file-ref">pkg/plugins/config.go:2260</span></p>
+  <p>When adopting <code>other.BlunderbussConfig</code>, the pointer is shared. In-place mutations would affect both structs. A defensive copy (<code>cfg := *other.BlunderbussConfig; b.BlunderbussConfig = &amp;cfg</code>) would be safer.</p>
+</div>
+
+<div class="card severity-low">
+  <h3><span class="tag tag-suggestion">Suggestion</span> Test improvements</h3>
+  <ul>
+    <li><code>TestHandlePullRequestShardedConfig</code> uses a single case instead of table-driven tests &mdash; inconsistent with the file's conventions</li>
+    <li>Deeply nested <code>}}}}}}}</code> closings are hard to read &mdash; break up with helper variables</li>
+    <li>No genyaml test for the new <code>StarExpr</code> handling</li>
+  </ul>
+</div>
+
+<div class="card severity-low">
+  <h3><span class="tag tag-suggestion">Suggestion</span> Clean up helpProvider YAML example</h3>
+  <p>The generated YAML snippet tripled in size with empty-string keys (<code>""</code>) in the orgs and repos maps. This may confuse users reading the config documentation rather than help them.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Positive Observations</h2>
+
+<div class="card severity-info">
+  <h3><span class="tag tag-positive">Positive</span> What the PR does well</h3>
+  <ul>
+    <li>Follows the established Bugzilla sharding pattern &mdash; consistent codebase conventions</li>
+    <li>Thorough <code>mergeFrom</code> with conflict detection and proper error aggregation (13 test cases)</li>
+    <li>Clean fallback logic in <code>BlunderbussFor</code>: repo &gt; org &gt; global</li>
+    <li><code>setDefaults()</code> correctly initializes the pointer before accessing promoted fields</li>
+    <li><code>HasConfigFor()</code> properly updated to account for Blunderbuss sharding</li>
+    <li>The <code>genyaml.go</code> change to handle <code>*ast.StarExpr</code> is a clean, minimal fix</li>
+    <li>No breaking changes for existing deployments &mdash; inline embedding preserves backward compatibility</li>
+    <li>Rollback is safe &mdash; older binaries silently ignore the <code>orgs</code> key</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>Files at a Glance</h2>
+
+<table>
+  <thead>
+    <tr><th>File</th><th>Changes</th><th>Action needed</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><span class="file-ref">pkg/plugins/config.go</span></td>
+      <td>+132 / -8</td>
+      <td>Nil guard in <code>BlunderbussFor</code>, extend <code>validateBlunderbuss</code>, document replacement semantic</td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/plugins/blunderbuss/blunderbuss.go</span></td>
+      <td>+35 / -10</td>
+      <td>Fix <code>handleStatusEvent</code> to use <code>BlunderbussFor</code></td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/plugins/blunderbuss/blunderbuss_test.go</span></td>
+      <td>+195 / -17</td>
+      <td>Review only</td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/plugins/config_test.go</span></td>
+      <td>+187 / -0</td>
+      <td>Review only</td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/plugins/plugin-config-documented.yaml</span></td>
+      <td>+72 / -1</td>
+      <td>Review only (generated)</td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/genyaml/genyaml.go</span></td>
+      <td>+3 / -0</td>
+      <td>Review only</td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">cmd/deck/main_test.go</span></td>
+      <td>+3 / -2</td>
+      <td>Review only</td>
+    </tr>
+    <tr>
+      <td><span class="file-ref">pkg/plugins/plugins_test.go</span></td>
+      <td>+3 / -2</td>
+      <td>Review only</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2>Deployment Notes</h2>
+
+<div class="deployment-notes">
+  <ul>
+    <li><strong>No breaking changes</strong> for existing deployments. Flat YAML configs parse identically.</li>
+    <li><strong>Rollback is safe</strong> &mdash; older binaries silently ignore the <code>orgs</code> key.</li>
+    <li><strong>Operators adopting sharded config:</strong> overrides fully replace the parent config, they do not merge field-by-field. Every desired field must be specified at the override level.</li>
+    <li><strong>Status events:</strong> until the <code>handleStatusEvent</code> fix lands, per-org/repo overrides are only respected for PR open and <code>/auto-cc</code> events, not status-triggered reviewer assignment.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>Review Checklist</h2>
+<ul class="checklist">
+  <li><code>handleStatusEvent</code> updated to use <code>BlunderbussFor</code></li>
+  <li><code>handleStatus</code> signature changed to accept <code>BlunderbussConfig</code></li>
+  <li>Nil guard added in <code>BlunderbussFor</code> fallback path</li>
+  <li><code>validateBlunderbuss</code> extended to validate org/repo configs</li>
+  <li>Full-replacement behavior documented (or cascading defaults implemented)</li>
+  <li>Tests pass after changes</li>
+</ul>
+
+<!-- ============================================================ -->
+<h2>PR Comment (ready to post)</h2>
+<div class="comment-box">
+<div class="copy-hint">Copy the text below to use as a GitHub PR comment</div>
+Thanks for the PR and for keeping it fresh through the stale cycles &mdash; the overall approach is sound and follows the established sharding patterns well. I want to get this merged, but a few things need to be addressed first.
+
+**Required changes:**
+
+1. **`handleStatusEvent` ignores org/repo sharding** (`blunderbuss.go:256`): This handler still passes the full `Blunderbuss` struct to `handleStatus` instead of resolving config via `BlunderbussFor()`. The other two handlers were correctly updated, but status-triggered reviewer assignment will always use global config. This makes the sharding feature incomplete for this code path.
+
+2. **Nil pointer dereference in `BlunderbussFor`** (`config.go:944`): The fallback `return *c.Blunderbuss.BlunderbussConfig` panics when the pointer is nil. This was flagged in a previous review and acknowledged but never fixed. Please add a nil guard.
+
+3. **`validateBlunderbuss` skips sharded configs** (`config.go:1268`): Validation only checks `ReviewerCount` at the top level. Org/repo-level configs with invalid values pass silently. Please extend validation to cover sharded configs.
+
+**Design question:**
+
+`BlunderbussFor()` returns the most specific config as a full replacement, not a field-level merge with the parent. This means a repo override setting only `ignore_authors` will lose the global `request_count` (falls to zero value). This differs from how the Bugzilla plugin cascades defaults. Is this intentional? If so, please add a code comment documenting the design choice. If not, consider implementing cascading defaults.
+
+The `mergeFrom` logic, test coverage, and backward compatibility are all in good shape. Happy to re-review promptly once these are addressed.</div>
+
+</body>
+</html>

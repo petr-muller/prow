@@ -258,6 +258,48 @@ The annotation-based approach (maintainer-preferred) is a well-understood patter
 - Maintainers may prefer to close this as "won't fix" if no compelling use case beyond `Optional` emerges. The annotation approach keeps the door open at low cost.
 - If a contributor proposes a spec field instead of an annotation, they should expect pushback based on the maintainer discussion in the issue.
 
+## Proposed Issue Augmentation
+
+### Title Change
+- **Current**: Flaky ProwJob Field
+- **Proposed**: Add annotation or field to mark ProwJobs as flaky
+- **Rationale**: Original title is ambiguous — "Flaky ProwJob Field" could mean a field that is itself flaky. The new title clarifies this is a feature request for a mechanism to mark jobs.
+
+### Proposed GitHub Comment
+
+```
+/retitle Add annotation or field to mark ProwJobs as flaky
+
+Prow already has several mechanisms that overlap with parts of the "flaky job" concept. The `Optional` field on presubmit jobs (`pkg/config/jobs.go`) marks jobs as non-blocking for Tide merge gating, and the `SkipReport` field controls whether results are reported to GitHub. For retries, periodic jobs have a dedicated `Retry` struct, while presubmit/postsubmit retries are handled manually via `/retest` commands in the trigger plugin. There is currently no single mechanism to mark a job as "known flaky" and have multiple components adjust behavior accordingly.
+
+As discussed in the comments, adding a first-class `Flaky` field to `ProwJobSpec` would lock in specific semantics in the CRD API, which is difficult to change later. The maintainer-preferred approach would be a standard annotation (e.g., `prow.k8s.io/flaky`), following the pattern used by TestGrid and other external tools. This allows each component (tide, crier, plank) to independently define what "flaky" means in its context, without API versioning concerns. Job annotations are already propagated from config to ProwJob ObjectMeta via `pkg/pjutil/pjutil.go`.
+
+A concrete proposal would benefit from defining at least one specific behavior change — for example, how should the GitHub reporter in crier annotate status checks for a flaky job, or should Tide treat flaky jobs differently from optional ones? Without concrete per-component semantics, the annotation would have no effect.
+
+/kind feature
+/area prow
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Context about existing overlapping mechanisms (Optional, SkipReport, Retry, /retest) that the original issue doesn't mention
+- Architectural reasoning for why annotation is preferred over spec field
+- Concrete guidance on what a useful proposal would look like (define per-component semantics)
+
+**Why these labels**:
+- `/kind feature`: This is a feature request for new functionality
+- `/area prow`: Affects core ProwJob API/infrastructure, not a specific component
+- `/help-wanted`: Level 2 effort — well-scoped but needs contributor to define semantics
+
+**What's NOT included**:
+- Priority label: This is a nice-to-have, not urgent. Existing mechanisms cover most concrete use cases.
+- Specific implementation plan: The issue needs design discussion before implementation.
+- Suggestion to close: While maintainers are lukewarm, the issue documents a real user need and the annotation approach has low cost if someone wants to pursue it.
+
 ## Next Steps
 
-(Action items will be added here)
+- Post the augmentation comment (via wrapup subcommand)
+- Monitor for community response defining concrete use cases
+- Consider whether `Optional` + reporting configuration already covers the practical need

@@ -178,6 +178,86 @@ This aligns with maintainer consensus and established patterns (testgrid). The k
 - Unit tests for annotation parsing in each consuming component
 - Integration test showing annotation affects behavior end-to-end
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+The annotation-based approach (maintainer-preferred) is a well-understood pattern with moderate scope. The main complexity lies in defining clear semantics for "flaky" across components, not in the implementation itself. Most of the concrete use cases are already served by existing mechanisms (`Optional`, `SkipReport`, `/retest`).
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small to Moderate
+- **Details**: Annotation constant in `pkg/kube/prowjob.go` (~5 LOC), then per-component consumption (1-2 files per component). Total: 3-6 files, ~100-200 LOC depending on how many components consume the annotation.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: Each component needs to define what "flaky" means for its context. Tide might treat flaky jobs differently in merge gating, crier might annotate reports differently. The complexity is in design decisions, not code.
+- **Level Indication**: 2-3
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Contributor needs to understand the annotation propagation path (config → ProwJob ObjectMeta) and each consuming component's architecture. The testgrid annotation pattern provides a clear template.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Some uncertainty
+- **Details**: The annotation constant itself is clear. What's unclear is what concrete behaviors each component should implement. The issue doesn't specify, and maintainers haven't defined expected semantics. This is the main risk factor.
+- **Level Indication**: 2-3
+
+#### Testing Requirements
+- **Assessment**: Simple per component
+- **Details**: Unit tests for annotation parsing, following existing patterns for other annotations/labels. No new test infrastructure needed.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Annotation ignored by default. Components opt in to consuming it. No behavior change for existing deployments.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Follows the established testgrid annotation pattern exactly. Annotations are the maintainer-preferred approach for this class of feature.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Purely internal Prow change, no external API requirements.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `kind/feature`: New capability for marking flaky jobs
+- [x] `help-wanted`: Well-scoped but requires understanding multiple components
+- [x] `area/prow`: Core Prow API/infrastructure
+- [ ] `good-first-issue`: Too much uncertainty about semantics for a new contributor
+- [ ] `priority/important-soon`: Nice-to-have, existing mechanisms cover most use cases
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Prow's annotation/label system
+- Should review:
+  - `pkg/kube/prowjob.go`: Existing annotation/label constants
+  - `pkg/pjutil/pjutil.go`: How annotations propagate from config to ProwJob
+  - TestGrid annotation usage as a pattern reference
+  - `pkg/config/jobs.go:202`: How `Optional` field works (closest existing concept)
+- Recommended approach:
+  1. Define `prow.k8s.io/flaky` annotation constant
+  2. Pick one component (e.g., GitHub reporter in crier) as initial consumer
+  3. Propose specific behavior change for that component
+  4. Discuss with maintainers before expanding to other components
+- **Key risk**: Must define concrete semantics before implementing. A vague "flaky" annotation with no consumers adds no value.
+
+### Caveats and Considerations
+
+- The biggest open question is whether this provides value beyond the existing `Optional` field. A flaky job that shouldn't block merges is effectively an optional job. The added value of a "flaky" annotation would be in behaviors *other* than merge gating (e.g., different reporting, dashboard grouping, retry logic).
+- Maintainers may prefer to close this as "won't fix" if no compelling use case beyond `Optional` emerges. The annotation approach keeps the door open at low cost.
+- If a contributor proposes a spec field instead of an annotation, they should expect pushback based on the maintainer discussion in the issue.
+
 ## Next Steps
 
 (Action items will be added here)

@@ -308,8 +308,8 @@ Key questions asked:
 Maintainer decision:
 Proceed with wrapup (post comment and push branches).
 
-## Next Steps
+## Wrapup
 
-- Post the augmentation comment (via wrapup subcommand)
-- Monitor for community response defining concrete use cases
-- Consider whether `Optional` + reporting configuration already covers the practical need
+- Branches pushed to origin: `claude-maintenance-helpers`, `issue-triage-494`
+- Comment posting: Skipped by maintainer decision
+- Triage status: Complete

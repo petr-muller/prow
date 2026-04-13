@@ -200,6 +200,76 @@ A general-purpose markdown lens provides the most value. It directly enables the
 - Tests for HTML sanitization
 - Integration test with Spyglass rendering pipeline
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+Creating a new Spyglass lens is a well-patterned task with clear reference implementations (HTML lens, metadata lens), but it spans multiple files, requires adding a Go dependency for markdown rendering, and needs HTML sanitization to be done correctly. Suitable for a skilled contributor familiar with Go.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: ~5-8 files affected. New lens package (lens.go, template.html — 2 files), import in `cmd/deck/main.go` (1 file), go.mod/go.sum for markdown dependency (2 files), unit tests (1 file), documentation updates (1 file). Estimated ~200-400 LOC.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: The lens interface is simple (Header/Body/Callback), and existing lenses provide clear patterns. The main complexity is choosing and integrating a markdown rendering library, sanitizing the output HTML to prevent XSS, and handling relative links within artifacts. No concurrency concerns.
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires understanding of Go templates, the Spyglass lens plugin API, and security considerations for HTML sanitization. Can be learned from existing lens implementations. No deep Prow architectural knowledge needed.
+- **Level Indication**: 2
+
+#### Clarity and Certainty
+- **Assessment**: Some uncertainty
+- **Details**: The core feature is clear (render markdown from artifacts), but design questions remain: which markdown library to use, how to handle relative links (the issue mentions templated links), whether to support collapsible display, what level of markdown feature support is needed (tables? diagrams?). These are decisions, not blockers.
+- **Level Indication**: 2-3
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Unit tests for markdown rendering, HTML sanitization, artifact reading. Can follow existing lens test patterns (html_test.go, buildlog/lens_test.go). No complex integration test infrastructure needed.
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Purely additive — new lens only activates when configured and when matching artifacts exist. No impact on existing deployments unless they opt in by adding the lens to their Spyglass config.
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: The Spyglass lens system was designed exactly for this kind of extension. Adding a new lens follows established patterns perfectly. No new architectural concepts needed.
+- **Level Indication**: 1
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: Needs a Go markdown library (goldmark is mature, widely used, MIT licensed). No external API dependencies. The lens reads artifacts that already exist in the Spyglass artifact system.
+- **Level Indication**: 1-2
+
+### Recommended Labels
+
+- [x] `kind/feature`: New Spyglass lens capability
+- [x] `area/spyglass`: Affects the Spyglass lens system
+- [x] `help-wanted`: Well-defined, moderate scope, good patterns to follow
+- [ ] `good-first-issue`: Requires understanding multiple components and security considerations
+
+### Guidance for Contributors
+
+- Should review existing lens implementations, especially `pkg/spyglass/lenses/html/` and `pkg/spyglass/lenses/metadata/` for patterns
+- Key decisions to make before coding: markdown library choice, HTML sanitization approach, relative link handling strategy
+- Suggested approach: start with a minimal lens that renders markdown to HTML using goldmark, test with a simple DEBUGGING.md, then iterate on UX (collapsible display, link handling)
+- The `pkg/spyglass/lenses/common/common.go` utilities handle artifact fetching — lean on them
+
+### Caveats and Considerations
+
+- The issue's alternate ask ("literally any way to indicate that users should look into the ARTIFACTS link") could be addressed with a simpler UI change to Spyglass (highlighting the artifacts link). This would be a Level 1 change but doesn't fully address the feature request.
+- pohly's concern about job maintainer burden is valid — the lens is only useful if jobs produce DEBUGGING.md. Adoption depends on tooling like kubetest2 emitting these files automatically.
+- The existing HTML lens (Approach 3) is a zero-effort workaround but doesn't address markdown simplicity or discoverability.
+
 ## Next Steps
 
 (Action items will be added here)

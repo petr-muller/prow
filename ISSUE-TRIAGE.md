@@ -180,7 +180,81 @@ This directly addresses the fundamental issue: Tide has no memory of what contex
 - Test memory pruning for merged/closed PRs
 - Test concurrent access to context history
 
+## Effort Assessment
+
+**Effort Level**: 3 - Large (requires expertise)
+
+### Summary
+
+Fixing a race condition in Tide's core merge decision logic. The root cause is well understood and a solution prototype exists (PR #563), but the fix requires deep understanding of Tide's concurrent architecture, careful state management, and thorough testing of timing-dependent behavior.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: 3 files (`pkg/tide/tide.go`, `status.go`, `tide_test.go`), ~150-200 lines added. Changes are localized to the context evaluation path but touch the critical merge decision logic.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: High
+- **Details**: Race condition between two async controllers (sync and status), state tracking across sync cycles, transient GitHub API behavior during check re-triggers. The fix introduces a new `contextHistory` state machine that must be thread-safe and handle edge cases like force pushes and PR closures.
+- **Level Indication**: 3-4
+
+#### Required Expertise
+- **Assessment**: Deep
+- **Details**: Requires understanding of Tide's dual-controller architecture, Go concurrency patterns (mutexes, channels), GitHub Actions check run lifecycle, and the relationship between `RequiredContexts`, `RequiredIfPresentContexts`, and `SkipUnknownContexts`.
+- **Level Indication**: 3-4
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause is clearly identified (disappearing contexts invisible to `unsuccessfulContexts()`). Solution approach is validated by PR #563 prototype. No open architectural questions.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate-Complex
+- **Details**: Need tests for context disappearance, multi-transition scenarios, memory pruning, and concurrent access. PR #563 includes comprehensive test cases that can be used as a starting point. No new test infrastructure needed.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: The fix only prevents incorrect merges (false positives). Correct merge behavior is unchanged. No configuration changes required. Purely additive defensive behavior.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Extends existing context evaluation with state tracking. Follows existing patterns (mutex-protected state, per-PR data). The `contextHistory` concept fits naturally alongside the existing `statusUpdate` state.
+- **Level Indication**: 2-3
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: Works around a known GitHub API behavior (transient check run removal during re-trigger). No changes to external API usage required; the fix is entirely internal state management.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `area/tide`: Core Tide context evaluation logic
+- [x] `kind/bug`: Race condition causing incorrect merges
+- [ ] `good-first-issue`: Requires deep Tide expertise and concurrency knowledge
+- [ ] `help-wanted`: Too complex for typical help-wanted scope
+
+### Guidance for Contributors
+
+- Requires experience with Prow's Tide architecture, specifically the sync/status controller interaction
+- Should review PR #563 (`fix-tide-retest-race-337` branch) which implements the recommended solution
+- Key files to understand:
+  - `pkg/tide/tide.go`: `unsuccessfulContexts()`, `filterPR()`, `isPassingTests()`
+  - `pkg/tide/status.go`: `expectedStatus()`, `setStatuses()`, status controller lifecycle
+  - `pkg/config/tide.go`: `MissingRequiredContexts()`, `IsOptional()`, context policy
+- Must ensure thread safety of `contextHistory` (concurrent access from sync and status controllers)
+- Must implement pruning to prevent unbounded memory growth
+- Consult with Tide maintainers before starting implementation
+
+### Caveats and Considerations
+
+- PR #563 was closed without merging; the reason is unclear but the approach appears sound
+- The fix makes merge decisions more conservative (delays merges when contexts disappear), which is the correct trade-off for a merge safety mechanism
+- A simpler alternative (fresh API query before merge) reduces but doesn't eliminate the race window
+
 ## Next Steps
 
-- Assess effort level for implementing the fix
 - Prepare augmentation comment for the issue

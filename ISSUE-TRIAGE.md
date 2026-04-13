@@ -277,8 +277,40 @@ Well-defined problem with a clear solution approach and established abort patter
 - Consider whether to abort stale batches on every sync or only when triggering a new batch. Aborting on every sync is more aggressive but prevents orphaned jobs from consuming resources even when no new batch is triggered.
 - Some deployments may intentionally allow stale batches to complete (e.g., if batch jobs produce artifacts beyond merge gating). A config option could address this, but may not be needed for an initial implementation.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "`tide`: obsolete batch ProwJobs not aborted when a new batch supersedes them" is clear, specific, mentions the component, and accurately describes the feature request.
+
+### Proposed GitHub Comment
+
+```
+The root cause is in Tide's `dividePool()` function, which queries ProwJobs using a cache index keyed by `org/repo:branch@baseSHA`. When baseSHA advances, old batch ProwJobs no longer match the index and become invisible to subsequent sync iterations. `takeAction()` then sees `batchPending == 0` and triggers a fresh batch, while the old one continues running to completion. In effect, the old batch ProwJobs are orphaned — still consuming CI resources but with results that Tide will never use.
+
+Prow already has a well-established pattern for aborting superseded jobs: `pjutil.TerminateOlderJobs()` in `pkg/pjutil/abort.go` does exactly this for presubmit jobs, and Plank's `syncAbortedJob()` handles the cleanup (pod deletion, marking complete). However, `TerminateOlderJobs` explicitly excludes batch jobs (line 64). The fix would involve either removing that exclusion (if batch job digest comparison works correctly for this case) or adding batch-specific abort logic in Tide itself — for example, querying for batch ProwJobs with stale baseSHAs before triggering a new batch and setting them to `AbortedState`.
+
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the baseSHA-keyed cache index in `dividePool()` is the mechanism that makes old batches invisible. The original issue describes the symptom accurately but doesn't explain the underlying code path.
+- Implementation guidance: pointers to the existing abort pattern (`TerminateOlderJobs`, `syncAbortedJob`) and the specific exclusion that prevents it from working for batch jobs. This gives potential contributors a clear starting point.
+
+**Why these labels**:
+- `area/tide`: Already applied. Correct — the fix is in `pkg/tide/`.
+- `kind/feature`: Already applied. Correct — per maintainer reclassification.
+- `/help-wanted`: Level 2 effort assessment. Well-defined problem with established patterns to follow, but requires moderate Tide-specific knowledge.
+
+**What's NOT included**:
+- No `/retitle`: Title is already specific and well-structured.
+- No `/good-first-issue`: Requires understanding Tide's batch lifecycle, ProwJob indexing, and abort patterns — not suitable for first-time contributors.
+- No `/priority`: This is a resource optimization feature, not a correctness bug. Old batches running to completion is wasteful but not harmful.
+- No detailed solution approach: The comment provides enough for a contributor to get started. Detailed architectural recommendations belong in PR review, not the issue.
+
 ## Next Steps
 
-- Augment: Improve issue with technical findings
 - Brief: Walk maintainer through findings
 - Wrapup: Push branches and post comment

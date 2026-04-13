@@ -202,7 +202,83 @@ Approach 3 provides the clearest intent coupling (abort old → trigger new) wit
 - Unit test: configuration to disable abort behavior
 - Integration-style test: full sync cycle with baseSHA advance
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+Well-defined problem with a clear solution approach and established abort patterns to follow. The scope is moderate (2-4 files, ~100-200 LOC) but requires understanding Tide's batch lifecycle and ProwJob indexing. Not a good-first-issue due to the Tide-specific knowledge required, but well within reach for a contributor familiar with Prow or willing to invest time understanding the batch flow.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: Primary changes in `pkg/tide/tide.go` (new abort helper, modification to `takeAction` or `syncSubpool`). Possibly a new cache index function. Tests in `pkg/tide/tide_test.go`. Optionally `pkg/pjutil/abort.go` if extending `TerminateOlderJobs`. Estimated 2-4 files, 100-200 LOC.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: The abort pattern is well-established (`Status.State = AbortedState`). The main complexity is querying batch ProwJobs by org/repo/branch without baseSHA, which may need a new cache index. No concurrency concerns — sync loop is single-threaded per subpool.
+- **Level Indication**: 2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires understanding of Tide's sync loop, `dividePool`, `takeAction`, and how ProwJob cache indexes work. Can be learned from existing code. Familiarity with controller-runtime client patterns helpful.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Problem is clearly described with reproduction steps. Solution approach is clear: find stale batch ProwJobs and set them to AbortedState. The main open question is whether to do this in Tide or extend Plank's `TerminateOlderJobs`.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Follow existing patterns in `TestAccumulateBatch` and `TestDividePool`. Need new test cases for baseSHA-change scenarios. Existing test infrastructure is sufficient — no new test framework needed.
+- **Level Indication**: 2
+
+#### Backwards Compatibility
+- **Assessment**: Minor impact
+- **Details**: Changes behavior for stale batch ProwJobs that currently run to completion. This is the desired behavior change. Could be made configurable if needed, but aborting obsolete jobs is broadly desirable. No config schema changes strictly required.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Follows the established abort pattern used by Plank and trigger plugin. ProwJob state machine already supports AbortedState for exactly this scenario ("prow killed the job early, new commit pushed perhaps"). Natural extension of existing behavior.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Entirely internal to Prow. Uses existing Kubernetes API patterns for listing and updating ProwJobs.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `help-wanted`: Moderate scope, clear solution, suitable for skilled contributors
+- [x] `area/tide`: Core Tide functionality
+- [x] `kind/feature`: New cleanup behavior (per maintainer reclassification)
+- [ ] `good-first-issue`: Requires moderate Tide-specific knowledge
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and Kubernetes controller patterns
+- Should review:
+  - `pkg/tide/tide.go`: `dividePool()`, `takeAction()`, `trigger()`, `accumulateBatch()` flow
+  - `pkg/pjutil/abort.go`: `TerminateOlderJobs()` — the established abort pattern
+  - `pkg/plank/reconciler.go`: `syncAbortedJob()` — how aborted jobs are cleaned up
+  - `pkg/tide/tide_test.go`: `TestAccumulateBatch`, `TestDividePool` — existing test patterns
+- Recommended approach: Add a helper in `pkg/tide/tide.go` that queries batch ProwJobs for org/repo/branch with stale baseSHA and sets them to AbortedState. Call it from `syncSubpool` or `takeAction` before triggering a new batch.
+- Key consideration: May need a new cache index for batch ProwJobs by org/repo/branch (without baseSHA in the key)
+
+### Caveats and Considerations
+
+- The `TerminateOlderJobs` batch exclusion at `abort.go:64` was intentional. Before removing it (Approach 2), investigate whether batch job digests would cause incorrect matching. Approach 3 (Tide-side abort) is safer.
+- Consider whether to abort stale batches on every sync or only when triggering a new batch. Aborting on every sync is more aggressive but prevents orphaned jobs from consuming resources even when no new batch is triggered.
+- Some deployments may intentionally allow stale batches to complete (e.g., if batch jobs produce artifacts beyond merge gating). A config option could address this, but may not be needed for an initial implementation.
+
 ## Next Steps
 
-- Assess effort: Determine complexity and effort level
 - Augment: Improve issue with technical findings
+- Brief: Walk maintainer through findings
+- Wrapup: Push branches and post comment

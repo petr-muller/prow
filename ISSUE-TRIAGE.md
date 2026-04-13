@@ -270,6 +270,42 @@ Creating a new Spyglass lens is a well-patterned task with clear reference imple
 - pohly's concern about job maintainer burden is valid — the lens is only useful if jobs produce DEBUGGING.md. Adoption depends on tooling like kubetest2 emitting these files automatically.
 - The existing HTML lens (Approach 3) is a zero-effort workaround but doesn't address markdown simplicity or discoverability.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "`deck` feature request: a way to surface debugging hints" is clear, mentions the component, and describes the request well.
+
+### Proposed GitHub Comment
+
+```
+Spyglass already has the infrastructure to support this well. The lens plugin system (`pkg/spyglass/lenses/`) allows creating artifact viewers that match files by regex pattern — a new lens matching `DEBUGGING.md` (or any `.md`) would automatically render when that artifact is present. Existing lenses like `html` (`pkg/spyglass/lenses/html/`) and `metadata` provide clear implementation patterns to follow: implement `Header()`, `Body()`, `Callback()`, register via `init()`, and configure artifact matching in the Spyglass config.
+
+A general-purpose **markdown lens** (rather than debugging-specific) would be the most versatile approach — it could render any `.md` artifact, with the DEBUGGING.md use case being one configuration. This would need a Go markdown library (e.g., goldmark) for server-side rendering with HTML sanitization. Lens priority controls placement, so a DEBUGGING.md config could be set to appear prominently near the top of the Spyglass view. As @petr-muller noted, OpenShift already uses the existing `html` lens to surface similar content — that works today as a workaround if jobs emit HTML instead of markdown, though markdown is simpler for job maintainers to produce (addressing @pohly's concern about burden).
+
+/area spyglass
+/kind feature
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Architecture context: how the Spyglass lens system works and where a new lens fits
+- Specific code paths and patterns to follow (html lens, metadata lens)
+- Recommendation for generic markdown lens vs debugging-specific
+- Acknowledgment of the HTML lens workaround and how it relates to the discussion
+
+**Why these labels**:
+- `/area spyglass`: The feature is specifically about Spyglass artifact rendering, not Deck generally
+- `/kind feature`: New capability request
+- `/help-wanted`: Level 2 effort — well-defined, good patterns to follow, but requires multiple files and security considerations (HTML sanitization)
+
+**What's NOT included**:
+- No `/retitle`: current title is already clear
+- No priority label: this is an enhancement, not a bug or urgent need
+- No `/good-first-issue`: requires understanding the lens plugin API, adding a Go dependency, and handling HTML sanitization correctly — more than a first issue
+
 ## Next Steps
 
 (Action items will be added here)

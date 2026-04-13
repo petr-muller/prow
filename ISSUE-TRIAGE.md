@@ -255,6 +255,47 @@ Fixing a race condition in Tide's core merge decision logic. The root cause is w
 - The fix makes merge decisions more conservative (delays merges when contexts disappear), which is the correct trade-off for a merge safety mechanism
 - A simpler alternative (fresh API query before merge) reduces but doesn't eliminate the race window
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Tide merges PR when retesting GitHub action" is clear, specific, mentions the affected component, and accurately describes the bug behavior.
+
+### Proposed GitHub Comment
+
+```
+/remove-lifecycle stale
+/reopen
+
+This is a race condition in Tide's context evaluation logic. When a GitHub Action is re-triggered, GitHub temporarily **removes** the old CheckRun from its API before creating the new one. During this window (typically a few seconds), the check is completely absent from the `ListCheckRuns` API response. If Tide's sync loop queries GitHub during this window, `unsuccessfulContexts()` in `pkg/tide/tide.go` sees no failing or pending check for that context and the PR passes the merge filter.
+
+The gap is in how Tide handles missing contexts. `MissingRequiredContexts()` only flags contexts listed in `RequiredContexts` (Prow-managed presubmit jobs). A GitHub Action check that disappears during re-trigger is invisible: it's not in the returned context list (so the first check loop skips it), and it may not be in `RequiredContexts` (so `MissingRequiredContexts` doesn't flag it either). The result is that Tide sees "all contexts passing" when in reality a check is being re-run.
+
+The fix in #563 introduced context history tracking: remembering which contexts were previously seen per PR and treating disappeared contexts as pending. That approach is architecturally sound and directly addresses the root cause. This is a Level 3 fix requiring understanding of Tide's concurrent sync/status controller architecture.
+
+/area tide
+/kind bug
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the original issue correctly suspected a race but didn't identify the exact mechanism (GitHub removing CheckRuns from API during re-trigger, and Tide's inability to detect disappeared contexts)
+- Technical details: specific function names and code paths where the gap exists
+- Fix approach validation: confirmation that PR #563's approach is sound
+- Effort level context for potential contributors
+
+**Why these labels**:
+- `/area tide`: Bug is in Tide's context evaluation path
+- `/kind bug`: Already applied, reinforcing
+
+**What's NOT included**:
+- No `/good-first-issue` or `/help-wanted`: Level 3 issue requiring deep expertise
+- No `/priority` label: The bug is real but intermittent; maintainers can prioritize
+- No `/retitle`: Current title is already good
+- Removed `/reopen` and `/remove-lifecycle stale` will be needed since the issue is currently closed by the stale bot
+
 ## Next Steps
 
-- Prepare augmentation comment for the issue
+- Brief the maintainer on findings
+- Wrap up: push branches and post comment

@@ -283,7 +283,45 @@ Adding a build ID listing cache to `cmd/deck/job_history.go` is a well-defined c
 - The `area/podutils/gcsupload` label on #388 may be misleading — the bug is in Deck, not in gcsupload. The label was likely added because the issue mentions GCS, but the root cause is in Deck's listing logic.
 - An alternative minimal fix (just increasing the timeout) would be Level 1, but wouldn't properly solve the underlying issue for very large job histories.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Job history page displays incorrect timestamps for recent job runs" is clear and specific, accurately describes the symptom.
+
+### Proposed GitHub Comment
+
+```
+This is a duplicate of #388, which reports the same symptom on a different Prow instance (prow.ci.openshift.org). Thank you for confirming this affects multiple instances — it helps establish this is a systemic bug in Prow, not an instance-specific issue.
+
+The root cause is in Deck's job history handler (`cmd/deck/job_history.go`). When loading the page, Deck lists all build IDs from cloud storage (GCS/S3) with a hard-coded **10-second timeout**. For jobs with many builds, this listing often exceeds the timeout. When it does, the code silently proceeds with whatever partial results were returned before the deadline. Since GCS returns objects in lexicographic order — not chronological — a partial listing produces an arbitrary subset of builds that changes with each request depending on network latency and GCS server load.
+
+The fix would involve caching the build ID listing so that repeated requests return consistent results. See #388 for tracking.
+
+/kind bug
+/area deck
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the original issue describes the symptom but not why it happens
+- Technical pointer to the specific code location
+- Explanation of why results vary between requests (lexicographic vs chronological ordering)
+- Cross-reference to the primary issue (#388)
+
+**Why these labels**:
+- `/kind bug`: This is broken behavior, not a feature request
+- `/area deck`: The bug is in Deck's job history handler, not in gcsupload or any other component
+
+**What's NOT included**:
+- `/help-wanted`: Not adding to the duplicate — the label already exists on #388
+- No `/retitle`: Title is already clear and descriptive
+- No solution details: Those belong on #388, not the duplicate
+- No `/close`: The maintainer will close it as duplicate after reviewing
+
 ## Next Steps
 
-- Augment issue with findings
-- Close #680 as duplicate of #388, cross-referencing the analysis
+- Post the augmentation comment to #680
+- Ensure #388 has the root cause analysis (consider augmenting #388 separately)
+- Push triage branches

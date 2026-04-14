@@ -1,6 +1,6 @@
 # Triage for Issue #337
 
-**Status**: In Progress
+**Status**: Complete
 **Created**: 2026-04-13
 
 ## Issue Information
@@ -305,6 +305,7 @@ Key questions asked:
 Maintainer decision:
 - Proceed with wrapup (post comment, reopen issue)
 
-## Next Steps
+## Wrapup
 
-- Wrap up: push branches and post comment
+- Branches pushed to origin: `337-triage`
+- Comment: Not posted (maintainer decision)

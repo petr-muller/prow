@@ -206,8 +206,84 @@ Approach 2 would be the ideal long-term solution but is significantly more compl
 - Test concurrent cache access
 - Test behavior when cache is cold (first request)
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+Adding a build ID listing cache to `cmd/deck/job_history.go` is a well-defined change with a clear solution approach. It requires understanding of Go concurrency (sync.Map or mutexes) and Deck's request handling, but doesn't touch core architecture or introduce breaking changes.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small-to-Moderate
+- **Details**: Primary changes in 1-2 files (`job_history.go`, possibly `main.go` for cache initialization). Estimated ~100-200 lines for the cache implementation, cache key logic, and TTL expiration. Test file updates needed.
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: Requires concurrent-safe cache implementation (sync.Map or mutex-guarded map), TTL-based expiration, and careful key design for `(storageProvider, bucket, root)` tuples. The cache logic itself is straightforward, but thread safety under concurrent HTTP requests needs care.
+- **Level Indication**: 2-3
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires familiarity with Go concurrency primitives (sync.Map, sync.Mutex, or sync.RWMutex), understanding of Deck's HTTP handler lifecycle, and knowledge of how GCS listing works. No deep Prow-specific architecture knowledge needed.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause is clearly identified (10s timeout + partial listing). Caching approach is well-understood and commonly implemented. The only open design question is TTL value and whether to support cache-busting.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Need to test cache hit/miss behavior, TTL expiration, concurrent access safety, and that results are consistent across multiple calls. Existing `fakestorage`-based test infrastructure can be extended. No new test infrastructure needed.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Purely additive — adds caching layer between existing HTTP handler and GCS listing. No behavior change from the user's perspective except more consistent results and potentially slightly stale data (by TTL duration).
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit
+- **Details**: Caching is a common pattern in web servers. Deck already handles concurrent requests. Adding an in-memory cache fits naturally into the existing architecture without introducing new patterns.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: The fix is entirely within Prow's codebase. No external API changes or new dependencies needed.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined, moderate scope, suitable for skilled contributors
+- [x] `area/deck`: Bug is in Deck's job history handler
+- [x] `kind/bug`: Incorrect display behavior caused by code defect
+- [ ] `good-first-issue`: Requires Go concurrency knowledge, not ideal for first-timers
+
+### Guidance for Contributors
+
+- Suitable for contributors familiar with Go concurrency and web server caching patterns
+- Should review:
+  - `cmd/deck/job_history.go`: `getJobHistory()` and `listBuildIDs()` functions
+  - `cmd/deck/job_history_test.go`: Existing test patterns with `fakestorage`
+  - Go standard library `sync` package documentation
+- Recommended approach:
+  1. Add a package-level cache (sync.Map or mutex-guarded map) keyed by `(storageProvider, bucketName, root)`
+  2. Cache entries should store sorted `[]uint64` build IDs and a timestamp
+  3. On cache hit with valid TTL, skip `listBuildIDs()` and use cached results
+  4. On cache miss or expired TTL, call `listBuildIDs()` and update cache
+  5. Consider using `sync.Once`-style loading to prevent thundering herd on cold cache
+
+### Caveats and Considerations
+
+- Since #680 is a duplicate of #388, the effort assessment applies to the fix tracked under #388
+- The `area/podutils/gcsupload` label on #388 may be misleading — the bug is in Deck, not in gcsupload. The label was likely added because the issue mentions GCS, but the root cause is in Deck's listing logic.
+- An alternative minimal fix (just increasing the timeout) would be Level 1, but wouldn't properly solve the underlying issue for very large job histories.
+
 ## Next Steps
 
-- Assess effort level for implementing the caching solution
+- Augment issue with findings
 - Close #680 as duplicate of #388, cross-referencing the analysis
-- Add research findings to #388 to help future contributors

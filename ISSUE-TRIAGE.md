@@ -122,89 +122,123 @@ The code **intentionally swallows `DeadlineExceeded` errors** (line 467) and pro
 - `TestListBuildIDsReturnsResultsOnError` — Specifically tests that partial results are returned on error (validates the current buggy behavior as intentional)
 - **Test Gap**: No test for timeout behavior or non-deterministic results from partial listings
 
+### Key Observation: Lexicographic Ordering Explains the Symptom
+
+GCS lists objects **lexicographically**. Prow build IDs are 19-digit Snowflake-like numbers (e.g., `1254406011708510210`), so lexicographic order = numeric order = chronological order. This means the listing always starts from the **oldest** builds. When the 10-second timeout fires mid-listing, it cuts off the **newest** builds — the ones users actually care about. This perfectly explains why users see October dates instead of today's runs.
+
+Additionally, pagination is affected: each page load calls `listBuildIDs()` fresh. Even clicking "Older Runs" from a correct page can show wrong results if the timeout hits differently, because the `buildId` URL parameter only controls the crop window over whatever partial list was returned.
+
 ### Proposed Solutions
 
-#### Approach 1: Cache Build ID Listings
+#### Approach 1: Start Listing from Latest Build (recommended, fixes root cause)
 
-**Description**: Add a time-based cache for build ID listings per job. Cache the full list of build IDs for a configurable TTL (e.g., 1-5 minutes). Subsequent requests within the TTL window reuse the cached list instead of re-listing GCS.
+**Description**: Leverage the already-known latest build ID (from `latest-build.txt`, read at line 451) to start listing from the most recent builds rather than from the oldest. GCS `storage.Query` supports `StartOffset` — by setting it near the latest build ID, we skip the bulk of old builds and only list the most recent ones. This would complete well within the timeout for any practical number of recent builds.
+
+**Implementation outline**:
+1. The `Opener.Iterator` interface (`pkg/io/opener.go:94`) currently takes `(prefix, delimiter)` — extend it to accept a `StartOffset` option (or add a new method)
+2. In `listBuildIDs()`, compute a `StartOffset` from the latest build ID (e.g., subtract a buffer to get the last few hundred builds)
+3. Pass `StartOffset` through to the GCS `storage.Query` at `opener.go:474`
+4. For S3 backend (gocloud/blob), use equivalent `ListOptions` parameters
+
+**Challenges**:
+- Requires modifying the `Opener.Iterator` interface (cross-cutting change in `pkg/io`)
+- Build IDs aren't sequential (Snowflake IDs have gaps), so computing the right `StartOffset` requires a heuristic
+- PR logs use symlink `.txt` files — same approach should work since filenames are `<buildID>.txt`
+- Total build count becomes unknown (only listing a subset) — affects the "Showing X/Y results" display
 
 **Pros**:
-- Eliminates non-deterministic behavior within the cache window
-- Dramatically reduces GCS API calls
-- Faster page loads after initial cache population
-- Pagination becomes consistent (same list for older/newer pages)
+- Fixes the root cause: recent builds are always listed first
+- Fast even on first load — no caching needed
+- Pagination works correctly since relevant builds are always in the listing
+- Scales to any number of total builds
 
 **Cons**:
-- New builds won't appear until cache expires (acceptable for history page)
-- Memory usage grows with number of jobs and build IDs cached
-- Cache invalidation complexity
-- Doesn't solve the initial population timeout issue
+- Requires `Opener.Iterator` interface change (broader impact than just Deck)
+- StartOffset heuristic needs tuning — too aggressive = miss some builds, too conservative = still timeout
+- Loses total build count (cosmetic issue)
 
 **Affected Components**:
-- `cmd/deck/job_history.go` — Add caching layer around `listBuildIDs`
-- Possibly `cmd/deck/main.go` — Cache initialization
+- `pkg/io/opener.go` — Add `StartOffset` support to `Iterator`
+- `cmd/deck/job_history.go` — Use latest build ID to compute `StartOffset` in `listBuildIDs`
 
 **Complexity**: Medium
 **Backwards Compatibility**: None — purely additive improvement
 
-#### Approach 2: Paginated GCS Listing with Cursor
+#### Approach 2: Incomplete Results Banner (complementary, improves UX)
 
-**Description**: Instead of listing all build IDs and then cropping, use GCS pagination to fetch only the needed page of results. For numeric build IDs (logs prefix), start listing from the known `latest-build.txt` value downward. Use GCS listing's `StartOffset`/`EndOffset` or prefix-based pagination.
+**Description**: When `listBuildIDs()` times out, propagate this to the template and display a warning banner: "Results may be incomplete — not all builds could be listed in time." The code already detects `DeadlineExceeded` at line 467 — just propagate a `ResultsIncomplete bool` flag to `jobHistoryTemplate` and render a banner in `job-history.html`.
+
+**Implementation outline**:
+1. Add `ResultsIncomplete bool` to `jobHistoryTemplate` struct
+2. Set it to `true` when `errors.Is(err, context.DeadlineExceeded)` at line 467
+3. Add a conditional banner div in `job-history.html`
 
 **Pros**:
-- Only fetches what's needed — no timeout required
-- Consistent results every time
-- Scales to any number of builds
-- Lower GCS API costs
+- Very simple change (~10 lines)
+- Sets correct user expectations immediately
+- Good safety net even after fixing the root cause
+- No architectural impact
 
 **Cons**:
-- GCS listing is lexicographic, not numeric — complex to map to numeric pagination
-- May not work well for PR logs (symlink `.txt` files)
-- More complex implementation
-- Total count of builds becomes expensive to compute
+- Doesn't fix the underlying problem
+- Users still see wrong data, just with a warning
 
 **Affected Components**:
-- `cmd/deck/job_history.go` — Rewrite `listBuildIDs` and `getJobHistory` pagination logic
+- `cmd/deck/job_history.go` — Add `ResultsIncomplete` field, set on timeout
+- `cmd/deck/template/job-history.html` — Add conditional banner
 
-**Complexity**: High
-**Backwards Compatibility**: Pagination links would change behavior
+**Complexity**: Very Low (Level 1)
+**Backwards Compatibility**: None
 
-#### Approach 3: Increase Timeout + Add Deterministic Fallback
+#### Approach 3: Progressive Loading (long-term UX improvement)
 
-**Description**: Increase the listing timeout (e.g., 30-60s) and, if it still fires, ensure results are deterministic by caching the partial result for a short TTL so refreshes return the same data.
+**Description**: Instead of server-side rendering the full page, return an initial page with the latest build info (from `latest-build.txt`) immediately, then progressively load older builds via AJAX. The page would show a loading indicator while older builds are being fetched.
+
+**Implementation outline**:
+1. Add a new JSON API endpoint (e.g., `/job-history-api/...`) that returns build data
+2. Initial page load shows the latest build immediately (from `latest-build.txt` + single `getBuildData` call)
+3. Frontend JS fetches additional builds asynchronously and appends rows to the table
+4. Could batch requests (e.g., fetch 5 builds at a time) for progressive rendering
 
 **Pros**:
-- Minimal code change
-- Fixes the symptom for most practical cases
-- Fallback cache ensures consistency even on timeout
+- Best user experience — page loads instantly with most relevant data
+- Older builds appear progressively, no timeout issues
+- Natural fit for modern web UX patterns
 
 **Cons**:
-- Doesn't address the fundamental scaling issue
-- Slower page loads for jobs with many builds
-- Still non-deterministic on first load if timeout fires
+- Significant frontend and backend changes
+- New API endpoint to maintain
+- More complex error handling (partial failures visible to user)
+- Major refactor of current server-rendered approach
 
-**Complexity**: Low
-**Backwards Compatibility**: None
+**Affected Components**:
+- `cmd/deck/job_history.go` — New JSON API endpoint
+- `cmd/deck/static/job-history/job-history.ts` — AJAX-based progressive loading
+- `cmd/deck/template/job-history.html` — Loading indicators
+- `cmd/deck/main.go` — Register new endpoint
+
+**Complexity**: High
+**Backwards Compatibility**: None (additive), but significant code churn
 
 #### Recommendation
 
-**Preferred Approach**: Approach 1 (Cache Build ID Listings)
+**Preferred Approach**: Approach 1 (Start Listing from Latest Build) + Approach 2 (Banner) as a complementary safety net.
 
-This provides the best balance of fix quality, implementation complexity, and user experience. It directly addresses both the non-determinism (same cached list = same results on refresh) and performance (no repeated GCS listings). The cache TTL of 1-5 minutes is acceptable for a history page — users don't need sub-minute freshness for historical data.
+Approach 1 directly fixes the root cause by ensuring the most relevant (recent) builds are always listed, regardless of total history size. The key insight is that we already know the latest build ID — we just need to use that knowledge to scope the GCS listing. Approach 2 adds a low-cost safety net for edge cases where even the scoped listing might timeout.
 
-Approach 2 would be the ideal long-term solution but is significantly more complex and may require rethinking the entire pagination model.
+Approach 3 is the ideal long-term UX but is a much larger effort and should be considered separately.
 
 **Key Implementation Considerations**:
-1. Use a sync.Map or mutex-protected map keyed by `(bucket, root)` for the cache
-2. Cache both the sorted build ID list and the total count
-3. Consider a background refresh goroutine to keep the cache warm
-4. Add a cache-busting query parameter for users who need fresh data
+1. The `Opener.Iterator` interface change needs careful design — consider adding an optional `ListOptions` struct rather than modifying the existing signature
+2. The StartOffset heuristic could use the latest build ID minus a configurable buffer, with a generous default
+3. The banner should be non-intrusive (e.g., a yellow info bar, not a blocking modal)
+4. Both approaches 1 and 2 should be testable with the existing `fakestorage` test infrastructure
 
 **Testing Requirements**:
-- Test that repeated requests return consistent results
-- Test cache expiration behavior
-- Test concurrent cache access
-- Test behavior when cache is cold (first request)
+- Test that listing with StartOffset returns only recent builds
+- Test that the banner appears when listing times out
+- Test pagination consistency with the scoped listing
+- Test the StartOffset heuristic with various build ID patterns
 
 ## Effort Assessment
 
@@ -212,48 +246,48 @@ Approach 2 would be the ideal long-term solution but is significantly more compl
 
 ### Summary
 
-Adding a build ID listing cache to `cmd/deck/job_history.go` is a well-defined change with a clear solution approach. It requires understanding of Go concurrency (sync.Map or mutexes) and Deck's request handling, but doesn't touch core architecture or introduce breaking changes.
+The recommended fix has two parts: (1) use `StartOffset` in GCS listing to scope to recent builds using knowledge from `latest-build.txt` (fixes root cause), and (2) add an incomplete-results banner as a safety net (simple UX improvement). Together, they require changes to the `Opener.Iterator` interface in `pkg/io` and the job history handler in `cmd/deck`, touching ~3-4 files with moderate complexity.
 
 ### Factor Analysis
 
 #### Scope of Changes
-- **Assessment**: Small-to-Moderate
-- **Details**: Primary changes in 1-2 files (`job_history.go`, possibly `main.go` for cache initialization). Estimated ~100-200 lines for the cache implementation, cache key logic, and TTL expiration. Test file updates needed.
-- **Level Indication**: 1-2
+- **Assessment**: Moderate
+- **Details**: Changes span `pkg/io/opener.go` (Iterator interface + GCS query), `cmd/deck/job_history.go` (listing logic + template data), `cmd/deck/template/job-history.html` (banner), plus test updates. Estimated ~150-250 lines across 3-4 files.
+- **Level Indication**: 2-3
 
 #### Complexity
 - **Assessment**: Moderate
-- **Details**: Requires concurrent-safe cache implementation (sync.Map or mutex-guarded map), TTL-based expiration, and careful key design for `(storageProvider, bucket, root)` tuples. The cache logic itself is straightforward, but thread safety under concurrent HTTP requests needs care.
+- **Details**: The core change (adding `StartOffset` to GCS query) is straightforward, but requires: (a) designing a backwards-compatible interface extension for `Opener.Iterator`, (b) a heuristic for computing the right StartOffset from the latest build ID, (c) handling both GCS and S3 backends. The banner part is trivial.
 - **Level Indication**: 2-3
 
 #### Required Expertise
 - **Assessment**: Moderate
-- **Details**: Requires familiarity with Go concurrency primitives (sync.Map, sync.Mutex, or sync.RWMutex), understanding of Deck's HTTP handler lifecycle, and knowledge of how GCS listing works. No deep Prow-specific architecture knowledge needed.
+- **Details**: Requires understanding of GCS listing APIs (`storage.Query.StartOffset`), the `pkg/io` abstraction layer, and how build IDs relate to lexicographic ordering. No deep Prow-specific architecture knowledge needed beyond Deck's job history handler.
 - **Level Indication**: 2-3
 
 #### Clarity and Certainty
-- **Assessment**: Well-defined
-- **Details**: Root cause is clearly identified (10s timeout + partial listing). Caching approach is well-understood and commonly implemented. The only open design question is TTL value and whether to support cache-busting.
-- **Level Indication**: 1-2
+- **Assessment**: Well-defined with minor uncertainty
+- **Details**: Root cause is clearly identified. The StartOffset approach is sound, but the heuristic for computing the offset needs tuning (how far back from latest to start). Also needs investigation into whether S3's gocloud/blob supports equivalent offset parameters.
+- **Level Indication**: 2
 
 #### Testing Requirements
 - **Assessment**: Moderate
-- **Details**: Need to test cache hit/miss behavior, TTL expiration, concurrent access safety, and that results are consistent across multiple calls. Existing `fakestorage`-based test infrastructure can be extended. No new test infrastructure needed.
+- **Details**: Need to test that scoped listing returns recent builds, that the banner appears on timeout, and that pagination works with the scoped listing. Existing `fakestorage`-based test infrastructure can be extended.
 - **Level Indication**: 2-3
 
 #### Backwards Compatibility
 - **Assessment**: Fully compatible
-- **Details**: Purely additive — adds caching layer between existing HTTP handler and GCS listing. No behavior change from the user's perspective except more consistent results and potentially slightly stale data (by TTL duration).
+- **Details**: The `Iterator` interface change should be additive (e.g., optional `ListOptions` struct). The banner is purely additive. No behavior changes for existing callers.
 - **Level Indication**: 1-2
 
 #### Architectural Alignment
 - **Assessment**: Good fit
-- **Details**: Caching is a common pattern in web servers. Deck already handles concurrent requests. Adding an in-memory cache fits naturally into the existing architecture without introducing new patterns.
+- **Details**: Using GCS query parameters to scope listings is the intended way to optimize GCS access. Adding `StartOffset` support to the `Opener` interface is a natural extension. The banner follows existing template patterns.
 - **Level Indication**: 1-2
 
 #### External Dependencies
-- **Assessment**: None
-- **Details**: The fix is entirely within Prow's codebase. No external API changes or new dependencies needed.
+- **Assessment**: Well-supported
+- **Details**: GCS `storage.Query.StartOffset` is a stable, documented API. S3/gocloud equivalent needs verification but should be available.
 - **Level Indication**: 1-3
 
 ### Recommended Labels
@@ -261,27 +295,27 @@ Adding a build ID listing cache to `cmd/deck/job_history.go` is a well-defined c
 - [x] `help-wanted`: Well-defined, moderate scope, suitable for skilled contributors
 - [x] `area/deck`: Bug is in Deck's job history handler
 - [x] `kind/bug`: Incorrect display behavior caused by code defect
-- [ ] `good-first-issue`: Requires Go concurrency knowledge, not ideal for first-timers
+- [ ] `good-first-issue`: Requires understanding of GCS APIs and the pkg/io abstraction, not ideal for first-timers
 
 ### Guidance for Contributors
 
-- Suitable for contributors familiar with Go concurrency and web server caching patterns
+- Suitable for contributors familiar with GCS APIs and Go interface design
 - Should review:
   - `cmd/deck/job_history.go`: `getJobHistory()` and `listBuildIDs()` functions
+  - `pkg/io/opener.go`: `Iterator()` method and GCS query construction
   - `cmd/deck/job_history_test.go`: Existing test patterns with `fakestorage`
-  - Go standard library `sync` package documentation
+  - GCS `storage.Query` documentation for `StartOffset` field
 - Recommended approach:
-  1. Add a package-level cache (sync.Map or mutex-guarded map) keyed by `(storageProvider, bucketName, root)`
-  2. Cache entries should store sorted `[]uint64` build IDs and a timestamp
-  3. On cache hit with valid TTL, skip `listBuildIDs()` and use cached results
-  4. On cache miss or expired TTL, call `listBuildIDs()` and update cache
-  5. Consider using `sync.Once`-style loading to prevent thundering herd on cold cache
+  1. Extend `Opener.Iterator` to accept an optional `StartOffset` (consider a `ListOptions` struct for future extensibility)
+  2. In `getJobHistory()`, after reading `latest-build.txt`, compute a `StartOffset` to scope the listing to recent builds
+  3. Add `ResultsIncomplete bool` to template data, set on `DeadlineExceeded`, render as a warning banner
+  4. Update tests for both the scoped listing and the banner
 
 ### Caveats and Considerations
 
 - Since #680 is a duplicate of #388, the effort assessment applies to the fix tracked under #388
 - The `area/podutils/gcsupload` label on #388 may be misleading — the bug is in Deck, not in gcsupload. The label was likely added because the issue mentions GCS, but the root cause is in Deck's listing logic.
-- An alternative minimal fix (just increasing the timeout) would be Level 1, but wouldn't properly solve the underlying issue for very large job histories.
+- The banner (Approach 2) alone would be a Level 1 fix and could be shipped independently as a quick win
 
 ## Proposed Issue Augmentation
 
@@ -294,9 +328,9 @@ Adding a build ID listing cache to `cmd/deck/job_history.go` is a well-defined c
 ```
 This is a duplicate of #388, which reports the same symptom on a different Prow instance (prow.ci.openshift.org). Thank you for confirming this affects multiple instances — it helps establish this is a systemic bug in Prow, not an instance-specific issue.
 
-The root cause is in Deck's job history handler (`cmd/deck/job_history.go`). When loading the page, Deck lists all build IDs from cloud storage (GCS/S3) with a hard-coded **10-second timeout**. For jobs with many builds, this listing often exceeds the timeout. When it does, the code silently proceeds with whatever partial results were returned before the deadline. Since GCS returns objects in lexicographic order — not chronological — a partial listing produces an arbitrary subset of builds that changes with each request depending on network latency and GCS server load.
+The root cause is in Deck's job history handler (`cmd/deck/job_history.go`). When loading the page, Deck lists all build IDs from cloud storage (GCS/S3) with a hard-coded **10-second timeout**. For jobs with many builds, this listing often exceeds the timeout. When it does, the code silently proceeds with whatever partial results were returned before the deadline. Since GCS lists objects in lexicographic order starting from the oldest, the timeout always cuts off the **newest** builds — the ones users actually want to see. Each request gets a different amount of data depending on network latency, causing the inconsistent display.
 
-The fix would involve caching the build ID listing so that repeated requests return consistent results. See #388 for tracking.
+The fix involves two parts: (1) using knowledge of the latest build ID (already read from `latest-build.txt`) to scope the GCS listing to recent builds via `StartOffset`, so only relevant builds are fetched, and (2) adding an "incomplete results" banner as a safety net when listings still timeout. See #388 for tracking.
 
 /kind bug
 /area deck
@@ -306,8 +340,9 @@ The fix would involve caching the build ID listing so that repeated requests ret
 
 **What's being added**:
 - Root cause explanation: the original issue describes the symptom but not why it happens
+- Key insight about lexicographic ordering: timeout cuts off newest builds, not random ones
 - Technical pointer to the specific code location
-- Explanation of why results vary between requests (lexicographic vs chronological ordering)
+- Solution direction (StartOffset + banner)
 - Cross-reference to the primary issue (#388)
 
 **Why these labels**:
@@ -317,7 +352,6 @@ The fix would involve caching the build ID listing so that repeated requests ret
 **What's NOT included**:
 - `/help-wanted`: Not adding to the duplicate — the label already exists on #388
 - No `/retitle`: Title is already clear and descriptive
-- No solution details: Those belong on #388, not the duplicate
 - No `/close`: The maintainer will close it as duplicate after reviewing
 
 ## Next Steps

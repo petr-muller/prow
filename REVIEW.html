@@ -1,0 +1,571 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #614 Review — cherrypicker non-org-member label feedback</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --red: #f85149;
+    --yellow: #d29922;
+    --orange: #db6d28;
+    --purple: #bc8cff;
+    --code-bg: #1c2128;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  h1 a { color: var(--accent); text-decoration: none; }
+  h1 a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 1.15rem;
+    margin: 1.8rem 0 0.6rem;
+    color: var(--accent);
+  }
+  h3 { font-size: 1rem; margin: 1rem 0 0.4rem; color: var(--text); }
+  p, li { color: var(--text); margin-bottom: 0.4rem; }
+  ul { padding-left: 1.4rem; margin-bottom: 0.8rem; }
+  .meta {
+    display: flex; gap: 1.5rem; flex-wrap: wrap;
+    color: var(--text-muted); font-size: 0.85rem;
+    margin-bottom: 1.5rem;
+  }
+  .meta span { display: inline-flex; align-items: center; gap: 0.3rem; }
+  .badge {
+    display: inline-block;
+    padding: 0.15rem 0.55rem;
+    border-radius: 1rem;
+    font-size: 0.75rem;
+    font-weight: 600;
+    vertical-align: middle;
+  }
+  .badge-open { background: #23863630; color: var(--green); border: 1px solid #23863650; }
+  .badge-size { background: #d2992230; color: var(--yellow); border: 1px solid #d2992250; }
+  .badge-approve { background: #3fb95030; color: var(--green); border: 1px solid #3fb95050; }
+  .badge-comment { background: #58a6ff30; color: var(--accent); border: 1px solid #58a6ff50; }
+  .badge-low { background: #3fb95030; color: var(--green); border: 1px solid #3fb95050; }
+  .badge-merge { background: #3fb95030; color: var(--green); border: 1px solid #3fb95050; font-size: 0.9rem; }
+
+  .gate-banner {
+    background: #3fb95015;
+    border: 1px solid #3fb95040;
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+  }
+  .gate-banner .gate-icon { font-size: 1.5rem; }
+  .gate-banner .gate-text { flex: 1; }
+  .gate-banner .gate-label { font-weight: 700; font-size: 1rem; color: var(--green); }
+  .gate-banner .gate-detail { font-size: 0.85rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 0.8rem;
+  }
+  .card.positive { border-left: 3px solid var(--green); }
+  .card.issue    { border-left: 3px solid var(--yellow); }
+  .card.suggestion { border-left: 3px solid var(--purple); }
+  .card.verdict  { border-left: 3px solid var(--accent); }
+  .card.converging { border-left: 3px solid var(--orange); }
+  .card.perspective { border-left: 3px solid var(--text-muted); }
+
+  .card-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .card-title .icon { font-size: 1.1rem; }
+  .card p, .card li { font-size: 0.9rem; }
+
+  .severity {
+    display: inline-block;
+    padding: 0.1rem 0.45rem;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .sev-medium { background: #d2992230; color: var(--yellow); }
+  .sev-low    { background: #8b949e20; color: var(--text-muted); }
+  .sev-nit    { background: #8b949e15; color: var(--text-muted); }
+
+  .file-ref {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.82rem;
+    color: var(--accent);
+    background: var(--code-bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0.6rem 0;
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85rem;
+  }
+  pre code { color: var(--text); }
+  .diff-add { color: var(--green); }
+  .diff-del { color: var(--red); }
+  .diff-ctx { color: var(--text-muted); }
+
+  .checklist { list-style: none; padding-left: 0; }
+  .checklist li {
+    padding: 0.3rem 0;
+    padding-left: 1.6rem;
+    position: relative;
+  }
+  .checklist li::before {
+    content: '';
+    position: absolute;
+    left: 0; top: 0.55rem;
+    width: 14px; height: 14px;
+    border: 1.5px solid var(--border);
+    border-radius: 3px;
+    background: var(--surface);
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .toc-title { font-weight: 600; font-size: 0.85rem; color: var(--text-muted); margin-bottom: 0.4rem; }
+  .toc ul { list-style: none; padding-left: 0; margin: 0; }
+  .toc li { padding: 0.15rem 0; font-size: 0.88rem; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+
+  .files-changed {
+    display: flex; gap: 0.5rem; flex-wrap: wrap;
+    margin-bottom: 1rem;
+  }
+  .file-chip {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    font-family: monospace;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+  }
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+
+  .perspective-header {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin-bottom: 0.6rem;
+  }
+  .perspective-header h3 {
+    margin: 0;
+    font-size: 1.05rem;
+  }
+  .reviewer-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr 1fr;
+    gap: 0.8rem;
+    margin-bottom: 1rem;
+  }
+  @media (max-width: 700px) {
+    .reviewer-grid { grid-template-columns: 1fr; }
+  }
+  .reviewer-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    text-align: center;
+  }
+  .reviewer-card .role { font-weight: 600; font-size: 0.9rem; margin-bottom: 0.3rem; }
+  .reviewer-card .verdict-line { font-size: 0.82rem; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<h1>
+  Review: <a href="https://github.com/kubernetes-sigs/prow/pull/614">#614</a>
+  &mdash; cherrypicker: comment when label is ignored for non-org member
+</h1>
+
+<div class="meta">
+  <span><span class="badge badge-open">OPEN</span></span>
+  <span>Author: <strong>valen-mascarenhas14</strong></span>
+  <span><span class="badge badge-size">size/L</span> +187 / &minus;25</span>
+  <span>Fixes: <a href="https://github.com/kubernetes-sigs/prow/issues/468" style="color:var(--accent)">#468</a></span>
+</div>
+
+<div class="files-changed">
+  <span class="file-chip">cmd/external-plugins/cherrypicker/server.go</span>
+  <span class="file-chip">cmd/external-plugins/cherrypicker/server_test.go</span>
+</div>
+
+<div class="toc">
+  <div class="toc-title">Contents</div>
+  <ul>
+    <li><a href="#gate">Merge gate decision</a></li>
+    <li><a href="#overview">Overview</a></li>
+    <li><a href="#perspectives">Reviewer perspectives</a></li>
+    <li><a href="#converging">Converging concerns</a></li>
+    <li><a href="#positive">What looks good</a></li>
+    <li><a href="#issues">Issues</a></li>
+    <li><a href="#suggestions">Suggestions</a></li>
+    <li><a href="#verdict">Advisor verdict</a></li>
+    <li><a href="#checklist">Review checklist</a></li>
+  </ul>
+</div>
+
+<!-- GATE DECISION -->
+<h2 id="gate">Merge gate decision</h2>
+
+<div class="gate-banner">
+  <div class="gate-icon">&#10004;</div>
+  <div class="gate-text">
+    <div class="gate-label">MERGE</div>
+    <div class="gate-detail">Gate check passed &mdash; no show-stoppers found (2026-04-14, 2nd pass)</div>
+  </div>
+  <span class="badge badge-merge">CLEAR TO MERGE</span>
+</div>
+
+<div class="card verdict">
+  <div class="card-title">Gate Rationale</div>
+  <p>
+    Second gate pass (2026-04-14) confirms the earlier finding: all three reviewers independently
+    concluded APPROVE with no critical issues. The PR adds a well-tested, low-risk behavioral
+    change and includes a clean refactoring that improves readability. No bugs, regressions, or
+    deployment-breaking changes were identified. No new concerns since the first gate check.
+  </p>
+  <h3 style="margin-top:0.8rem;">Non-Blocking Observations</h3>
+  <ul>
+    <li>The non-member&rsquo;s cherry-pick label is not removed after rejection, which could be
+      mildly confusing. Pre-existing behavior, worth a follow-up issue.</li>
+    <li><code>IsMember</code> vs <code>ListOrgMembers</code> inconsistency between the two
+      code paths is now more visible after the refactor; worth noting for future caching work.</li>
+  </ul>
+</div>
+
+<hr>
+
+<!-- OVERVIEW -->
+<h2 id="overview">Overview</h2>
+<p>
+  Refactors <code>handlePullRequest</code> into two focused handlers
+  (<code>handlePullRequestLabelAdded</code>, <code>handlePullRequestClosed</code>)
+  and adds an explicit GitHub comment when a cherry-pick label is ignored because the
+  PR author is not an org member. Previously this was silent.
+</p>
+<p>
+  The refactor also removes the <code>foundCherryPickComments</code> /
+  <code>foundCherryPickLabels</code> bookkeeping in the closed-PR path, replacing it
+  with a simpler <code>len(requesterToComments) == 0</code> check.
+</p>
+
+<!-- PERSPECTIVES -->
+<h2 id="perspectives">Reviewer perspectives</h2>
+
+<div class="reviewer-grid">
+  <div class="reviewer-card">
+    <div class="role">Code Quality</div>
+    <div class="verdict-line"><span class="badge badge-comment">COMMENT</span></div>
+    <p style="font-size:0.8rem; margin-top:0.4rem; color:var(--text-muted)">Senior Go engineer</p>
+  </div>
+  <div class="reviewer-card">
+    <div class="role">Maintainability</div>
+    <div class="verdict-line"><span class="badge badge-approve">APPROVE</span></div>
+    <p style="font-size:0.8rem; margin-top:0.4rem; color:var(--text-muted)">Burden: LOW</p>
+  </div>
+  <div class="reviewer-card">
+    <div class="role">Deployment Risk</div>
+    <div class="verdict-line"><span class="badge badge-low">LOW RISK</span></div>
+    <p style="font-size:0.8rem; margin-top:0.4rem; color:var(--text-muted)">No breaking changes</p>
+  </div>
+</div>
+
+<!-- CONVERGING CONCERNS -->
+<h2 id="converging">Converging concerns</h2>
+<p style="font-size:0.88rem; color:var(--text-muted); margin-bottom:0.8rem;">
+  Issues independently flagged by two or more reviewers carry the most weight.
+</p>
+
+<div class="card converging">
+  <div class="card-title">
+    <span class="severity sev-medium">converging</span>
+    Non-member rejection swallows <code>createComment</code> error
+  </div>
+  <p>
+    Flagged by: <strong>Code Quality</strong> + <strong>Maintainability</strong>
+  </p>
+  <p>
+    In <code>handlePullRequestLabelAdded</code>, if <code>createComment</code> fails, the
+    error is logged but the function returns <code>nil</code>. In the comment-based path
+    (<code>handleIssueComment</code>), equivalent errors are returned. A transient GitHub
+    API failure here means the rejection comment is silently lost with no retry.
+    Inconsistency makes debugging harder.
+  </p>
+  <p><span class="file-ref">server.go:366-370</span></p>
+</div>
+
+<div class="card converging">
+  <div class="card-title">
+    <span class="severity sev-medium">converging</span>
+    <code>PullRequestActionOpened</code> silently dropped
+  </div>
+  <p>
+    Flagged by: <strong>Code Quality</strong> + <strong>Maintainability</strong>
+  </p>
+  <p>
+    The original code accepted this action but immediately bailed at the
+    <code>!pr.Merged</code> check (opened PRs are never merged). Dropping it is functionally
+    a no-op, but the removal is a behavioral change not mentioned in the PR description.
+    A brief note in the description or a code comment would help.
+  </p>
+</div>
+
+<div class="card converging">
+  <div class="card-title">
+    <span class="severity sev-medium">converging</span>
+    Inconsistent membership checking: <code>IsMember</code> vs <code>ListOrgMembers</code>
+  </div>
+  <p>
+    Flagged by: <strong>Code Quality</strong> + <strong>Maintainability</strong> (noted positively by <strong>Deployment Risk</strong>)
+  </p>
+  <p>
+    The label path uses <code>IsMember(org, prAuthor)</code> (single-user API call) while
+    the closed path uses <code>ListOrgMembers()</code> (fetches all members). The
+    <code>IsMember</code> approach is actually better for API rate limits at scale, and is
+    consistent with <code>handleIssueComment</code>. However, a code comment should explain
+    why the PR author is checked (GitHub does not expose who added a label in the
+    <code>PullRequestEvent</code> payload).
+  </p>
+  <p><span class="file-ref">server.go:360-372</span> vs <span class="file-ref">server.go:475</span></p>
+</div>
+
+<!-- POSITIVE -->
+<h2 id="positive">What looks good</h2>
+
+<div class="card positive">
+  <div class="card-title"><span class="icon">&#10003;</span> Clean structural split</div>
+  <p>
+    Splitting by action into dedicated handlers is easier to follow than the original
+    monolith with interleaved conditionals. Each handler has a single, clear responsibility.
+    Removes confusing <code>foundCherryPickComments</code> / <code>foundCherryPickLabels</code>
+    boolean flags.
+  </p>
+</div>
+
+<div class="card positive">
+  <div class="card-title"><span class="icon">&#10003;</span> Correct simplification in <code>handlePullRequestClosed</code></div>
+  <p>
+    Moving the <code>requesterToComments[pr.User.Login]</code> map init inside the label
+    loop and replacing the two boolean flags with <code>len(requesterToComments) == 0</code>
+    is equivalent and simpler. A subtle correctness fix that avoids creating the inner map
+    when there are no cherry-pick labels.
+  </p>
+</div>
+
+<div class="card positive">
+  <div class="card-title"><span class="icon">&#10003;</span> Handles unmerged PRs gracefully</div>
+  <p>
+    The new <code>handlePullRequestLabelAdded</code> responds to labels on unmerged PRs with
+    a &ldquo;will cherry-pick once merged&rdquo; message. Previously, labels on unmerged PRs
+    were silently dropped. Good UX improvement.
+  </p>
+</div>
+
+<div class="card positive">
+  <div class="card-title"><span class="icon">&#10003;</span> Reuses existing <code>notOrgMemberMessageTemplate</code></div>
+  <p>
+    Consistent messaging with the comment-based cherry-pick path. No new templates or
+    string formats introduced.
+  </p>
+</div>
+
+<div class="card positive">
+  <div class="card-title"><span class="icon">&#10003;</span> Well-scoped tests</div>
+  <p>
+    <code>TestHandlePullRequestLabelAdded_BaseEqualsTarget</code> and
+    <code>TestHandlePullRequestLabelAdded_NonMemberRejected</code>
+    test behavior, not implementation details. Existing <code>testCherryPickPRWithLabels</code>
+    properly updated to set <code>event.Label</code> for labeled events &mdash; fixing a
+    pre-existing test gap.
+  </p>
+</div>
+
+<div class="card positive">
+  <div class="card-title"><span class="icon">&#10003;</span> Better API efficiency for label events</div>
+  <p>
+    Using <code>IsMember</code> (one API call) instead of <code>ListOrgMembers</code>
+    (potentially paginated) for the label path is a positive change for GitHub API rate
+    limits at scale. Label events now also process only the triggering label rather than
+    re-scanning all labels, reducing duplicate processing.
+  </p>
+</div>
+
+<!-- ISSUES -->
+<h2 id="issues">Issues</h2>
+
+<div class="card issue">
+  <div class="card-title">
+    <span class="severity sev-medium">medium</span>
+    1. Rejected label is not removed from the PR
+  </div>
+  <p>
+    When a non-member&rsquo;s label is rejected, the label stays on the PR. If the PR
+    later merges, <code>handlePullRequestClosed</code> picks up that label again and
+    silently drops it (filtered by <code>ListOrgMembers</code>). This works but is
+    confusing for users &mdash; the label lingers despite the rejection comment.
+  </p>
+  <p>
+    Consider removing the label after posting the rejection comment. Same issue applies
+    when <code>targetBranch == baseBranch</code>.
+  </p>
+  <p><span class="file-ref">server.go:366-371</span></p>
+</div>
+
+<div class="card issue">
+  <div class="card-title">
+    <span class="severity sev-nit">nit</span>
+    2. Missing trailing newline in <code>server_test.go</code>
+  </div>
+  <p>
+    The diff shows <code>\ No newline at end of file</code>. Should be fixed.
+  </p>
+  <p><span class="file-ref">server_test.go:1461</span></p>
+</div>
+
+<div class="card issue">
+  <div class="card-title">
+    <span class="severity sev-nit">nit</span>
+    3. Inconsistent <code>botUser</code> setup in new tests
+  </div>
+  <p>
+    <code>TestHandlePullRequestLabelAdded_BaseEqualsTarget</code> sets <code>botUser</code>
+    on the server, but <code>TestHandlePullRequestLabelAdded_NonMemberRejected</code> does
+    not. Neither path uses it, so both should omit it for consistency.
+  </p>
+</div>
+
+<!-- SUGGESTIONS -->
+<h2 id="suggestions">Suggestions</h2>
+
+<div class="card suggestion">
+  <div class="card-title"><span class="icon">&#9672;</span> Add code comment at <code>IsMember</code> call</div>
+  <p>
+    Explain that the label event payload does not identify who added the label, so checking
+    the PR author is the best available proxy. This prevents future maintainers from
+    &ldquo;fixing&rdquo; something that is an intentional trade-off.
+  </p>
+  <p><span class="file-ref">server.go:360-372</span></p>
+</div>
+
+<div class="card suggestion">
+  <div class="card-title"><span class="icon">&#9672;</span> Propagate <code>createComment</code> error</div>
+  <p>
+    Return the error from <code>createComment</code> instead of swallowing it, for
+    consistency with other error handling paths. If swallowing is intentional (e.g., to
+    avoid retries that would re-trigger the label event), add a comment explaining why.
+  </p>
+  <p><span class="file-ref">server.go:366-370</span></p>
+</div>
+
+<div class="card suggestion">
+  <div class="card-title"><span class="icon">&#9672;</span> Remove rejected label after posting comment</div>
+  <p>After posting the rejection comment in <code>handlePullRequestLabelAdded</code>:</p>
+<pre><code><span class="diff-ctx"> if !ok {
+     resp := fmt.Sprintf(notOrgMemberMessageTemplate, org, org, org, prAuthor)
+     if err := s.createComment(log, org, repo, num, nil, resp); err != nil {
+         log.WithError(err).WithField("response", resp).Error("Failed to create comment.")
+     }</span>
+<span class="diff-add">+    if err := s.ghc.RemoveLabel(org, repo, num, pre.Label.Name); err != nil {
++        log.WithError(err).Error("Failed to remove rejected cherry-pick label.")
++    }</span>
+<span class="diff-ctx">     return log, nil
+ }</span></code></pre>
+</div>
+
+<div class="card suggestion">
+  <div class="card-title"><span class="icon">&#9672;</span> Update PR description</div>
+  <p>
+    Mention the removal of <code>PullRequestActionOpened</code> handling and why it was
+    safe to drop. This helps reviewers and future changelog readers.
+  </p>
+</div>
+
+<!-- VERDICT -->
+<h2 id="verdict">Advisor verdict</h2>
+
+<div class="card verdict">
+  <div class="card-title">
+    <span class="badge badge-approve" style="font-size:0.85rem;">APPROVE WITH SUGGESTIONS</span>
+  </div>
+  <p>
+    All three reviewers agree this is a well-structured, low-risk change that improves both
+    code organization and user experience. No critical or blocking issues were identified.
+    The concerns raised are real but non-blocking: edge-case UX imperfections and minor code
+    hygiene items, not correctness bugs or deployment risks.
+  </p>
+  <p style="margin-top:0.6rem;">
+    The core idea is sound and the refactoring improves readability. The missing trailing
+    newline should be fixed before merge. The label removal, error handling, and code comment
+    suggestions are worth discussing with the author. The rest are minor.
+  </p>
+</div>
+
+<!-- CHECKLIST -->
+<h2 id="checklist">Review checklist</h2>
+<ul class="checklist">
+  <li>Trailing newline restored in <code>server_test.go</code></li>
+  <li>Add code comment explaining <code>IsMember</code> on PR author (GitHub API limitation)</li>
+  <li>Discuss: propagate <code>createComment</code> error or document why it is swallowed?</li>
+  <li>Discuss: remove rejected label after posting comment?</li>
+  <li>Update PR description to note <code>PullRequestActionOpened</code> removal</li>
+  <li>Consistent <code>botUser</code> setup in new tests</li>
+  <li>Tests pass (<code>go test ./cmd/external-plugins/cherrypicker/...</code>)</li>
+</ul>
+
+<hr>
+<p style="font-size:0.78rem; color:var(--text-muted); text-align:center;">
+  Generated 2026-04-09, gate checks 2026-04-10 &amp; 2026-04-14 &mdash; kubernetes-sigs/prow#614 &mdash; Multi-perspective maintainer review
+</p>
+
+</body>
+</html>

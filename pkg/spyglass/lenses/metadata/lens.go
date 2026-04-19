@@ -248,6 +248,14 @@ func hintFromPodInfo(buf []byte) string {
 		if ic.Ready {
 			continue
 		}
+		// Sidecar containers (init containers with restartPolicy=Always) have
+		// Ready=false after pod completion because they've been terminated. A
+		// clean termination (exit code 0) is expected and not a failure signal.
+		if isSidecarContainer(report.Pod.Spec.InitContainers, ic.Name) {
+			if state := ic.State.Terminated; state != nil && state.ExitCode == 0 {
+				continue
+			}
+		}
 		var msg string
 		// Init container not ready by the time this job failed
 		// The 3 different states should be mutually exclusive, if it happens
@@ -260,9 +268,22 @@ func hintFromPodInfo(buf []byte) string {
 			// Yes this is weird, but it did happened https://github.com/kubernetes/test-infra/issues/21985
 			msg = "state: running"
 		}
-		msgs = append(msgs, fmt.Sprintf("Init container %s not ready: (%s)", ic.Name, msg))
+		if isSidecarContainer(report.Pod.Spec.InitContainers, ic.Name) {
+			msgs = append(msgs, fmt.Sprintf("Sidecar container %s terminated with error: (%s)", ic.Name, msg))
+		} else {
+			msgs = append(msgs, fmt.Sprintf("Init container %s not ready: (%s)", ic.Name, msg))
+		}
 	}
 	return strings.Join(msgs, "\n")
+}
+
+func isSidecarContainer(initContainers []v1.Container, name string) bool {
+	for _, ic := range initContainers {
+		if ic.Name == name {
+			return ic.RestartPolicy != nil && *ic.RestartPolicy == v1.ContainerRestartPolicyAlways
+		}
+	}
+	return false
 }
 
 func hintFromProwJob(buf []byte) (string, bool) {

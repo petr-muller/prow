@@ -37,6 +37,11 @@ import (
 
 type FakeArtifact = fake.Artifact
 
+func containerRestartPolicyAlways() *v1.ContainerRestartPolicy {
+	p := v1.ContainerRestartPolicyAlways
+	return &p
+}
+
 // TestCheckTimestamps checks the way in which the started.json and
 // finished.json files affect the view. For example, a negative duration should
 // result in a warning for the user.
@@ -513,6 +518,112 @@ func TestHintFromPodInfo(t *testing.T) {
 								State: v1.ContainerState{
 									Waiting: &v1.ContainerStateWaiting{
 										Reason: "PodInitializing",
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:     "sidecar container terminated cleanly is not reported",
+			expected: "",
+			info: k8sreporter.PodReport{
+				Pod: &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "8ef160fc-46b6-11ea-a907-1a9873703b03",
+					},
+					Spec: v1.PodSpec{
+						InitContainers: []v1.Container{
+							{
+								Name:          "mongo-sidecar",
+								Image:         "mongo:latest",
+								RestartPolicy: containerRestartPolicyAlways(),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  "test",
+								Image: "gcr.io/k8s-staging-test-infra/kubekins-e2e:latest-master",
+							},
+						},
+					},
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						InitContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:  "mongo-sidecar",
+								Ready: false,
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										Reason:   "Completed",
+										ExitCode: 0,
+									},
+								},
+							},
+						},
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:  "test",
+								Ready: false,
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										Reason:   "Error",
+										ExitCode: 1,
+									},
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			name:     "sidecar container terminated with error is reported",
+			expected: "Sidecar container mongo-sidecar terminated with error: (state: terminated, reason: \"Error\", message: \"\")",
+			info: k8sreporter.PodReport{
+				Pod: &v1.Pod{
+					ObjectMeta: metav1.ObjectMeta{
+						Name: "8ef160fc-46b6-11ea-a907-1a9873703b03",
+					},
+					Spec: v1.PodSpec{
+						InitContainers: []v1.Container{
+							{
+								Name:          "mongo-sidecar",
+								Image:         "mongo:latest",
+								RestartPolicy: containerRestartPolicyAlways(),
+							},
+						},
+						Containers: []v1.Container{
+							{
+								Name:  "test",
+								Image: "gcr.io/k8s-staging-test-infra/kubekins-e2e:latest-master",
+							},
+						},
+					},
+					Status: v1.PodStatus{
+						Phase: v1.PodFailed,
+						InitContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:  "mongo-sidecar",
+								Ready: false,
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										Reason:   "Error",
+										ExitCode: 137,
+									},
+								},
+							},
+						},
+						ContainerStatuses: []v1.ContainerStatus{
+							{
+								Name:  "test",
+								Ready: false,
+								State: v1.ContainerState{
+									Terminated: &v1.ContainerStateTerminated{
+										Reason:   "Completed",
+										ExitCode: 0,
 									},
 								},
 							},

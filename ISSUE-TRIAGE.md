@@ -249,6 +249,152 @@ Suboptimal API design using two optional booleans to represent three mutually ex
 **Migration/Rollout Strategy**:
 Not applicable - this is an internal refactor with minimal external impact. The change can be made atomically in a single PR with all callers updated.
 
+### Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+**Summary**
+
+Well-defined refactoring with clear solution approach (enum replacement). Moderate scope (~4-5 files, ~200 LOC) with straightforward implementation, but involves breaking API change requiring careful handling. Suitable for contributors familiar with Go patterns and basic Prow structure.
+
+**Factor Analysis**
+
+#### Scope of Changes
+- **Assessment**: Small to Moderate
+- **Details**: 
+  - Core changes: 2 files (client_factory.go, remote.go)
+  - Test updates: 1-2 files (moonraker_test.go, new client_factory_test.go)
+  - Estimated ~200 lines modified/added
+  - Changes localized to pkg/git/v2 package
+- **Level Indication**: 1-2 (favors lower end due to localized scope)
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**:
+  - Straightforward enum definition using Go iota pattern
+  - Replace two-boolean logic with single switch statement
+  - No concurrency, algorithms, or race conditions
+  - Similar pattern exists in codebase (can learn from examples)
+  - Most complex part is ensuring all usage sites are updated
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**:
+  - Understanding of Go enums (iota pattern) - basic Go knowledge
+  - Familiarity with factory pattern and option functions
+  - Understanding pkg/git/v2 structure (can be learned from reading code)
+  - No deep Prow architectural knowledge required
+  - No domain expertise needed (GitHub API, Kubernetes, etc.)
+  - Learnable from existing code and documentation
+- **Level Indication**: 2-3 (moderate - can learn what's needed but not trivial)
+
+#### Clarity and Certainty
+- **Assessment**: Very Well-defined
+- **Details**:
+  - TODO comment explicitly suggests the solution ("combine into a single enum")
+  - Research phase identified clear recommended approach
+  - No trade-offs or multiple viable approaches - enum is clearly best
+  - Desired behavior is unambiguous
+  - All requirements are clear
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**:
+  - New unit tests for `NewClientFactory` scheme selection (3 test cases for 3 schemes)
+  - New unit test for `httpResolverFactory` HTTP vs HTTPS differentiation
+  - Update integration test (simple change: `UseInsecureHTTP` → `WithScheme(SchemeHTTP)`)
+  - Can follow existing test patterns from remote_test.go
+  - No integration test infrastructure needed (already exists)
+  - Standard table-driven test approach
+- **Level Indication**: 2-3 (moderate - needs new tests but patterns are clear)
+
+#### Backwards Compatibility
+- **Assessment**: Breaking API Change (but limited impact)
+- **Details**:
+  - Removes `UseInsecureHTTP` and `UseSSH` fields from public `ClientFactoryOpts` struct
+  - Breaks existing code using these fields directly or via `WithInsecureHTTP()`/`WithSSH()` helpers
+  - **Mitigation**: Only 1 external caller found (moonraker_test.go in same repo)
+  - pkg/git/v2 doesn't appear to have API stability guarantees
+  - No serialized config concerns (fields are runtime-only)
+  - Can be done atomically in single PR
+  - **Impact**: Low due to limited usage, but technically breaking
+- **Level Indication**: 2-3 (breaking change bumps from L1 to L2, but limited scope prevents L3)
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**:
+  - Directly addresses documented TODO in codebase
+  - Improves existing pattern without introducing new concepts
+  - Follows Go best practices (enum for mutually exclusive states)
+  - Aligns with Prow's code quality goals
+  - No contradiction with established patterns
+  - Makes API clearer and more maintainable
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**:
+  - Pure internal refactoring
+  - No external API dependencies
+  - No GitHub, Kubernetes, or other external system involvement
+  - All changes contained within pkg/git/v2 package
+- **Level Indication**: 1-3
+
+**Overall Determination**: **Level 2** - The breaking API change is the primary factor elevating this from Level 1 to Level 2. While the change is well-defined and straightforward, the backwards compatibility consideration requires care and understanding. However, the limited external impact (only 1 caller) and clear migration path keep this at Level 2 rather than Level 3.
+
+### Recommended Labels
+
+Based on this assessment:
+- [x] `help-wanted`: Appropriate for skilled contributor, well-defined scope
+- [x] `kind/cleanup`: Refactoring to improve code quality (addresses TODO)
+- [x] `area/git`: Changes to git v2 package
+- [ ] `good-first-issue`: Not recommended - breaking API change requires more than beginner-level understanding
+- [ ] `priority/*`: No priority label needed - quality improvement but not urgent
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- **Suitable for**: Contributors familiar with Go patterns and willing to learn Prow's git v2 package structure
+- **Should review before starting**:
+  - `pkg/git/v2/client_factory.go` - Current implementation and option pattern
+  - `pkg/git/v2/remote.go` - Remote resolver factories
+  - `pkg/git/v2/remote_test.go` - Test patterns to follow
+  - Go enum patterns using iota
+- **Recommended approach**:
+  1. Define `SchemeType` enum (HTTPS=0, HTTP, SSH)
+  2. Add `Scheme SchemeType` field to `ClientFactoryOpts`, remove boolean fields
+  3. Update `NewClientFactory` decision logic to switch on enum
+  4. Replace `WithInsecureHTTP`/`WithSSH` with `WithScheme` or remove helpers
+  5. Update `Apply` method to copy scheme field
+  6. Update moonraker_test.go to use new API
+  7. Add unit tests for all three schemes
+  8. Optional: Add `String()` method for debugging
+- **Key considerations**:
+  - Ensure zero value (HTTPS) is the default
+  - Update all option merging/copying logic
+  - Test all three scheme paths
+  - Consider adding scheme validation if needed
+- **Estimated time**: 2-4 hours for experienced Go developer
+
+### Caveats and Considerations
+
+**Positive factors**:
+- Very clear TODO comment makes this an "approved" refactoring
+- Limited blast radius (only 1 external caller)
+- No architectural complexity - pure API cleanup
+- Good learning opportunity for understanding Prow's git client structure
+
+**Challenges**:
+- First breaking API change for contributor might be intimidating
+- Need to find all usages (though grep shows only 3 files)
+- Should think about whether to keep old helpers with deprecation warnings (probably not needed given limited usage)
+
+**Alternative approach**: If breaking changes are a concern, could implement Approach 2 (deprecation-based) from research phase, but this seems like overkill given the limited external usage.
+
+**Recommendation for issue author**: The issue author offered to implement this - they should feel confident proceeding with Approach 1 (enum-based scheme type) as the cleanest solution.
+
 ## Next Steps
 
 - ✓ Initial validation complete - issue is LEGITIMATE

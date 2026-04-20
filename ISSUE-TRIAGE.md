@@ -143,7 +143,74 @@ The issue has evolved through maintainer discussion into something broader than 
 1. Add cross-reference from `getting-started-deploy.md` to `local-dev.md` (trivial PR)
 2. Contribution-path development guides (larger effort, could be separate issues)
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue) for remaining work
+
+### Summary
+
+The core request (local/Kind setup documentation) has already been implemented. The remaining work is a small cross-reference addition to `getting-started-deploy.md` — a trivial, well-defined documentation change. The broader contribution-path documentation vision is a separate, larger effort that should be tracked independently.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1 file (`getting-started-deploy.md`), ~5 lines to add a cross-reference note
+- **Level Indication**: 1
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Adding a paragraph/note pointing to `local-dev.md` for developers who want to explore locally
+- **Level Indication**: 1
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic markdown, understanding of the doc structure
+- **Level Indication**: 1
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The gap is clear (missing cross-reference), the solution is obvious (add one)
+- **Level Indication**: 1
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Documentation only — verify Hugo renders correctly, no code tests needed
+- **Level Indication**: 1
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Additive documentation change, no behavior impact
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Cross-referencing between related docs is standard practice
+- **Level Indication**: 1
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Internal documentation only
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Trivial cross-reference addition, perfect for newcomers
+- [x] `area/documentation`: Already applied
+- [x] `kind/cleanup`: Improving existing documentation
+- [ ] `help-needed`: Too simple for this label
+
+### Guidance for Contributors
+
+This is a great first contribution:
+1. Add a note near the top of `site/content/en/docs/getting-started-deploy.md` directing developers who want to explore/develop locally to the [Local Development Environment](/docs/local-dev/) guide
+2. The note should clarify that `local-dev.md` is for development/exploration without cloud infrastructure, while the deploy guide is for production-like deployments
+3. Submit a PR with the change
+
+### Caveats and Considerations
+
+The broader "Prow development guide" vision discussed by @BenTheElder and @petr-muller is a separate Level 2-3 effort that should be tracked in its own issue. That vision includes contribution-path-specific guides for Tide, Deck, ProwJob controllers, and Gerrit — each requiring domain expertise to write well.
+
 ## Next Steps
 
-- Assess effort for remaining work
 - Prepare augmentation comment

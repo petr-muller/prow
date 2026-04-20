@@ -395,7 +395,62 @@ Based on this assessment:
 
 **Recommendation for issue author**: The issue author offered to implement this - they should feel confident proceeding with Approach 1 (enum-based scheme type) as the cleanest solution.
 
-## Next Steps
+### Proposed Issue Augmentation
+
+**Title Change**:
+- **No change needed**: Current title is clear and specific. It references the TODO comment and indicates the proposed solution (enum). While it could be reworded to be slightly more descriptive (e.g., "Refactor git scheme selection to use enum instead of boolean flags"), the current title accurately reflects the issue and matches the TODO comment verbatim, which is helpful for searchability.
+
+**Proposed GitHub Comment**:
+
+```markdown
+## Root Cause
+
+The current implementation uses two optional boolean pointers (`UseInsecureHTTP` and `UseSSH`) to represent three mutually exclusive schemes (HTTPS, HTTP, SSH). This is a classic "tri-state boolean" anti-pattern that creates several issues:
+- **Ambiguity**: The comment says "UseInsecureHTTP overrides UseSSH" but this precedence isn't enforced—both could be set to true
+- **Implicit defaults**: HTTPS is the default when both are nil/false, requiring users to understand implementation details
+- **Difficult validation**: Can't statically enforce mutual exclusion with the current design
+
+## Implementation Details
+
+The core changes needed are:
+1. **Define enum**: Add `SchemeType` with values `SchemeHTTPS` (zero value), `SchemeHTTP`, and `SchemeSSH` in `pkg/git/v2/client_factory.go`
+2. **Update struct**: Replace `UseInsecureHTTP *bool` and `UseSSH *bool` with single `Scheme SchemeType` field in `ClientFactoryOpts`
+3. **Simplify logic**: Replace the 3-way branch in `NewClientFactory:314-329` with a switch on the enum
+4. **Update helpers**: Replace `WithInsecureHTTP()` and `WithSSH()` with `WithScheme(SchemeType)` or remove in favor of direct field access
+5. **Tests**: Add unit tests for scheme selection logic and update `test/integration/test/moonraker_test.go`
+
+Note: This is technically a breaking API change, but research shows only one external caller (`moonraker_test.go`), making migration straightforward.
+
+## Related Work
+
+The `httpResolverFactory.resolve()` method in `pkg/git/v2/remote.go:132-150` already has internal logic that switches between "http" and "https" schemes. The enum would make this decision path clearer throughout the codebase.
+
+/area git
+/kind cleanup
+/help-wanted
+```
+
+**Rationale**:
+
+**What's being added**:
+- **Root cause analysis**: Explains WHY the current design is problematic (tri-state boolean anti-pattern, ambiguity, validation issues) - not mentioned in original issue
+- **Technical implementation details**: Specific steps, files, and line numbers for the refactoring - original issue proposed enum but didn't specify implementation approach
+- **Breaking change mitigation**: Notes that while technically breaking, impact is minimal (1 caller) - important context for potential contributors
+- **Related code context**: Points to `httpResolverFactory.resolve()` which already has scheme-switching logic
+
+**Why these labels**:
+- `/area git`: Affects `pkg/git/v2` package exclusively - this is the git client component
+- `/kind cleanup`: This is a refactoring/code quality improvement addressing a documented TODO, not a bug fix or new feature
+- `/help-wanted`: Based on Level 2 effort assessment - well-defined refactoring suitable for contributors familiar with Go patterns. Not `good-first-issue` because it involves a breaking API change and requires understanding of the git client structure
+
+**What's NOT included**:
+- **Detailed solution approaches**: The triage research identified three possible approaches (direct enum, deprecation-based, pointer-to-enum), but the comment recommends the clear winner (direct enum) to avoid overwhelming the reader
+- **Effort assessment details**: While extensively analyzed in triage, contributors don't need the full factor-by-factor breakdown in the issue
+- **Test coverage gaps**: Research identified that scheme selection logic isn't currently tested, but this is implied by "add unit tests" in the implementation steps
+- **Alternative workarounds**: None exist - this is a code quality issue, not a blocking bug
+- **Priority label**: This is a quality improvement but not urgent - no priority label needed
+
+
 
 - ✓ Initial validation complete - issue is LEGITIMATE
 - [ ] Research: Identify all code paths using scheme selection

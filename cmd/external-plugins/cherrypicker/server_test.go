@@ -45,14 +45,15 @@ type fghc struct {
 	pr       *github.PullRequest
 	isMember bool
 
-	diff       []byte
-	patch      []byte
-	comments   []string
-	prs        []github.PullRequest
-	prComments []github.IssueComment
-	prLabels   []github.Label
-	orgMembers []github.TeamMember
-	issues     []github.Issue
+	diff          []byte
+	patch         []byte
+	comments      []string
+	prs           []github.PullRequest
+	prComments    []github.IssueComment
+	prLabels      []github.Label
+	orgMembers    []github.TeamMember
+	removedLabels []string
+	issues        []github.Issue
 }
 
 func (f *fghc) AddLabel(org, repo string, number int, label string) error {
@@ -116,6 +117,14 @@ func (f *fghc) CreateComment(org, repo string, number int, comment string) error
 func (f *fghc) IsMember(org, user string) (bool, error) {
 	f.Lock()
 	defer f.Unlock()
+	if len(f.orgMembers) > 0 {
+		for _, m := range f.orgMembers {
+			if m.Login == user {
+				return true, nil
+			}
+		}
+		return false, nil
+	}
 	return f.isMember, nil
 }
 
@@ -214,13 +223,11 @@ func (f *fghc) GetIssueLabels(org, repo string, number int) ([]github.Label, err
 	return f.prLabels, nil
 }
 
-func (f *fghc) ListOrgMembers(org, role string) ([]github.TeamMember, error) {
+func (f *fghc) RemoveLabel(org, repo string, number int, label string) error {
 	f.Lock()
 	defer f.Unlock()
-	if role != "all" {
-		return nil, fmt.Errorf("all is only supported role, not: %s", role)
-	}
-	return f.orgMembers, nil
+	f.removedLabels = append(f.removedLabels, label)
+	return nil
 }
 
 func (f *fghc) CreateFork(org, repo string) (string, error) {
@@ -1435,6 +1442,10 @@ func TestHandlePullRequestLabelAdded_NonMemberRejected(t *testing.T) {
 
 	if !strings.Contains(ghc.comments[0], "only [foo]") {
 		t.Fatalf("expected org membership rejection, got %v", ghc.comments[0])
+	}
+
+	if len(ghc.removedLabels) != 1 || ghc.removedLabels[0] != "cherrypick/release-1.9" {
+		t.Fatalf("expected rejected label to be removed, got %v", ghc.removedLabels)
 	}
 }
 

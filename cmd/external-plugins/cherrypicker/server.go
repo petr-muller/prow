@@ -22,7 +22,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -63,7 +62,7 @@ type githubClient interface {
 	IsMember(org, user string) (bool, error)
 	ListIssueComments(org, repo string, number int) ([]github.IssueComment, error)
 	GetIssueLabels(org, repo string, number int) ([]github.Label, error)
-	ListOrgMembers(org, role string) ([]github.TeamMember, error)
+	RemoveLabel(org, repo string, number int, label string) error
 }
 
 // HelpProvider construct the pluginhelp.PluginHelp for this plugin.
@@ -358,7 +357,8 @@ func (s *Server) handlePullRequestLabelAdded(log logrus.FieldLogger, pre github.
 	prAuthor := pr.User.Login
 
 	if !s.allowAll {
-		// Only org members should be able to do cherry-picks.
+		// The label event payload does not identify who added the label, so
+		// checking the PR author is the best available proxy.
 		ok, err := s.ghc.IsMember(org, prAuthor)
 		if err != nil {
 			return log, err
@@ -366,7 +366,10 @@ func (s *Server) handlePullRequestLabelAdded(log logrus.FieldLogger, pre github.
 		if !ok {
 			resp := fmt.Sprintf(notOrgMemberMessageTemplate, org, org, org, prAuthor)
 			if err := s.createComment(log, org, repo, num, nil, resp); err != nil {
-				log.WithError(err).WithField("response", resp).Error("Failed to create comment.")
+				return log, fmt.Errorf("failed to comment on non-member cherry-pick label: %w", err)
+			}
+			if err := s.ghc.RemoveLabel(org, repo, num, pre.Label.Name); err != nil {
+				log.WithError(err).Error("Failed to remove rejected cherry-pick label.")
 			}
 			return log, nil
 		}
@@ -471,15 +474,11 @@ func (s *Server) handlePullRequestClosed(log logrus.FieldLogger, pre github.Pull
 	}
 	// Figure out membership.
 	if !s.allowAll {
-		// TODO: Possibly cache this.
-		members, err := s.ghc.ListOrgMembers(org, "all")
-		if err != nil {
-			return log, err
-		}
 		for requester := range requesterToComments {
-			isMember := slices.ContainsFunc(members, func(member github.TeamMember) bool {
-				return requester == member.Login
-			})
+			isMember, err := s.ghc.IsMember(org, requester)
+			if err != nil {
+				return log, err
+			}
 			if !isMember {
 				delete(requesterToComments, requester)
 			}

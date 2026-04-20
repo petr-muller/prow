@@ -211,6 +211,52 @@ This is a great first contribution:
 
 The broader "Prow development guide" vision discussed by @BenTheElder and @petr-muller is a separate Level 2-3 effort that should be tracked in its own issue. That vision includes contribution-path-specific guides for Tide, Deck, ProwJob controllers, and Gerrit — each requiring domain expertise to write well.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: "Docs: Add subsection for running Prow outside GKE (e.g., local/Kind)"
+- **Proposed**: "Docs: Add cross-reference from deploy guide to local development guide"
+- **Rationale**: The original ask (local/Kind setup docs) has been fully addressed. The remaining work is specifically about cross-referencing. Retitling focuses the issue on what's actually left to do.
+
+### Proposed GitHub Comment
+
+```
+/retitle Docs: Add cross-reference from deploy guide to local development guide
+/remove-lifecycle stale
+
+The core request in this issue — documentation for running Prow locally on Kind — has been addressed. Since this issue was filed, two new guides were added (March 2026):
+
+- **[Local Development Environment](/docs/local-dev/)**: Complete guide for running a full Prow stack locally using Kind with in-cluster fakes for all external services (GitHub, GCS, Gerrit, Pub/Sub). Covers `make dev`, component profiles, single-component rebuilds, fake webhooks via `phony`, and a hook plugin development workflow.
+- **[Local Development with Tilt](/docs/local-dev-tilt/)**: Automatic rebuild-on-save layer on top of the Kind environment.
+
+Additionally, issue #283 (moving starter config from test-infra) has been completed.
+
+**What remains**: The [Deploying Prow](/docs/getting-started-deploy/) guide is still GKE-focused and doesn't cross-reference the local development guides. A developer arriving at the deploy guide (e.g., from a search engine) has no signal that a simpler local path exists for exploration and development. Adding a brief note near the top of `getting-started-deploy.md` pointing to `local-dev.md` would close this gap. The broader vision of contribution-path-specific development guides (Tide, Deck, ProwJob controllers) discussed in this thread is a separate, larger effort.
+
+/kind cleanup
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Status update acknowledging the substantial work done since the issue was filed
+- Clear identification of what remains (cross-reference gap)
+- Pointers to the new docs for anyone finding this issue
+
+**Why these labels**:
+- `/kind cleanup`: Improving cross-references in existing documentation
+- `/good-first-issue`: Level 1 effort — adding a note to one file, perfect for newcomers
+- `/remove-lifecycle stale`: Issue has active resolution context, not abandoned
+- No `/area` change: `area/documentation` already applied
+
+**What's NOT included**:
+- No `/help-wanted`: Too simple for that label
+- No priority label: Documentation cross-reference is nice-to-have, not urgent
+- Not closing the issue: Retitling to focus on remaining work is more productive than close+reopen
+
 ## Next Steps
 
-- Prepare augmentation comment
+- Brief maintainer on findings
+- Wrapup: push branches, post comment

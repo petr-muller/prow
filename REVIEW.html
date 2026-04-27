@@ -394,14 +394,14 @@
 <!-- Advisor banner -->
 <div class="advisor-banner">
   <span class="advisor-verdict">Approve with suggestions</span>
-  <span class="advisor-text"><strong>All 3 reviewers approved.</strong> Two converging concerns identified (config validation, misleading test comment). No blockers &mdash; safe default preserves existing behavior.</span>
+  <span class="advisor-text"><strong>Reviewed (COMMENTED).</strong> 8 comments posted. Config validation, pass-policy-not-config, and BLOCKED constant are the key asks. Three new findings added during review (misleading code comment, backwards config warning, GitHub reason surfacing).</span>
 </div>
 
 <!-- Progress -->
 <div class="progress-bar-container">
   <div class="progress-label">
     <span>Review progress</span>
-    <span id="progress-text">0 / 9 items reviewed</span>
+    <span id="progress-text">0 / 12 items reviewed</span>
   </div>
   <div class="progress-track">
     <div class="progress-fill" id="progress-fill"></div>
@@ -494,7 +494,7 @@
 <div class="section">
   <div class="section-header" onclick="toggleSection(this)">
     <span class="chevron">&#9660;</span>
-    Review items (9)
+    Review items (12)
   </div>
   <div class="section-body">
 
@@ -502,21 +502,18 @@
     <div class="review-item" id="item-1">
       <div class="ri-header" onclick="toggleCheck(1)">
         <input type="checkbox" id="cb-1" onclick="event.stopPropagation(); updateProgress()">
-        <span class="ri-title">1. No config validation for policy values <span class="converge-badge">3/3 reviewers</span></span>
+        <span class="ri-title">1. No config validation for policy values <span class="converge-badge">commented on PR</span></span>
         <span class="severity converging">converging</span>
       </div>
       <div class="ri-body">
-        <p>There is no validation that <code>github_merge_blocks_policy</code> values are one of <code>ignore</code>, <code>permit</code>, or <code>block</code>. A typo like <code>"blocker"</code> silently falls through the <code>switch</code> statements (no matching case, no default), effectively behaving as <code>"permit"</code> with no warning.</p>
-        <p>This has security implications: an operator who configures <code>"block"</code> with a typo will believe merges are blocked when they are actually permitted. Unlike <code>PrioritizeExistingBatchesMap</code> (which uses <code>bool</code> and gets validation at unmarshal time), this is a free-form string type.</p>
-        <p><strong>Suggested fix:</strong> Add validation at config load time, or at minimum add a <code>default</code> case with an error log in the switch statements:</p>
-        <pre class="code-block">for key, policy := range t.GitHubMergeBlocksPolicyMap {
-    switch policy {
-    case GitHubMergeBlocksIgnore, GitHubMergeBlocksPermit, GitHubMergeBlocksBlock:
-    default:
-        return fmt.Errorf("invalid github_merge_blocks_policy %q for %q", policy, key)
-    }
-}</pre>
-        <p class="file-ref">pkg/config/tide.go:402-414</p>
+        <p>There is no validation that <code>github_merge_blocks_policy</code> values are one of <code>ignore</code>, <code>permit</code>, or <code>block</code>. A typo like <code>"blocker"</code> silently falls through the <code>switch</code> statements (no matching case, no default), effectively behaving as <code>"ignore"</code> (no case matches, nothing happens, merge proceeds with no warning).</p>
+        <p>This has security implications: an operator who configures <code>"block"</code> with a typo will believe merges are blocked when they are actually permitted.</p>
+        <p><strong>PR comments posted:</strong></p>
+        <ul>
+          <li><code>tide.go:256</code> &mdash; Config load and <code>checkconfig</code> should validate the value is one of the three.</li>
+          <li><code>github.go:647</code> &mdash; Do something loud in <code>default:</code> for unexpected values that somehow slip through (programmer error or botched validation).</li>
+        </ul>
+        <p class="file-ref">pkg/config/tide.go:256, pkg/tide/github.go:647</p>
         <p class="flagged-by">Flagged by: Code Quality, Maintainability, Deployment Risk</p>
       </div>
       <div class="comment-area">
@@ -548,12 +545,12 @@
     <div class="review-item" id="item-3">
       <div class="ri-header" onclick="toggleCheck(3)">
         <input type="checkbox" id="cb-3" onclick="event.stopPropagation(); updateProgress()">
-        <span class="ri-title">3. Raw "BLOCKED" string compared in three places</span>
+        <span class="ri-title">3. Raw "BLOCKED" string compared in three places <span class="converge-badge">commented on PR</span></span>
         <span class="severity suggestion">suggestion</span>
       </div>
       <div class="ri-body">
-        <p>The <code>MergeStateStatus</code> field is compared against the raw string <code>"BLOCKED"</code> in three separate locations (<code>github.go:638</code>, <code>status.go:266</code>, <code>status.go:389</code>). Extracting a const improves grep-ability and prevents typo-induced bugs:</p>
-        <pre class="code-block">const mergeStateStatusBlocked = "BLOCKED"</pre>
+        <p>The <code>MergeStateStatus</code> field is compared against the raw string <code>"BLOCKED"</code> in three separate locations (<code>github.go:638</code>, <code>status.go:266</code>, <code>status.go:389</code>).</p>
+        <p><strong>PR comment posted:</strong> <code>github.go:638</code> &mdash; <code>"BLOCKED"</code> should be a constant somewhere, maybe close to the <code>PullRequest</code> type.</p>
         <p class="file-ref">pkg/tide/github.go:638, pkg/tide/status.go:266, pkg/tide/status.go:389</p>
         <p class="flagged-by">Flagged by: Maintainability</p>
       </div>
@@ -571,7 +568,8 @@
       </div>
       <div class="ri-body">
         <p>Under the default <code>"permit"</code> policy, <code>poolStatus()</code> emits a warning log for every BLOCKED PR on every status sync cycle &mdash; not just once or on state transitions. For installations with many repos using branch protection/rulesets where PRs commonly have BLOCKED status, this could produce significant log noise.</p>
-        <p><strong>Suggestion:</strong> Consider a Prometheus counter metric (<code>tide_merge_blocked_prs{org, repo, policy}</code>) instead of or in addition to the warning log. A metric is more operationally useful for dashboards and alerting, especially for operators transitioning from "permit" to "block".</p>
+        <p><strong>Likely overstated:</strong> Under <code>"permit"</code>, the PR is still allowed to merge, so it won't linger in the pool. The noisy logging window is just however many sync cycles pass between entering the pool and Tide merging the PR. The real noise scenario would require many PRs in the pool simultaneously with BLOCKED status, which is unlikely in practice.</p>
+        <p><em>Original suggestion:</em> Consider a Prometheus counter metric (<code>tide_merge_blocked_prs{org, repo, policy}</code>) instead of or in addition to the warning log.</p>
         <p class="file-ref">pkg/tide/status.go:389-405</p>
         <p class="flagged-by">Flagged by: Code Quality, Deployment Risk</p>
       </div>
@@ -619,13 +617,23 @@
     <div class="review-item" id="item-7">
       <div class="ri-header" onclick="toggleCheck(7)">
         <input type="checkbox" id="cb-7" onclick="event.stopPropagation(); updateProgress()">
-        <span class="ri-title">7. requirementDiff now takes full *config.Tide &mdash; increased coupling</span>
+        <span class="ri-title">7. requirementDiff and poolStatus take full *config.Tide &mdash; pass just the policy <span class="converge-badge">commented on PR</span></span>
         <span class="severity suggestion">suggestion</span>
       </div>
       <div class="ri-body">
-        <p>The <code>requirementDiff</code> function gained a <code>*config.Tide</code> parameter. The nil-check at line 266 (<code>if tide != nil</code>) suggests it can be nil, but the caller always passes <code>&amp;sc.config().Tide</code> which is never nil. The nil path exists only for test convenience.</p>
-        <p>Passing the full config increases coupling. An alternative would be to pass just the resolved <code>GitHubMergeBlocksPolicy</code> for the relevant repo, keeping the function's dependency narrow. Acceptable for now but worth noting if more config-dependent checks are added.</p>
-        <p class="file-ref">pkg/tide/status.go:129</p>
+        <p>Both <code>requirementDiff</code> and <code>poolStatus</code> receive <code>*config.Tide</code> but only need the resolved policy. They even reconstruct an <code>OrgRepo</code> internally to call the method. The callsite (<code>expectedStatus</code>) already has the <code>OrgRepo</code>, so the policy can be resolved there once and passed down.</p>
+        <p><strong>PR comments posted:</strong></p>
+        <ul>
+          <li><code>status.go:271</code> &mdash; <code>requirementDiff</code> only needs the policy. The callsite already has the necessary <code>OrgRepo</code>:</li>
+        </ul>
+        <pre class="code-block">mergeBlocksPolicy := sc.config().Tide.GitHubMergeBlocksPolicy(orgRepo)
+for _, q := range queryMap.ForRepo(repo) {
+    diff, diffCount := requirementDiff(pr, &amp;q, cc, mergeBlocksPolicy)</pre>
+        <ul>
+          <li><code>status.go:388</code> &mdash; <code>poolStatus</code> also only needs the policy; both callsites would have access to the policy computed for <code>requirementDiff</code> (just compute it earlier, before the conditional on L316).</li>
+        </ul>
+        <p>This also eliminates the nil-check (<code>if tide != nil</code>) which only exists for test convenience since the production caller never passes nil.</p>
+        <p class="file-ref">pkg/tide/status.go:271, pkg/tide/status.go:388</p>
         <p class="flagged-by">Flagged by: Code Quality, Maintainability</p>
       </div>
       <div class="comment-area">
@@ -662,11 +670,69 @@
         <p>In <code>poolStatus</code>, the logrus field <code>"policy"</code> is hardcoded to <code>config.GitHubMergeBlocksPermit</code> rather than referencing a resolved variable:</p>
         <pre class="code-block">"policy": config.GitHubMergeBlocksPermit,</pre>
         <p>Technically correct (code path only executes when policy <em>is</em> permit), but using a local variable reads more naturally and is resilient to future refactoring.</p>
+        <p><strong>Note:</strong> This would be addressed by Item 7's suggestion to pass the resolved policy as a parameter instead of the full config.</p>
         <p class="file-ref">pkg/tide/status.go:399</p>
         <p class="flagged-by">Flagged by: Code Quality</p>
       </div>
       <div class="comment-area">
         <textarea placeholder="Your review comment for this item..." id="note-9"></textarea>
+      </div>
+    </div>
+
+    <!-- Item 10: New finding from review -->
+    <div class="review-item" id="item-10">
+      <div class="ri-header" onclick="toggleCheck(10)">
+        <input type="checkbox" id="cb-10" onclick="event.stopPropagation(); updateProgress()">
+        <span class="ri-title">10. Misleading "Block merge" comment in status controller <span class="converge-badge">commented on PR</span></span>
+        <span class="severity concern">concern</span>
+      </div>
+      <div class="ri-body">
+        <p>In <code>requirementDiff</code> at <code>status.go:274</code>, the comment says <code>// Block merge by adding to diff</code>. This is misleading &mdash; the status controller does not actually block merges. Adding to <code>diff</code> affects the status message displayed on the PR, not the merge decision. The actual merge blocking happens in <code>isAllowedToMerge()</code> in <code>github.go</code>.</p>
+        <p><strong>PR comment posted:</strong> <code>status.go:274</code> &mdash; "this is misleading, this is status controller - does not actually block merges"</p>
+        <p class="file-ref">pkg/tide/status.go:274</p>
+        <p class="flagged-by">Found during review (not in original analysis)</p>
+      </div>
+      <div class="comment-area">
+        <textarea placeholder="Your review comment for this item..." id="note-10"></textarea>
+      </div>
+    </div>
+
+    <!-- Item 11: New finding from review -->
+    <div class="review-item" id="item-11">
+      <div class="ri-header" onclick="toggleCheck(11)">
+        <input type="checkbox" id="cb-11" onclick="event.stopPropagation(); updateProgress()">
+        <span class="ri-title">11. Config comment about "ignore" appears backwards <span class="converge-badge">commented on PR</span></span>
+        <span class="severity concern">concern</span>
+      </div>
+      <div class="ri-body">
+        <p>The config documentation says: <em>"Note: 'ignore' may cause issues with repos using GitHub Rulesets that restrict updates but have Tide on the bypass list."</em></p>
+        <p>This appears backwards. Per issue <a href="https://github.com/kubernetes-sigs/prow/issues/575">#575</a>, the problem is with <code>"block"</code> policy: when a repo uses a "restrict updates" ruleset and Tide is on the bypass list, GitHub still reports <code>mergeStateStatus</code> as BLOCKED. With <code>"block"</code> policy, Tide refuses to merge even though it <em>can</em> (bypass list). With <code>"ignore"</code>, Tide would correctly proceed. The comment warns about the wrong policy.</p>
+        <p><strong>PR comment posted:</strong> <code>prow-config-documented.yaml:1568</code> &mdash; "What kind of issues may <code>ignore</code> cause? 'Restrict updates' in what sense?"</p>
+        <p class="file-ref">pkg/config/prow-config-documented.yaml:1568</p>
+        <p class="flagged-by">Found during review (not in original analysis)</p>
+      </div>
+      <div class="comment-area">
+        <textarea placeholder="Your review comment for this item..." id="note-11"></textarea>
+      </div>
+    </div>
+
+    <!-- Item 12: New finding from review -->
+    <div class="review-item" id="item-12">
+      <div class="ri-header" onclick="toggleCheck(12)">
+        <input type="checkbox" id="cb-12" onclick="event.stopPropagation(); updateProgress()">
+        <span class="ri-title">12. Surface actual GitHub blocking reason (future)</span>
+        <span class="severity suggestion">suggestion</span>
+      </div>
+      <div class="ri-body">
+        <p>When Tide reports "Blocked by GitHub (branch rulesets or protection)", it would be more helpful to show the actual reason from GitHub. When a merge attempt is denied, GitHub provides an informative message like:</p>
+        <pre class="code-block">At least 2 approving reviews are required by reviewers with write access.</pre>
+        <p>It would be great if Tide could surface that in the status message. Not something that needs to be addressed in this PR, but worth investigating if GitHub exposes the reason via the API before an actual merge attempt.</p>
+        <p><strong>PR comment posted:</strong> <code>status.go:277</code> &mdash; scoped as a future improvement, not a blocker for this PR.</p>
+        <p class="file-ref">pkg/tide/status.go:277</p>
+        <p class="flagged-by">Found during review (not in original analysis)</p>
+      </div>
+      <div class="comment-area">
+        <textarea placeholder="Your review comment for this item..." id="note-12"></textarea>
       </div>
     </div>
 
@@ -681,7 +747,7 @@
     <button class="verdict-btn" id="btn-comment" onclick="selectVerdict('comment')">Comment</button>
     <button class="verdict-btn" id="btn-request" onclick="selectVerdict('request')">Request Changes</button>
   </div>
-  <textarea id="verdict-body" placeholder="Overall review summary...">LGTM &#x2014; approving this PR. The implementation is clean, well-tested, and follows established patterns with a safe default. Two suggestions I would ask you to consider before merge: (1) add config validation that rejects unknown policy values at load time, since a typo currently falls through silently to &#x22;permit&#x22; behavior with no warning, and (2) fix the misleading comment in the &#x22;Complex: All requirements met but changes requested blocks merge&#x22; test case where the &#x60;+ 50(review)&#x60; note is inaccurate since &#x60;reviewApprovedRequired&#x60; is false. Neither is a hard blocker but both would meaningfully improve debuggability and test clarity.</textarea>
+  <textarea id="verdict-body" placeholder="Overall review summary...">COMMENTED with 8 inline comments. Key asks: (1) validate policy values at config load and checkconfig, plus a loud default in switch statements; (2) pass the resolved policy to requirementDiff/poolStatus instead of the full *config.Tide; (3) extract &#x22;BLOCKED&#x22; to a constant. Also flagged: misleading &#x22;Block merge&#x22; comment in status controller (it only affects status messages), the config doc warning about &#x22;ignore&#x22; appears backwards (&#x22;block&#x22; is what breaks the bypass-list scenario per #575), and a future suggestion to surface actual GitHub blocking reasons.</textarea>
   <div class="btn-row">
     <button class="copy-btn" onclick="copyReview()">Copy full review as Markdown</button>
     <button class="copy-btn secondary" onclick="copySummary()">Copy summary only</button>
@@ -690,7 +756,7 @@
 </div>
 
 <script>
-const TOTAL_ITEMS = 9;
+const TOTAL_ITEMS = 12;
 
 function toggleSection(header) {
   header.parentElement.classList.toggle('collapsed');
@@ -772,7 +838,7 @@ function copySummary() {
 }
 
 // Persist state to localStorage
-const STORAGE_KEY = 'pr579-review-v2';
+const STORAGE_KEY = 'pr579-review-v3';
 function saveState() {
   const state = { verdict: selectedVerdict, verdictBody: document.getElementById('verdict-body').value, items: {} };
   for (let i = 1; i <= TOTAL_ITEMS; i++) {

@@ -126,8 +126,75 @@ The condition gates `filterTrustedUsers` on the skip flags, but `trusted_apps` s
 1. Retest the integration job to confirm the failure is a flake
 2. Consider adding more test cases for `trusted_apps` edge cases
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+A one-line conditional fix in a single file, with a clear root cause and an existing approved PR. The fix is fully backwards compatible and follows existing patterns.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1 file modified (`pkg/plugins/dco/dco.go`), 1 line changed, 1 test file (`dco_test.go`) with ~25 lines of new test
+- **Level Indication**: 1
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Adding one additional condition (`len(config.TrustedApps) > 0`) to an existing boolean guard. No new logic, no edge cases.
+- **Level Indication**: 1
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go, ability to read a conditional. No Prow-specific or domain expertise needed.
+- **Level Indication**: 1
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause is unambiguous (line 300 gates the function on wrong conditions). Fix is clear and already validated in PR #681.
+- **Level Indication**: 1
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: One unit test following existing patterns (PR #681 already adds this). No integration test changes needed.
+- **Level Indication**: 1
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Additive only — existing configs with skip flags continue to work identically. Only changes behavior for configs that set `trusted_apps` without skip flags (which was broken before).
+- **Level Indication**: 1
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Fixes a bug in existing logic, no new patterns or abstractions introduced.
+- **Level Indication**: 1
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Pure internal logic fix, no GitHub API or Kubernetes changes needed.
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Extremely well-defined, minimal scope, clear fix
+- [x] `kind/bug`: Fixing broken feature
+- [x] `area/plugins`: DCO plugin
+
+### Guidance for Contributors
+
+This is an ideal first contribution: the root cause is identified, the fix is a single line, and there's already an approved PR (#681) to reference. A contributor would need to:
+1. Understand the guard condition at `pkg/plugins/dco/dco.go:300`
+2. Add `|| len(config.TrustedApps) > 0` to the condition
+3. Add a unit test (see PR #681 for the pattern)
+
+### Caveats and Considerations
+
+PR #681 already implements this fix and has LGTM + approval. The practical next step is to get that PR merged rather than duplicate the work. The integration test failure on PR #681 should be investigated/retested.
+
 ## Next Steps
 
-- Assess effort level
-- Augment the issue with findings and link to PR #681
-- Consider retesting PR #681's integration job
+- Augment the issue with findings
+- Investigate PR #681 integration test failure and retest if flaky
+- Merge PR #681

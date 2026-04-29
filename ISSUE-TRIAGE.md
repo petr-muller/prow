@@ -193,8 +193,48 @@ This is an ideal first contribution: the root cause is identified, the fix is a 
 
 PR #681 already implements this fix and has LGTM + approval. The practical next step is to get that PR merged rather than duplicate the work. The integration test failure on PR #681 should be investigated/retested.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: DCO plugin trusted_apps config not working
+- **Proposed**: DCO plugin: trusted_apps config has no effect without skip_dco_check flags
+- **Rationale**: The current title is clear but vague about the nature of the bug. The new title specifies the exact condition under which `trusted_apps` fails — it's gated behind unrelated skip flags.
+
+### Proposed GitHub Comment
+
+```
+/retitle DCO plugin: trusted_apps config has no effect without skip_dco_check flags
+
+This is a confirmed bug. The root cause is in `pkg/plugins/dco/dco.go` at line 300: the `filterTrustedUsers()` function — which is where `trusted_apps` is actually checked — is only called when `SkipDCOCheckForMembers` or `SkipDCOCheckForCollaborators` is `true`. If neither skip flag is set (the common case when users only want `trusted_apps`), the function is never invoked and the `trusted_apps` config is silently ignored.
+
+The fix is a one-line change to the guard condition: adding `|| len(config.TrustedApps) > 0` so that `filterTrustedUsers` also runs when trusted apps are configured. PR #681 implements exactly this fix with a unit test and has been approved. It's currently blocked by what appears to be an unrelated integration test flake.
+
+/remove-lifecycle stale
+/area plugins
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause: the exact line and condition that causes the bug (not in original issue)
+- Explanation of why `trusted_apps` is silently ignored (the guard condition)
+- Link to existing fix PR #681 and its status
+
+**Why these labels**:
+- `/area plugins`: DCO is a Prow plugin
+- `/good-first-issue`: Level 1 effort — one-line fix, clear root cause, existing approved PR
+- `/remove-lifecycle stale`: Issue is legitimate and actively being fixed
+- No `/kind bug`: Already has `kind/bug` label
+
+**What's NOT included**:
+- No detailed code snippets — the PR already shows the fix
+- No priority label — fix PR already exists and is approved
+- No `/help-wanted` — already has an approved PR, just needs the integration test resolved
+
 ## Next Steps
 
-- Augment the issue with findings
-- Investigate PR #681 integration test failure and retest if flaky
+- Post augmentation comment to issue
+- Retest PR #681's integration job (or investigate if it's a real failure)
 - Merge PR #681

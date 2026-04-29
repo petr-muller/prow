@@ -280,7 +280,51 @@ The feature as originally requested — `/retest` triggering Netlify deploy prev
 3. BenTheElder's security concerns are valid but partially addressable with build hooks (no full-access token needed)
 4. If Netlify adds a deploy preview rebuild API in the future, the Prow integration would be straightforward following the GitHub Actions pattern
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "Integrate with Netlify for /retest Prow command" is clear and specific enough.
+
+### Proposed GitHub Comment
+
+```
+## Netlify API Limitation
+
+After researching this, the main blocker is on Netlify's side rather than Prow's: **Netlify does not expose an API to trigger deploy preview rebuilds for a specific PR.** Deploy previews are triggered exclusively by GitHub push webhook events. The available alternatives each have significant limitations:
+
+- **Build hooks** (`POST https://api.netlify.com/build_hooks/{id}?trigger_branch=<branch>`) trigger *branch deploys*, not deploy previews. These don't create the `deploy-preview-N` URL and don't update GitHub PR status checks — so the failed check that prompted `/retest` would remain failed.
+- **Netlify API tokens** (PATs) have no granular scoping — they grant full account access, which makes @BenTheElder's security concern from the [original issue](https://github.com/kubernetes/test-infra/issues/35103) even more relevant.
+- **Pushing an empty commit** to the PR branch is the only method that triggers a true deploy preview rebuild with proper GitHub status updates, but this requires push access to contributor forks and pollutes git history.
+
+## Prow Architecture Context
+
+Prow already has a pattern for re-triggering external CI on `/retest`: the `TriggerGitHubWorkflows` option in the trigger plugin config (`pkg/plugins/trigger/generic-comment.go:168-196`) fetches failed GitHub Action runs and re-triggers them via the GitHub API. If Netlify were to add an API for deploy preview rebuilds, the Prow integration would follow this exact pattern and be straightforward to implement.
+
+Until then, the available workaround for contributors is pushing an empty commit (`git commit --allow-empty -m "retrigger" && git push`) or asking a repo admin to re-deliver the GitHub webhook from the repository's webhook settings.
+
+/area plugins
+/kind feature
+```
+
+### Rationale
+
+**What's being added**:
+- Netlify API limitation analysis — the issue assumes an API exists but it doesn't
+- Security concern details — PATs lack granular scoping, reinforcing BenTheElder's concern
+- Prow architecture context — the `TriggerGitHubWorkflows` pattern shows this would be easy IF the API existed
+- Practical workarounds — so users aren't stuck while waiting for Netlify API changes
+
+**Why these labels**:
+- `/area plugins`: The trigger plugin in `pkg/plugins/trigger/` is the affected component
+- `/kind feature`: This is a new feature request, not a bug
+
+**What's NOT included**:
+- No `/good-first-issue` or `/help-wanted`: The feature is blocked by external API limitations (Level 4). Adding difficulty labels would invite contributors to work on something that can't be fully solved.
+- No `/retitle`: Current title is adequate
+- No `/priority`: This is a nice-to-have, not blocking functionality
+
 ## Next Steps
 
-- Augment the issue with technical findings about Netlify API limitations
 - Brief maintainer on findings
+- Wrap up triage

@@ -202,7 +202,85 @@ The feature as requested (Prow calling Netlify API on `/retest`) is **not direct
 4. BenTheElder's security concerns are partially addressed by build hooks (no full-access token needed), but the fundamental limitation remains
 5. The `TriggerGitHubWorkflows` pattern at `generic-comment.go:168-196` provides a clean template if/when Netlify adds proper API support
 
+## Effort Assessment
+
+**Effort Level**: 4 - Very Large / Near Impossible (as requested); 2 - Moderate (partial build hook solution)
+
+### Summary
+
+The feature as originally requested — `/retest` triggering Netlify deploy preview rebuilds with proper GitHub PR status updates — is **not achievable** due to Netlify API limitations. Deploy previews can only be triggered by GitHub push webhooks; no external API exists for this. The closest viable Prow change (build hook integration) is moderate effort but produces branch deploys, not deploy previews, and doesn't update GitHub PR status — meaning it doesn't solve the actual problem.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small (for build hook approach)
+- **Details**: ~2-3 files modified (`pkg/plugins/trigger/generic-comment.go`, `pkg/plugins/config.go`, tests), ~50-100 LOC following the existing `TriggerGitHubWorkflows` pattern
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple (for the Prow code change itself)
+- **Details**: The code pattern already exists in the GitHub Actions integration. Adding a build hook call is straightforward. The complexity is in the external system limitation.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Need understanding of trigger plugin architecture and Netlify API specifics. Contributor must understand the distinction between deploy previews and branch deploys.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Significant uncertainty
+- **Details**: The fundamental problem (Netlify lacks an API for deploy preview rebuilds) means no Prow code change can fully solve this. The issue as written assumes such an API exists. Open questions about what "partial solution" is acceptable.
+- **Level Indication**: 3-4
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Unit tests following existing trigger plugin test patterns. Integration testing would require a Netlify-connected repo.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Any integration would be opt-in via configuration, no impact on existing deployments
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Good fit (partial solution follows existing pattern)
+- **Details**: The `TriggerGitHubWorkflows` pattern is the exact template. Adding another external CI trigger follows established architecture. However, adding Netlify-specific code to Prow raises questions about vendor-specific integrations.
+- **Level Indication**: 2-3
+
+#### External Dependencies
+- **Assessment**: Blocking
+- **Details**: Netlify's API does not support triggering deploy preview rebuilds. This is the critical blocker. The feature cannot be fully implemented without Netlify adding this capability.
+- **Level Indication**: 4
+
+### Recommended Labels
+
+- [x] `kind/feature`: New feature request for external CI integration
+- [x] `area/plugins`: Affects the trigger plugin
+- [ ] `good-first-issue`: External API limitation makes this deceptively complex
+- [ ] `help-wanted`: Cannot be fully solved without Netlify API changes
+
+### Guidance for Contributors
+
+**For Level 4 (as requested — full deploy preview rebuild)**:
+- This is blocked by external API limitations, not Prow code complexity
+- The Netlify API does not expose an endpoint to trigger deploy preview rebuilds
+- A full solution requires Netlify to add this capability
+- Alternative: Advocate for Netlify API improvements, then implement when available
+
+**For Level 2 (partial — build hook branch deploys)**:
+- Follow the `TriggerGitHubWorkflows` pattern in `pkg/plugins/trigger/generic-comment.go:168-196`
+- Add a `TriggerNetlifyBuildHooks` config option to `Trigger` struct
+- Call configured build hook URLs with `trigger_branch=<pr-branch>` on `/retest`
+- Caveat: This produces branch deploys, not deploy previews
+
+### Caveats and Considerations
+
+1. The issue author (Caesarsage) has self-assigned and seems eager to work on this — the triage should clearly communicate the API limitation to avoid wasted effort
+2. The original issue author (lmktfy/Tim Bannister) suggested `netlify deploy --production branch=main --deploy-preview=42 --trigger` — but this CLI command doesn't actually exist in its described form
+3. BenTheElder's security concerns are valid but partially addressable with build hooks (no full-access token needed)
+4. If Netlify adds a deploy preview rebuild API in the future, the Prow integration would be straightforward following the GitHub Actions pattern
+
 ## Next Steps
 
-- Assess effort level given the feasibility constraints
 - Augment the issue with technical findings about Netlify API limitations
+- Brief maintainer on findings

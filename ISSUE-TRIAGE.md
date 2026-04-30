@@ -334,6 +334,7 @@ Key questions asked:
 Maintainer decision:
 - No objections raised; proceed with wrapup
 
-## Next Steps
+## Wrapup
 
-- Wrap up triage: push branches and post augmentation comment
+- Branches pushed to origin: 2026-04-30
+- Comment posting: Skipped (maintainer decision)

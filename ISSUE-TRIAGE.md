@@ -218,6 +218,46 @@ This is an excellent first contribution to Prow:
 - For the test, copy the "unmergable PR" test case in `TestControllerReconcile` and change `Mergable` to `Draft: true`
 - The trigger plugin's handling in `pkg/plugins/trigger/pull-request.go` shows the broader pattern for reference
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: "Renaming a presubmit job triggered builds on draft pull requests"
+- **Proposed**: "Status reconciler triggers jobs on draft pull requests"
+- **Rationale**: The current title describes the symptom from the reporter's specific scenario (renaming). The proposed title names the component and the actual bug more precisely — it's not specific to renames; any config change that adds a blocking presubmit will trigger on drafts.
+
+### Proposed GitHub Comment
+
+```
+/retitle Status reconciler triggers jobs on draft pull requests
+
+The root cause is in `pkg/statusreconciler/controller.go`, in the `triggerNewPresubmits()` method. When the status reconciler detects a new or renamed blocking presubmit, it fetches all open PRs and triggers the job on each one. The code filters out unmergeable PRs (line 237) and untrusted PRs (line 270), but it never checks the `Draft` field. This means draft PRs are treated the same as ready-for-review PRs during reconciliation.
+
+By contrast, the trigger plugin in `pkg/plugins/trigger/pull-request.go` has extensive draft handling: it skips all jobs for draft PRs on open/reopen/sync events (`buildAllButDrafts()`), and even aborts running jobs when a PR is converted to draft. The status reconciler bypasses all of this because it triggers jobs through its own code path rather than through the trigger plugin's PR event handling.
+
+The fix is straightforward: add a `pr.Draft` check right after the existing `Mergable` check in `triggerNewPresubmits()`, following the same pattern. The test infrastructure in `controller_test.go` already has a template for this (the "unmergable PR" test case).
+
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the reporter described the symptom but not where in the code the problem is or why
+- Contrast with trigger plugin: explains why normal PR triggering respects drafts but reconciliation doesn't
+- Fix guidance: tells potential contributors exactly where to look and what pattern to follow
+
+**Why these labels**:
+- `/good-first-issue`: Level 1 effort — single if-statement fix following existing pattern, excellent for new contributors
+- `area/status-reconciler`: Already applied
+- `kind/bug`: Already applied
+
+**What's NOT included**:
+- No `/area` or `/kind` commands: both are already correctly applied
+- No priority label: this is a real but minor bug (only triggers during config changes, not during normal operation)
+- No `/remove-lifecycle stale`: will be handled by the comment activity itself or manually
+
 ## Next Steps
 
-- Proceed with `augment` subcommand
+- Proceed with `brief` subcommand
+- Then `wrapup` to push and post

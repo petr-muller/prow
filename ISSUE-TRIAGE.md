@@ -154,6 +154,70 @@ This is the right level of fix for the problem. The status reconciler already ha
 - Add a test case: "draft PR means no trigger, retire and migrate still happen"
 - Use the existing test infrastructure (fakeProwJobTriggerer, fakeGitHubClient, etc.)
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+Adding a single `if pr.Draft` check in `triggerNewPresubmits()`, following the exact same pattern as the existing `Mergable` check two lines above. One test case to add using the existing test infrastructure. Total change: ~10 lines across 1 file.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1 file (`pkg/statusreconciler/controller.go`), ~5 lines of production code + ~30 lines of test code in `controller_test.go`
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: A single boolean field check (`pr.Draft`), identical in pattern to the existing `Mergable` check at line 237. No edge cases beyond what `GetPullRequests()` already handles.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go. The fix follows an existing pattern visible in the same function. No understanding of Prow architecture needed beyond reading the immediate code context.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The problem is clear (draft PRs aren't filtered), the fix location is obvious (right after the `Mergable` check), and the desired behavior matches what the trigger plugin already does.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Add one test case in `TestControllerReconcile` with a PR fixture that has `Draft: true`, verifying no jobs are triggered but retire/migrate still happen. Follows existing test patterns exactly (see the "unmergable PR" test case as a template).
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Only prevents unwanted job triggering on draft PRs. No configuration changes. No behavior change for non-draft PRs.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Follows the exact filtering pattern already in place in `triggerNewPresubmits()`. Aligns with how the trigger plugin handles drafts.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: The `Draft` field is already populated by `GetPullRequests()`. No new API calls needed.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, follows existing pattern
+- [x] `kind/bug`: Fixing missing filter
+- [x] `area/status-reconciler`: Already applied
+
+### Guidance for Contributors
+
+This is an excellent first contribution to Prow:
+- Look at `pkg/statusreconciler/controller.go:236-243` — the `Mergable` check is your template
+- Add a similar check for `pr.Draft` right after it
+- For the test, copy the "unmergable PR" test case in `TestControllerReconcile` and change `Mergable` to `Draft: true`
+- The trigger plugin's handling in `pkg/plugins/trigger/pull-request.go` shows the broader pattern for reference
+
 ## Next Steps
 
-- Proceed with `assess-effort` subcommand
+- Proceed with `augment` subcommand

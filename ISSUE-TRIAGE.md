@@ -243,8 +243,12 @@ Key questions asked:
 Maintainer decision:
 Proceed with wrapup.
 
+## Wrapup
+
+**Comment posted**: No (maintainer declined)
+**Branches pushed**: issue-triage-606 synced to origin
+
 ## Next Steps
 
-- Post augmentation comment to issue
 - Retest PR #681's integration job (or investigate if it's a real failure)
 - Merge PR #681

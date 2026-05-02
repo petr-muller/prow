@@ -172,53 +172,57 @@ This is a missing feature, not a bug. The Tide context policy system was built w
 This approach follows the established pattern, is fully backwards compatible, and gives users explicit control. It's the natural extension of the existing system and matches how similar features have been added to Prow. The separate option also allows users to migrate incrementally from branch protection to Rulesets.
 
 **Key Implementation Considerations**:
-1. GitHub Rulesets API uses different endpoints and response shapes than branch protection — need to extract required status checks from ruleset rules of type `required_status_checks`
-2. The `RepositoryClient` interface must be extended, which means all implementations (real client, fakes, mocks) need updates
-3. The override plugin should also gain Ruleset awareness for consistency
-4. Consider how Rulesets interact with branch protection when both are enabled (union of required checks is the logical default)
+1. The key API endpoint is `GET /repos/{owner}/{repo}/rules/branches/{branch}` — returns pre-aggregated effective rules for a branch, including org-level rulesets, already filtered to `active` enforcement only. This dramatically simplifies the implementation (no need for condition matching, enforcement filtering, or separate org-level calls).
+2. The response uses polymorphic rule objects with a `type` discriminator. Required status checks are under `type: "required_status_checks"` with a different structure than branch protection: `{context: "name", integration_id: 15368}` instead of plain strings. The `integration_id` field (optional) pins a check to a specific GitHub App but can be ignored for determining what's required.
+3. Up to 150 rulesets (75 repo + 75 org) can target one branch. They aggregate (union of rules, most restrictive wins). During migration, both branch protection and Rulesets can be active simultaneously and layer together.
+4. The `RepositoryClient` interface must be extended, which means all implementations (real client, fakes, mocks) need updates.
+5. The override plugin should also gain Ruleset awareness for consistency.
+6. The rules endpoint is paginated (max 100 per page) — pagination handling required.
+7. Permissions are favorable: the rules endpoint only needs `Metadata` (read), less than branch protection's `Administration` (read).
 
 **Testing Requirements**:
-- Unit tests for new GitHub API types and client methods
+- Unit tests for new GitHub API types and client methods (polymorphic rule deserialization)
 - Unit tests for Ruleset config option in `TideContextPolicy`
-- Integration tests for merged context policy (branch protection + Rulesets + Prow jobs)
+- Integration tests for merged context policy (branch protection + Rulesets + Prow jobs, including coexistence)
 - Tests for override plugin with Rulesets
+- Tests for pagination handling
 
 **Migration/Rollout Strategy**:
-New opt-in config option — no migration needed. Users add `from-rulesets: true` to their Tide context policy when ready.
+New opt-in config option — no migration needed. Users add `from-rulesets: true` to their Tide context policy when ready. Both `from-branch-protection` and `from-rulesets` can be enabled simultaneously during migration (GitHub itself layers both systems).
 
 ## Effort Assessment
 
-**Effort Level**: 2 - Moderate (help-needed)
+**Effort Level**: 3 - Large (requires expertise)
 
 ### Summary
 
-This is a well-defined feature request that follows an established pattern (`from-branch-protection`), but requires work across multiple layers (GitHub API types, client methods, config, Tide logic) and knowledge of both the GitHub Rulesets API and Prow's architecture.
+While the feature follows an established pattern (`from-branch-protection`), deeper research into the GitHub Rulesets API reveals significant additional complexity: polymorphic API response types, layering semantics (up to 150 rulesets per branch, union with most-restrictive-wins), coexistence with branch protection during migration, pagination handling, and the need to update all `RepositoryClient` interface implementations. The API endpoint design (`rules/branches/{branch}`) simplifies aggregation, but the data model, coexistence concerns, and interface-wide changes push this beyond a typical moderate change.
 
 ### Factor Analysis
 
 #### Scope of Changes
-- **Assessment**: Moderate
-- **Details**: Estimated 5-8 files, ~200-400 lines. Core changes in `pkg/github/types.go` (new types), `pkg/github/client.go` (new interface methods + HTTP calls), `pkg/config/tide.go` (new config field + policy logic), plus corresponding test files. Optional: `pkg/plugins/override/override.go` for consistency.
+- **Assessment**: Moderate-Large
+- **Details**: Estimated 8-12 files, ~300-500 lines. Core changes in `pkg/github/types.go` (polymorphic rule types), `pkg/github/client.go` (new interface methods + HTTP calls + pagination), `pkg/config/tide.go` (new config field + policy logic), `pkg/plugins/override/override.go`, plus all corresponding test files and all fake/mock implementations of `RepositoryClient`.
 - **Level Indication**: 2-3
 
 #### Complexity
-- **Assessment**: Moderate
-- **Details**: No concurrency issues or race conditions. The solution follows an existing pattern closely. Main complexity is understanding the GitHub Rulesets API response shape and correctly extracting required status checks from it. The Rulesets API is more complex than branch protection (multiple rulesets can apply, each with multiple rules).
-- **Level Indication**: 2-3
+- **Assessment**: High
+- **Details**: The GitHub Rulesets API uses polymorphic rule objects with a `type` discriminator — each rule type has different `parameters`. Required status checks use `{context, integration_id}` tuples rather than plain strings. Up to 150 rulesets can target a single branch and they aggregate with most-restrictive-wins semantics. During migration, both branch protection and Rulesets can be active and layer together. The `rules/branches/{branch}` endpoint handles aggregation, but the consumer still needs to correctly deserialize polymorphic responses and handle pagination.
+- **Level Indication**: 3
 
 #### Required Expertise
-- **Assessment**: Moderate
-- **Details**: Needs familiarity with GitHub Rulesets API, Prow's config hierarchy, and the Tide context policy system. Can be learned from existing `from-branch-protection` implementation, but contributor needs to be comfortable reading API docs and working across multiple packages.
-- **Level Indication**: 2-3
+- **Assessment**: Deep
+- **Details**: Requires understanding of GitHub Rulesets API (significantly different model from branch protection), Prow's `RepositoryClient` interface pattern and all its implementations, Tide's context policy system, and the override plugin. Contributor must understand how Rulesets layer with branch protection to design correct coexistence behavior.
+- **Level Indication**: 3
 
 #### Clarity and Certainty
-- **Assessment**: Well-defined
-- **Details**: The desired behavior is clear: fetch required status checks from Rulesets and add them to Tide's required contexts. The approach (parallel `from-rulesets` option) is straightforward. One open question: how to handle multiple rulesets with overlapping rules (union of required checks is the natural default).
-- **Level Indication**: 1-2
+- **Assessment**: Some uncertainty
+- **Details**: Core behavior is clear (fetch required checks from Rulesets), but open questions remain: How to handle `integration_id` (ignore for context requirements, but document the limitation)? How to handle coexistence when both `from-branch-protection` and `from-rulesets` are enabled (union is natural but needs design)? Should pagination be generic or specific to this endpoint?
+- **Level Indication**: 2-3
 
 #### Testing Requirements
-- **Assessment**: Moderate
-- **Details**: Needs unit tests for GitHub API types/client (HTTP mock pattern exists at `pkg/github/client_test.go:2316`), config parsing tests (pattern at `pkg/config/tide_test.go:1158`), and context policy building tests (pattern at `pkg/config/tide_test.go:1293`). All test patterns are well-established.
+- **Assessment**: Moderate-Complex
+- **Details**: Needs unit tests for polymorphic rule deserialization, GitHub API client with HTTP mocking (pattern at `pkg/github/client_test.go:2316`), config parsing (pattern at `pkg/config/tide_test.go:1158`), context policy building with coexistence scenarios, pagination handling, and override plugin. Test data setup is more complex due to the nested polymorphic response structure.
 - **Level Indication**: 2-3
 
 #### Backwards Compatibility
@@ -227,44 +231,47 @@ This is a well-defined feature request that follows an established pattern (`fro
 - **Level Indication**: 1-2
 
 #### Architectural Alignment
-- **Assessment**: Perfect fit
-- **Details**: Directly mirrors the existing `from-branch-protection` pattern. Extends `TideContextPolicy` struct with one new field, adds a new conditional block in `GetTideContextPolicy()` parallel to the existing branch protection block. No new patterns needed.
-- **Level Indication**: 1-2
+- **Assessment**: Good fit with pattern extension
+- **Details**: Mirrors the existing `from-branch-protection` pattern but requires new patterns for polymorphic API response handling that don't exist in the codebase today. The `RepositoryClient` interface extension follows existing patterns.
+- **Level Indication**: 2-3
 
 #### External Dependencies
-- **Assessment**: Well-supported
-- **Details**: GitHub Rulesets REST API is stable and documented. Endpoints: `GET /repos/{owner}/{repo}/rulesets` and `GET /repos/{owner}/{repo}/rules/branches/{branch}`. The API provides required status check information in the `required_status_checks` rule type.
-- **Level Indication**: 1-3
+- **Assessment**: Well-supported but complex
+- **Details**: GitHub Rulesets REST API is stable and documented. The `GET /repos/{owner}/{repo}/rules/branches/{branch}` endpoint helpfully pre-aggregates effective rules. However, the API response model is significantly more complex than branch protection. Permissions are favorable (only `Metadata` read needed). Known gotcha: path-filtered workflows as required status checks can cause deadlocks (GitHub limitation, not solvable in Prow).
+- **Level Indication**: 2-3
 
 ### Recommended Labels
 
-- [x] `help-needed`: Well-defined, follows established patterns, suitable for skilled contributor
 - [x] `area/tide`: Extends Tide's context policy
 - [x] `kind/feature`: New capability
-- [ ] `good-first-issue`: Too many files/packages involved for a first contribution
+- [ ] `good-first-issue`: Requires deep expertise across multiple packages
+- [ ] `help-wanted`: Complexity and coexistence concerns require experienced contributor
 
 ### Guidance for Contributors
 
-**For Level 2 (Moderate)**:
-- Suitable for contributors familiar with Go and GitHub API
+**For Level 3 (Large)**:
+- Requires experience with Prow architecture, specifically Tide and the GitHub client
+- Should consult with maintainers before starting
 - Should review:
   - `pkg/config/tide.go:159-175` and `920-930`: The `TideContextPolicy` struct and `from-branch-protection` pattern
   - `pkg/github/client.go:165-202` and `2727-2806`: `RepositoryClient` interface and branch protection implementation
   - `pkg/github/types.go:552-682`: Branch protection types as template for Ruleset types
-  - GitHub Rulesets REST API documentation
-- Recommended approach:
-  1. Add Ruleset types to `pkg/github/types.go`
-  2. Add `GetRepositoryRulesets()` to `RepositoryClient` interface and implement
-  3. Add `FromRulesets` field to `TideContextPolicy`
-  4. Extend `GetTideContextPolicy()` with Ruleset fetch block
-  5. Add tests at each layer
-- Estimated time: 1-2 days for experienced Go developer
+  - GitHub Rulesets REST API documentation, particularly the `rules/branches/{branch}` endpoint
+- Key architectural considerations:
+  - Polymorphic rule deserialization — the API returns mixed rule types in a single array
+  - Coexistence design — both `from-branch-protection` and `from-rulesets` can be enabled simultaneously
+  - Interface-wide changes — `RepositoryClient` extension affects all implementations
+  - Pagination handling for the rules endpoint
+- Estimated time: 3-5 days for experienced Go/Prow developer
 
 ### Caveats and Considerations
 
-- The GitHub Rulesets API returns potentially many rulesets per repo. The implementation should filter for rulesets that apply to the target branch and extract `required_status_checks` rules.
-- Consider caching/rate limiting: Rulesets API calls add to GitHub API usage. If `from-branch-protection` is also enabled, both are fetched per context policy evaluation.
-- The override plugin (`pkg/plugins/override/override.go`) should ideally be updated in the same change for consistency, though it could be a follow-up.
+- The `rules/branches/{branch}` endpoint pre-aggregates effective rules from all sources (repo + org rulesets), filters to active enforcement, and resolves conditions. This is the right endpoint to use — do NOT try to fetch all rulesets and do condition matching manually.
+- The `integration_id` field on required status checks pins a check to a specific GitHub App. For Tide's purposes (determining what contexts are required), only the `context` string matters. The `integration_id` constrains who can satisfy the check but doesn't change what's required.
+- During migration periods, repos may have both branch protection and Rulesets active. GitHub itself layers both (union, most restrictive wins). When both `from-branch-protection` and `from-rulesets` are enabled, Tide should take the union of required contexts from both sources.
+- Consider caching/rate limiting: Rulesets API calls add to GitHub API usage, though the `rules/branches/{branch}` endpoint requires only `Metadata` (read) permission, less than branch protection's `Administration` (read).
+- The override plugin (`pkg/plugins/override/override.go`) should gain Ruleset awareness for consistency.
+- Known GitHub limitation: path-filtered workflows that are also required status checks cause PRs to get stuck with permanent "Pending" status when the paths aren't touched. This is a GitHub design issue, not solvable in Prow.
 
 ## Proposed Issue Augmentation
 
@@ -277,9 +284,7 @@ This is a well-defined feature request that follows an established pattern (`fro
 ```
 Tide currently supports inferring required contexts from GitHub branch protection rules via the `from-branch-protection` config option in `tide.context_options` (implemented in `pkg/config/tide.go`). When enabled, Tide calls `GetBranchProtection()` to fetch `RequiredStatusChecks.Contexts` and adds them to the set of required contexts before allowing a merge. However, Prow's GitHub client has no Ruleset API support at all — no types, no interface methods, no HTTP calls — so there's no way to extend this to Rulesets without building that foundation first.
 
-The most natural approach would be a parallel `from-rulesets` config option that mirrors `from-branch-protection`. The implementation would need: (1) new Ruleset types in `pkg/github/types.go`, (2) a `GetRepositoryRulesets()` method on the `RepositoryClient` interface in `pkg/github/client.go`, (3) a `FromRulesets` field on `TideContextPolicy`, and (4) a new block in `GetTideContextPolicy()` alongside the existing branch protection block at `pkg/config/tide.go:920-930`. All of these layers have clear existing patterns to follow. The override plugin (`pkg/plugins/override/override.go`) also fetches branch protection for validation and should ideally gain Ruleset awareness for consistency.
-
-/help-wanted
+The most natural approach would be a parallel `from-rulesets` config option that mirrors `from-branch-protection`. GitHub provides a helpful `GET /repos/{owner}/{repo}/rules/branches/{branch}` endpoint that returns pre-aggregated effective rules for a branch (including org-level rulesets, already filtered to active enforcement). The implementation would need: (1) new Ruleset types in `pkg/github/types.go` — note the API uses polymorphic rule objects with a `type` discriminator, more complex than branch protection's flat structure, (2) a `GetBranchRules()` method on the `RepositoryClient` interface in `pkg/github/client.go` with pagination support, (3) a `FromRulesets` field on `TideContextPolicy`, and (4) a new block in `GetTideContextPolicy()` alongside the existing branch protection block at `pkg/config/tide.go:920-930`. A key design consideration is coexistence: during migration, repos may have both branch protection and Rulesets active (GitHub layers both, union with most-restrictive-wins), so both `from-branch-protection` and `from-rulesets` should be independently enableable. The override plugin (`pkg/plugins/override/override.go`) also fetches branch protection for validation and should ideally gain Ruleset awareness for consistency.
 ```
 
 ### Rationale
@@ -287,17 +292,18 @@ The most natural approach would be a parallel `from-rulesets` config option that
 **What's being added**:
 - Technical explanation of how `from-branch-protection` works and why the same approach doesn't cover Rulesets (the codebase has zero Ruleset API support)
 - Concrete implementation roadmap with file paths, showing the four layers of work needed
+- Key details about the Rulesets API: the golden endpoint, polymorphic response types, and coexistence with branch protection
 - Note about the override plugin also needing updates — a detail the reporter likely wouldn't know
 
 **Why these labels**:
-- `/help-wanted`: Level 2 effort assessment — well-defined feature with clear patterns to follow, suitable for skilled contributor
+- No difficulty label: Level 3 effort assessment — requires expertise with polymorphic API types, interface-wide changes, and coexistence design
 - `area/tide` and `kind/feature` already applied by maintainer in previous comment
 
 **What's NOT included**:
 - No `/retitle`: Title is already clear and specific
+- No `/help-wanted` or `/good-first-issue`: Level 3 complexity — experienced contributors will self-select
 - No priority label: Feature request, not a regression or security issue
 - No `/area` or `/kind`: Already applied by maintainer
-- Effort assessment details: Too verbose for an issue comment; the implementation roadmap conveys the scope
 
 ## Next Steps
 

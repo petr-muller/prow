@@ -223,6 +223,46 @@ This is a test-only fix requiring changes to a single file (`pkg/config/secret/a
 - The fix: replace the `checkValueAndErr` function's channel-based approach with polling `generator()` in a loop with `time.After` timeout
 - Verify with: `go test -race -count=100 ./pkg/config/secret/`
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "flaking test: `TestAddWithParser`" is clear, specific, mentions the test name, and accurately describes the issue.
+
+### Proposed GitHub Comment
+
+```
+## Root Cause
+
+This is a race condition in the test's synchronization logic, not in the production code. The test's `parsingFN` sends the parsed value to a channel *inside* the parser callback (`agent_test.go:203`), but the parser executes during `loadSingleSecretWithParser` (`reloader.go:72`) — *before* `reloadSecret` acquires the write lock and commits the value to `p.parsed` (`reloader.go:78-80`). When the test receives on the channel and immediately calls `generator()`, it can read the stale value because the write lock hasn't been acquired yet.
+
+## Fix Approach
+
+The fix is test-only: replace the channel-based synchronization in `checkValueAndErr` with polling `generator()` in a loop with a timeout. This eliminates the race because the test only checks the committed value, not the intermediate parser signal. The production code's `RWMutex` synchronization is correct.
+
+/remove-lifecycle stale
+/kind flake
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the original issue noted the flake symptom but didn't identify why it happens
+- Fix approach: concrete guidance for contributors on what to change
+
+**Why these labels**:
+- `/kind flake`: More specific than `kind/bug`; this is exactly a flaky test
+- `/good-first-issue`: Level 1 effort — single-file test fix with clear root cause and approach
+- `/remove-lifecycle stale`: Issue is being actively triaged, remove stale label
+- No area label: No matching area label exists for `pkg/config/secret`; the existing labels are for Prow components (tide, deck, etc.), not internal packages
+
+**What's NOT included**:
+- No `/retitle`: title is already clear and specific
+- No priority label: flaking test is annoying but not blocking
+- No area label: no suitable area label exists for this internal package
+
 ## Next Steps
 
-- Augment the issue with findings
+- Brief maintainer on findings
+- Wrap up triage

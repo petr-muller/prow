@@ -305,6 +305,54 @@ Key code to review before starting:
 - Level 2 assumes the recommended approach (opt-in). If the project decides to change defaults (Approach 1 or 3), the effort increases to Level 3 due to backwards compatibility concerns and migration work.
 - The `readOnlyRootFilesystem` support requires auditing all utility container write paths — this is likely clean (all writes go to volumes), but needs verification.
 
+## Proposed Issue Augmentation
+
+### Title Change
+- **Current**: "Restrict Prow for Users running in Environments with OPA constraints"
+- **Proposed**: "Support Pod Security Standards (restricted profile) for ProwJob pods and control plane"
+- **Rationale**: The current title is vague ("restrict Prow" is ambiguous — restrict what?). The new title names the specific Kubernetes standard (PSS), identifies what needs to change (ProwJob pods and control plane), and makes the issue discoverable by people searching for PSS/OPA/Gatekeeper compatibility.
+
+### Proposed GitHub Comment
+
+```
+/retitle Support Pod Security Standards (restricted profile) for ProwJob pods and control plane
+
+Prow's core code does not actually require elevated privileges — it doesn't hardcode privileged mode, doesn't mount `docker.sock`, and doesn't run as root. The DecorationConfig already supports configurable `RunAsUser`, `RunAsGroup`, and `FsGroup` via `pkg/apis/prowjobs/v1/types.go`. However, Prow currently cannot pass Pod Security Standards (PSS) "restricted" profile admission because of two gaps:
+
+1. **ProwJob pods**: The utility containers injected by decoration (clonerefs, initupload, entrypoint, sidecar) in `pkg/pod-utils/decorate/podspec.go` are created without container-level SecurityContext. PSS "restricted" requires each container to explicitly set `allowPrivilegeEscalation: false`, `capabilities.drop: [ALL]`, and `seccompProfile.type: RuntimeDefault`. The DecorationConfig has no fields for these container-level settings.
+
+2. **Control plane pods**: The starter deployment manifests (`config/prow/cluster/starter/`) ship without any SecurityContext — no `runAsNonRoot`, no capability drops, no seccomp profile. In a PSS-restricted namespace, these deployments would be rejected by admission.
+
+The fix would extend DecorationConfig with additional SecurityContext fields (following the existing pattern for `RunAsUser`/`RunAsGroup`/`FsGroup`) and apply them to both pod-level and container-level contexts during decoration. Starter manifests should also be updated with PSS "restricted"-compatible defaults. This can be done in a backwards-compatible way since all new fields would be optional — nil means "don't set". The work splits naturally into independent PRs: manifest hardening, DecorationConfig extension, container-level SecurityContext plumbing, and documentation. If you have specific OPA constraints you're hitting beyond what PSS covers, sharing those details would help scope this further.
+
+/area pod-utilities
+/kind feature
+/help-wanted
+/remove-lifecycle stale
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: Prow doesn't need privileges but lacks the SecurityContext boilerplate for PSS compliance
+- Specific technical gaps: container-level SecurityContext on utility containers, and missing SecurityContext in starter manifests
+- Code locations for each gap
+- Implementation approach (extend existing DecorationConfig pattern)
+- PR decomposition strategy
+- Invitation for the author to share specific OPA constraints
+
+**Why these labels**:
+- `/area pod-utilities`: Primary changes affect pod decoration and utility containers
+- `/kind feature`: This is a new configuration capability, not a bug
+- `/help-wanted`: Level 2 effort — well-defined, moderate scope, suitable for a skilled contributor
+- `/remove-lifecycle stale`: Issue is being actively triaged
+
+**What's NOT included**:
+- Priority label: not warranted — this is an enhancement, not blocking anyone
+- Multiple area labels: while control plane manifests are also affected, the core code change is in pod-utilities
+- Detailed solution approaches: kept it to one paragraph to avoid overwhelming the comment; the triage document has the full analysis
+
 ## Next Steps
 
-- Augment the issue with technical details and solution proposal
+- Brief the maintainer on findings
+- Wrap up and post the comment

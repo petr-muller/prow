@@ -186,6 +186,86 @@ This approach follows the established pattern, is fully backwards compatible, an
 **Migration/Rollout Strategy**:
 New opt-in config option — no migration needed. Users add `from-rulesets: true` to their Tide context policy when ready.
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+This is a well-defined feature request that follows an established pattern (`from-branch-protection`), but requires work across multiple layers (GitHub API types, client methods, config, Tide logic) and knowledge of both the GitHub Rulesets API and Prow's architecture.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: Estimated 5-8 files, ~200-400 lines. Core changes in `pkg/github/types.go` (new types), `pkg/github/client.go` (new interface methods + HTTP calls), `pkg/config/tide.go` (new config field + policy logic), plus corresponding test files. Optional: `pkg/plugins/override/override.go` for consistency.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: Moderate
+- **Details**: No concurrency issues or race conditions. The solution follows an existing pattern closely. Main complexity is understanding the GitHub Rulesets API response shape and correctly extracting required status checks from it. The Rulesets API is more complex than branch protection (multiple rulesets can apply, each with multiple rules).
+- **Level Indication**: 2-3
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Needs familiarity with GitHub Rulesets API, Prow's config hierarchy, and the Tide context policy system. Can be learned from existing `from-branch-protection` implementation, but contributor needs to be comfortable reading API docs and working across multiple packages.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The desired behavior is clear: fetch required status checks from Rulesets and add them to Tide's required contexts. The approach (parallel `from-rulesets` option) is straightforward. One open question: how to handle multiple rulesets with overlapping rules (union of required checks is the natural default).
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Needs unit tests for GitHub API types/client (HTTP mock pattern exists at `pkg/github/client_test.go:2316`), config parsing tests (pattern at `pkg/config/tide_test.go:1158`), and context policy building tests (pattern at `pkg/config/tide_test.go:1293`). All test patterns are well-established.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: New opt-in config option. No existing behavior changes. Users add `from-rulesets: true` when ready. Default is off.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Directly mirrors the existing `from-branch-protection` pattern. Extends `TideContextPolicy` struct with one new field, adds a new conditional block in `GetTideContextPolicy()` parallel to the existing branch protection block. No new patterns needed.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: GitHub Rulesets REST API is stable and documented. Endpoints: `GET /repos/{owner}/{repo}/rulesets` and `GET /repos/{owner}/{repo}/rules/branches/{branch}`. The API provides required status check information in the `required_status_checks` rule type.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `help-needed`: Well-defined, follows established patterns, suitable for skilled contributor
+- [x] `area/tide`: Extends Tide's context policy
+- [x] `kind/feature`: New capability
+- [ ] `good-first-issue`: Too many files/packages involved for a first contribution
+
+### Guidance for Contributors
+
+**For Level 2 (Moderate)**:
+- Suitable for contributors familiar with Go and GitHub API
+- Should review:
+  - `pkg/config/tide.go:159-175` and `920-930`: The `TideContextPolicy` struct and `from-branch-protection` pattern
+  - `pkg/github/client.go:165-202` and `2727-2806`: `RepositoryClient` interface and branch protection implementation
+  - `pkg/github/types.go:552-682`: Branch protection types as template for Ruleset types
+  - GitHub Rulesets REST API documentation
+- Recommended approach:
+  1. Add Ruleset types to `pkg/github/types.go`
+  2. Add `GetRepositoryRulesets()` to `RepositoryClient` interface and implement
+  3. Add `FromRulesets` field to `TideContextPolicy`
+  4. Extend `GetTideContextPolicy()` with Ruleset fetch block
+  5. Add tests at each layer
+- Estimated time: 1-2 days for experienced Go developer
+
+### Caveats and Considerations
+
+- The GitHub Rulesets API returns potentially many rulesets per repo. The implementation should filter for rulesets that apply to the target branch and extract `required_status_checks` rules.
+- Consider caching/rate limiting: Rulesets API calls add to GitHub API usage. If `from-branch-protection` is also enabled, both are fetched per context policy evaluation.
+- The override plugin (`pkg/plugins/override/override.go`) should ideally be updated in the same change for consistency, though it could be a follow-up.
+
 ## Next Steps
 
 (Action items will be added here)

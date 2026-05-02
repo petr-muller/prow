@@ -240,6 +240,42 @@ A small, well-defined change to a single plugin file. The solution approach is c
 - The simpler approach (skip all labeling when merge commits present) is recommended over the per-commit approach danwinship proposed in comments. The per-commit approach would require N additional API calls (`GetCommit` per non-merge commit since `ListPullRequestCommits` doesn't populate `Files`), which is expensive and unnecessary given that merge commits are transient errors that users fix by force-pushing.
 - A reviewer should consider whether to also log a message when labeling is skipped, to aid debugging.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "`owners-label` should ignore merge commits" is clear, specific, mentions the component, and accurately describes the requested behavior.
+
+### Proposed GitHub Comment
+
+```
+The root cause is that `owners-label` uses `GetPullRequestChanges` (the GitHub `GET /pulls/{n}/files` endpoint), which returns the full diff between the PR head and base branch without distinguishing which commits introduced which files. When a merge commit is present, all files from the merged branch appear in this diff, producing a flood of irrelevant labels. Since `owners-label` only adds labels and never removes them, these persist even after the merge commit is force-pushed away.
+
+The simplest fix is to call `ListPullRequestCommits` before processing files and skip labeling entirely if any commit has multiple parents (i.e., is a merge commit). This pattern is already established in the DCO plugin (`pkg/plugins/dco/dco.go`), which uses `len(commit.Parents) > 1` to detect and skip merge commits. Labels would be applied correctly on the subsequent `synchronize` event after the user force-pushes to remove the merge commit. The per-commit file analysis approach discussed above would be more precise, but `ListPullRequestCommits` doesn't populate per-commit `Files` (only `GetCommit` does per the types), so it would require N additional API calls — unnecessarily expensive for what is always a transient state.
+
+/area plugins
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation: the specific GitHub API endpoint behavior that causes the problem (not in the original issue)
+- Recommended implementation approach with specific code reference to the DCO plugin pattern
+- Explanation of why the simpler approach is preferred over the per-commit approach discussed in comments (API constraint that `Files` isn't populated in `ListPullRequestCommits`)
+
+**Why these labels**:
+- `/area plugins`: The change is in the `owners-label` plugin (`pkg/plugins/owners-label/`)
+- `/good-first-issue`: Level 1 effort — small scope (1 file + tests), clear solution, established pattern to follow
+- No `/kind` command: `kind/feature` is already applied
+
+**What's NOT included**:
+- No `/retitle`: Title is already good
+- No priority label: This is a quality-of-life improvement, not urgent
+- Didn't repeat the problem description from the original issue — the reporter already described it clearly
+- Didn't repeat the discussion points already in comments — they're already there for any contributor to read
+
 ## Next Steps
 
-- Augment the issue with findings
+- Brief the maintainer on findings
+- Wrap up: push branches and post comment

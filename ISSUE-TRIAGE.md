@@ -228,7 +228,83 @@ The admission webhook (`cmd/admission/admission.go`) only validates ProwJob spec
 5. Add integration tests running in a PSS-restricted namespace
 6. Document the configuration in Prow's site docs
 
+## Effort Assessment
+
+**Effort Level**: 2 - Moderate (help-needed)
+
+### Summary
+
+The recommended approach (opt-in SecurityContext extension + hardened starter manifests) is well-defined, follows existing patterns, and is fully backwards compatible. The work spans multiple files but each change is straightforward — adding struct fields, plumbing them through decoration, and updating YAML manifests. No algorithmic complexity or concurrency concerns.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Moderate
+- **Details**: ~8-12 files affected, ~200-400 LOC. Key files: `types.go` (new DecorationConfig fields), `podspec.go` (container-level SecurityContext application), starter manifests (SecurityContext blocks), test files, documentation.
+- **Level Indication**: 2-3
+
+#### Complexity
+- **Assessment**: Simple-Moderate
+- **Details**: Adding new optional config fields and plumbing them into SecurityContext is mechanical. The only subtlety is ensuring `readOnlyRootFilesystem` works with utility container volume mounts — requires an audit of write paths, but the write operations already target volume mounts, not root filesystem.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Moderate
+- **Details**: Requires understanding of Kubernetes SecurityContext model, Prow's DecorationConfig mechanism, and `podspec.go` decoration flow. A contributor experienced with K8s security and Go can learn the Prow-specific patterns from existing code.
+- **Level Indication**: 2-3
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: The Kubernetes SecurityContext API is standardized. The solution approach maps directly: add fields → apply in decoration → update manifests. No design ambiguity.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Moderate
+- **Details**: Unit tests for new DecorationConfig fields in `podspec_test.go` (follow existing patterns for RunAsUser/RunAsGroup/FsGroup). Ideally add an integration test in a PSS-restricted namespace, but this is optional and can be a follow-up.
+- **Level Indication**: 2-3
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: All new DecorationConfig fields are optional pointers — nil means "don't set". Existing configs work unchanged. Starter manifests are templates, not running configs.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Directly extends the existing DecorationConfig → SecurityContext pattern. The 3 existing fields (RunAsUser, RunAsGroup, FsGroup) establish the exact pattern to follow. Adding more SecurityContext fields is the natural evolution.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: All changes are internal to Prow. SecurityContext is a stable Kubernetes API with no compatibility concerns.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `help-wanted`: Well-defined, moderate scope, suitable for a skilled contributor
+- [x] `kind/feature`: Adding new configuration capability
+- [x] `area/pod-utils`: Primary changes in pod decoration
+- [ ] `good-first-issue`: Requires understanding of Prow's decoration flow and K8s SecurityContext
+
+### Guidance for Contributors
+
+This is suitable for contributors familiar with Kubernetes SecurityContext and Go. The work can be split into independent PRs:
+
+1. **PR 1 (smallest, good starting point)**: Update starter manifests with PSS "restricted" SecurityContext — pure YAML changes, immediately useful
+2. **PR 2**: Extend DecorationConfig with new SecurityContext fields (RunAsNonRoot, AllowPrivilegeEscalation, ReadOnlyRootFilesystem, SeccompProfile, Capabilities)
+3. **PR 3**: Apply container-level SecurityContext to utility containers in `decorateSpec()`
+4. **PR 4**: Documentation for running Prow in PSS-restricted environments
+
+Key code to review before starting:
+- `pkg/pod-utils/decorate/podspec.go:831-844` — existing SecurityContext application
+- `pkg/apis/prowjobs/v1/types.go:564-576` — existing DecorationConfig fields
+- `pkg/pod-utils/decorate/podspec_test.go` — existing test patterns
+
+### Caveats and Considerations
+
+- The issue is very vague — the author may have specific OPA constraints beyond what PSS covers. The augmentation comment should invite them to share specifics.
+- Level 2 assumes the recommended approach (opt-in). If the project decides to change defaults (Approach 1 or 3), the effort increases to Level 3 due to backwards compatibility concerns and migration work.
+- The `readOnlyRootFilesystem` support requires auditing all utility container write paths — this is likely clean (all writes go to volumes), but needs verification.
+
 ## Next Steps
 
-- Assess effort level for the recommended approach
 - Augment the issue with technical details and solution proposal

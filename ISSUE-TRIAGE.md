@@ -171,7 +171,75 @@ The DCO pattern is the relevant precedent for this fix.
 - Test that labeling proceeds normally when no merge commits exist
 - Ensure the fake GitHub client supports `ListPullRequestCommits`
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+A small, well-defined change to a single plugin file. The solution approach is clear, follows an established pattern (DCO plugin), and has straightforward testing requirements. A new contributor could implement this with minimal guidance.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1 production file (`owners-label.go`), 1 test file (`owners-label_test.go`). Estimated ~15-25 lines of production code (interface addition + merge commit check + early return), ~30-50 lines of test code.
+- **Level Indication**: 1
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: The logic is a straightforward check: list commits, check for any with multiple parents, return early if found. The DCO plugin has an exact template to follow. No concurrency, no state management, no complex interactions.
+- **Level Indication**: 1
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Basic Go, basic understanding of GitHub's commit model (what a merge commit is). The contributor can learn the plugin pattern from the existing 123-line file. The DCO plugin provides a copy-paste-worthy pattern.
+- **Level Indication**: 1
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Problem is crystal clear, solution approach is agreed upon by maintainer (BenTheElder) and reporter (danwinship). No ambiguity in what needs to happen.
+- **Level Indication**: 1
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: Add test cases to existing test file following the established pattern. Test scenarios: (1) PR with merge commits → no labels added, (2) PR without merge commits → labels added normally. The existing test structure with `FakeClient` supports this easily.
+- **Level Indication**: 1
+
+#### Backwards Compatibility
+- **Assessment**: Minor behavioral change, universally positive
+- **Details**: Changes behavior only for PRs containing merge commits — labels are deferred, not lost. After force-push removes the merge commit, labels are applied normally on the next `synchronize` event. No configuration changes needed. No deployment impact for PRs without merge commits (the vast majority).
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Follows the exact pattern used by the DCO plugin. Uses existing `ListPullRequestCommits` API already available in the GitHub client. No new patterns, abstractions, or infrastructure needed.
+- **Level Indication**: 1
+
+#### External Dependencies
+- **Assessment**: Well-supported
+- **Details**: Uses existing `ListPullRequestCommits` GitHub API wrapper already in the codebase. The `Parents` field on `RepositoryCommit` is a stable part of the GitHub API.
+- **Level Indication**: 1
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Well-defined, small scope, clear pattern to follow, minimal expertise needed
+- [x] `kind/feature`: Adds new behavior to existing plugin
+- [x] `area/plugins`: Change is in the plugins subsystem
+
+### Guidance for Contributors
+
+- Review `pkg/plugins/owners-label/owners-label.go` (123 lines — the entire plugin)
+- Study the merge commit detection pattern in `pkg/plugins/dco/dco.go:156-161`
+- Add `ListPullRequestCommits` to the local `githubClient` interface
+- Add the check early in the `handle` function, before `GetPullRequestChanges`
+- Follow existing test patterns in `owners-label_test.go`
+
+### Caveats and Considerations
+
+- The simpler approach (skip all labeling when merge commits present) is recommended over the per-commit approach danwinship proposed in comments. The per-commit approach would require N additional API calls (`GetCommit` per non-merge commit since `ListPullRequestCommits` doesn't populate `Files`), which is expensive and unnecessary given that merge commits are transient errors that users fix by force-pushing.
+- A reviewer should consider whether to also log a message when labeling is skipped, to aid debugging.
+
 ## Next Steps
 
-- Assess effort level
 - Augment the issue with findings

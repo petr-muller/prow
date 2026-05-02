@@ -1,12 +1,12 @@
-# Triage for Issue #624
+# Triage for Issue #610
 
 **Status**: In Progress
 **Created**: 2026-05-02
 
 ## Issue Information
 
-- **Issue Number**: #624
-- **Issue URL**: https://github.com/kubernetes-sigs/prow/issues/624
+- **Issue Number**: #610
+- **Issue URL**: https://github.com/kubernetes-sigs/prow/issues/610
 
 ## Findings
 

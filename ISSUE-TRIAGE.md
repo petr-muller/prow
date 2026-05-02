@@ -266,6 +266,39 @@ This is a well-defined feature request that follows an established pattern (`fro
 - Consider caching/rate limiting: Rulesets API calls add to GitHub API usage. If `from-branch-protection` is also enabled, both are fetched per context policy evaluation.
 - The override plugin (`pkg/plugins/override/override.go`) should ideally be updated in the same change for consistency, though it could be a follow-up.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **No change needed**: Current title "`tide` does not respect required contexts from Github Rulesets" is clear, specific, mentions the affected component, and accurately describes the feature gap.
+
+### Proposed GitHub Comment
+
+```
+Tide currently supports inferring required contexts from GitHub branch protection rules via the `from-branch-protection` config option in `tide.context_options` (implemented in `pkg/config/tide.go`). When enabled, Tide calls `GetBranchProtection()` to fetch `RequiredStatusChecks.Contexts` and adds them to the set of required contexts before allowing a merge. However, Prow's GitHub client has no Ruleset API support at all — no types, no interface methods, no HTTP calls — so there's no way to extend this to Rulesets without building that foundation first.
+
+The most natural approach would be a parallel `from-rulesets` config option that mirrors `from-branch-protection`. The implementation would need: (1) new Ruleset types in `pkg/github/types.go`, (2) a `GetRepositoryRulesets()` method on the `RepositoryClient` interface in `pkg/github/client.go`, (3) a `FromRulesets` field on `TideContextPolicy`, and (4) a new block in `GetTideContextPolicy()` alongside the existing branch protection block at `pkg/config/tide.go:920-930`. All of these layers have clear existing patterns to follow. The override plugin (`pkg/plugins/override/override.go`) also fetches branch protection for validation and should ideally gain Ruleset awareness for consistency.
+
+/help-wanted
+```
+
+### Rationale
+
+**What's being added**:
+- Technical explanation of how `from-branch-protection` works and why the same approach doesn't cover Rulesets (the codebase has zero Ruleset API support)
+- Concrete implementation roadmap with file paths, showing the four layers of work needed
+- Note about the override plugin also needing updates — a detail the reporter likely wouldn't know
+
+**Why these labels**:
+- `/help-wanted`: Level 2 effort assessment — well-defined feature with clear patterns to follow, suitable for skilled contributor
+- `area/tide` and `kind/feature` already applied by maintainer in previous comment
+
+**What's NOT included**:
+- No `/retitle`: Title is already clear and specific
+- No priority label: Feature request, not a regression or security issue
+- No `/area` or `/kind`: Already applied by maintainer
+- Effort assessment details: Too verbose for an issue comment; the implementation roadmap conveys the scope
+
 ## Next Steps
 
 (Action items will be added here)

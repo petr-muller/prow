@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #695 Review: Introduce new summary component</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --red: #f85149;
+    --orange: #d29922;
+    --green: #3fb950;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 0.8rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1rem; margin: 1.2rem 0 0.5rem; color: var(--purple); }
+  .meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+
+  .recommendation-box {
+    background: #f8514911;
+    border: 2px solid var(--red);
+    border-radius: 8px;
+    padding: 1.2rem 1.5rem;
+    margin: 1.5rem 0;
+  }
+  .recommendation-box.approve { background: #3fb95011; border-color: var(--green); }
+  .recommendation-box h2 { color: var(--red); border: none; margin: 0 0 0.5rem; padding: 0; font-size: 1.3rem; }
+  .recommendation-box.approve h2 { color: var(--green); }
+  .recommendation-box p { font-size: 0.95rem; }
+
+  .perspective {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .perspective-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 0.8rem 1.2rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .perspective-header:hover { background: #1c2128; }
+  .perspective-title { font-weight: 600; font-size: 0.95rem; }
+  .perspective-body { padding: 1rem 1.2rem; }
+  .perspective-body ul { padding-left: 1.4rem; margin: 0.4rem 0; }
+  .perspective-body li { margin-bottom: 0.4rem; font-size: 0.92rem; }
+  .perspective-body p { font-size: 0.92rem; margin-top: 0.4rem; }
+
+  .verdict-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    vertical-align: middle;
+  }
+  .verdict-tag.changes { background: #f8514922; color: var(--red); border: 1px solid #f8514944; }
+  .verdict-tag.approve { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+  .verdict-tag.low { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+  .verdict-tag.medium { background: #d2992222; color: var(--orange); border: 1px solid #d2992244; }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+    border-left: 3px solid var(--border);
+  }
+  .finding.high { border-left-color: var(--red); }
+  .finding.medium { border-left-color: var(--orange); }
+  .finding.low { border-left-color: var(--text-muted); }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.high { background: #f8514922; color: var(--red); border: 1px solid #f8514944; }
+  .badge.medium { background: #d2992222; color: var(--orange); border: 1px solid #d2992244; }
+  .badge.low { background: #8b949e22; color: var(--text-muted); border: 1px solid #8b949e44; }
+  .badge.converge { background: #bc8cff22; color: var(--purple); border: 1px solid #bc8cff44; }
+
+  .finding-title { font-weight: 600; margin-bottom: 0.5rem; }
+  .finding p, .finding ul { margin-top: 0.4rem; color: var(--text); font-size: 0.92rem; }
+  .finding ul { padding-left: 1.4rem; }
+  .finding li { margin-bottom: 0.3rem; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    margin: 0.6rem 0;
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+  }
+  :not(pre) > code {
+    background: var(--code-bg);
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+
+  .file-ref { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
+
+  .comment-template {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 0.6rem;
+    overflow: hidden;
+  }
+  .comment-template summary {
+    padding: 0.5rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--accent);
+    user-select: none;
+  }
+  .comment-template summary:hover { background: var(--surface); }
+  .comment-template pre {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--border);
+  }
+  th { background: var(--surface); color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; }
+
+  .checklist { list-style: none; padding: 0; }
+  .checklist li {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.92rem;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist input[type="checkbox"] { margin-right: 0.5rem; accent-color: var(--green); }
+
+  .pr-comment-box {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+    position: relative;
+  }
+  .pr-comment-box p { font-size: 0.92rem; margin-bottom: 0.5rem; }
+  .pr-comment-box .copy-hint { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>PR #695: Introduce new summary component</h1>
+<p class="meta">
+  Author: <a href="https://github.com/vovakrk">@vovakrk</a> |
+  Files: 5 | +137 / -0 |
+  <a href="https://github.com/kubernetes-sigs/prow/pull/695">github.com/kubernetes-sigs/prow/pull/695</a> |
+  <a href="https://deploy-preview-695--k8s-prow.netlify.app">Netlify preview</a>
+</p>
+
+<!-- ============================================================ -->
+<div class="recommendation-box">
+  <h2>Recommendation: REQUEST_CHANGES</h2>
+  <p>All three independent reviewers flagged the XSS vulnerability and the lack of tests. The XSS issue is specific to this lens: unlike the <code>html</code> lens which renders inside an iframe sandbox, the summary lens injects directly into the Deck page DOM, making it a real injection vector. Combined with zero test coverage in a codebase where every comparable lens has tests, these two issues warrant changes before merge.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Reviewer Perspectives</h2>
+
+<details class="perspective" open>
+  <summary class="perspective-header">
+    <span class="perspective-title">1/3 &mdash; Code Quality</span>
+    <span class="verdict-tag changes">Request Changes</span>
+  </summary>
+  <div class="perspective-body">
+    <ul>
+      <li><strong>XSS via unsanitized Markdown (critical):</strong> <code>blackfriday.Run()</code> output cast to <code>template.HTML</code> bypasses auto-escaping. Unlike the <code>html</code> lens (iframe sandbox), this renders directly in the Deck DOM &mdash; scripts in artifacts execute in the application context.</li>
+      <li><strong>No tests:</strong> Zero coverage. Every comparable lens (<code>html</code>, <code>buildlog</code>, <code>junit</code>, <code>metadata</code>, <code>podinfo</code>, <code>links</code>) has tests.</li>
+      <li><strong>Misleading error message:</strong> Line 98 logs <code>"Error executing template."</code> but the failure is template <em>parsing</em>.</li>
+      <li><strong>Silent empty result:</strong> If all artifacts fail to read, an empty body renders with no indication of failure.</li>
+      <li><strong>Positive:</strong> Follows established lens patterns well, good structured logging, correct <code>spyglass.contentUpdated()</code> integration.</li>
+    </ul>
+  </div>
+</details>
+
+<details class="perspective">
+  <summary class="perspective-header">
+    <span class="perspective-title">2/3 &mdash; Maintainability</span>
+    <span class="verdict-tag changes">Request Changes</span>
+    <span class="verdict-tag medium" style="margin-left:0.3rem">Burden: Medium</span>
+  </summary>
+  <div class="perspective-body">
+    <ul>
+      <li><strong>Unmaintained dependency:</strong> <code>blackfriday/v2</code> has not had a release since April 2021. The Go ecosystem has moved to <code>goldmark</code>. Adopting an unmaintained library means future bugs or CVEs require a fork or migration.</li>
+      <li><strong>Unsanitized HTML as maintenance debt:</strong> When eventually flagged as a security issue, fixing it will change rendering behavior &mdash; a disruptive patch. Better to address upfront.</li>
+      <li><strong>No tests:</strong> Adding them now is far cheaper than later when the author's context is gone.</li>
+      <li><strong>Positive:</strong> Follows exact <code>html</code> lens pattern. Cleanly scoped &mdash; one package, one import, one dependency. Easy to revert. Good structured logging.</li>
+    </ul>
+  </div>
+</details>
+
+<details class="perspective">
+  <summary class="perspective-header">
+    <span class="perspective-title">3/3 &mdash; Deployment Risk</span>
+    <span class="verdict-tag low">Risk: Low</span>
+  </summary>
+  <div class="perspective-body">
+    <ul>
+      <li><strong>Entirely additive:</strong> No existing code paths, configs, or behavior modified.</li>
+      <li><strong>Opt-in activation:</strong> Lens only activates when operators explicitly configure it in Spyglass config. Without configuration, it never renders.</li>
+      <li><strong>Safe rollback:</strong> Removing the lens is trivial &mdash; leftover config becomes a no-op, not an error.</li>
+      <li><strong>No config migration needed,</strong> no new permissions, no behavioral changes to existing lenses.</li>
+      <li><strong>XSS surface noted:</strong> Artifact content is from CI outputs (narrower threat model), but still renders in the Deck DOM context.</li>
+    </ul>
+  </div>
+</details>
+
+<!-- ============================================================ -->
+<h2>Converging Concerns</h2>
+<p style="color: var(--text-muted); font-size: 0.88rem; margin-bottom: 1rem;">Issues independently flagged by multiple reviewers carry the highest confidence.</p>
+
+<div class="finding high">
+  <div class="finding-title"><span class="badge high">Required</span> <span class="badge converge">3/3 reviewers</span> XSS via unsanitized Markdown rendering</div>
+  <p class="file-ref">pkg/spyglass/lenses/summary/summary.go:88-92</p>
+  <p><code>blackfriday.Run()</code> converts Markdown to HTML but does <strong>not sanitize</strong> the output. Markdown can embed raw HTML including <code>&lt;script&gt;</code> tags and event handlers. Wrapping the result in <code>template.HTML</code> bypasses Go template auto-escaping. Unlike the <code>html</code> lens (which uses an iframe sandbox via <code>srcdoc</code>), this lens injects directly into the Deck page DOM &mdash; scripts in a <code>.md</code> artifact would execute in the application context.</p>
+  <h3>Suggested fix</h3>
+  <pre><code>import "github.com/microcosm-cc/bluemonday"
+
+p := bluemonday.UGCPolicy()
+safeHTML := p.SanitizeBytes(blackfriday.Run(content))</code></pre>
+  <p>Alternatives: use blackfriday's <code>SkipHTML</code> extension flag, render in a sandboxed iframe like the <code>html</code> lens, or use <code>goldmark</code> with raw HTML disabled by default.</p>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>The output of `blackfriday.Run()` is passed directly into `template.HTML` without sanitization. Markdown files can contain arbitrary raw HTML, including `&lt;script&gt;` tags, so a malicious artifact could execute JavaScript in the browser of anyone viewing the Spyglass page. Unlike the `html` lens which renders inside a sandboxed iframe, this lens injects directly into the Deck page DOM.
+
+Could you add HTML sanitization here? For example with `bluemonday`:
+
+```go
+p := bluemonday.UGCPolicy()
+safeHTML := p.SanitizeBytes(blackfriday.Run(content))
+```
+
+Alternatively, you could use blackfriday's `SkipHTML` extension or render in a sandboxed iframe like the `html` lens does.</code></pre>
+  </details>
+</div>
+
+<div class="finding high">
+  <div class="finding-title"><span class="badge high">Required</span> <span class="badge converge">2/3 reviewers</span> No unit tests</div>
+  <p class="file-ref">pkg/spyglass/lenses/summary/</p>
+  <p>Every comparable lens in the codebase has tests (<code>html</code>, <code>buildlog</code>, <code>junit</code>, <code>metadata</code>, <code>podinfo</code>, <code>links</code>). At minimum, tests should cover:</p>
+  <ul>
+    <li>Simple Markdown artifact rendering (happy path)</li>
+    <li>XSS mitigation &mdash; confirming script tags are stripped/escaped</li>
+    <li>Empty artifact list (error path)</li>
+  </ul>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>Could you add tests for the `Body` method? Every comparable lens in the codebase has test coverage. At minimum, tests covering the happy path (simple Markdown rendering), the XSS mitigation (confirming script tags in input are stripped), and the empty artifact list case would be great. The `html` lens test file is a good pattern to follow.</code></pre>
+  </details>
+</div>
+
+<!-- ============================================================ -->
+<h2>Additional Findings</h2>
+
+<div class="finding medium">
+  <div class="finding-title"><span class="badge medium">Suggestion</span> <span class="badge converge">2/3 reviewers</span> Unmaintained dependency</div>
+  <p class="file-ref">go.mod</p>
+  <p><code>blackfriday/v2 v2.1.0</code> has not had a release since April 2021. <a href="https://github.com/yuin/goldmark" style="color: var(--accent);">goldmark</a> is actively maintained, CommonMark-compliant, and disables raw HTML by default (which would also address the sanitization concern). Not blocking, but avoids a future forced migration.</p>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>Have you considered using `goldmark` instead of `blackfriday`? `blackfriday/v2` hasn't been updated since 2021, while `goldmark` is actively maintained and disables raw HTML by default (which would also help with the sanitization concern). Not a blocker, but worth considering to avoid adopting a dependency the project may need to replace later.</code></pre>
+  </details>
+</div>
+
+<div class="finding medium">
+  <div class="finding-title"><span class="badge medium">Suggestion</span> <span class="badge converge">2/3 reviewers</span> Misleading error message</div>
+  <p class="file-ref">pkg/spyglass/lenses/summary/summary.go:98</p>
+  <p>Log says <code>"Error executing template."</code> but the failure is template <em>parsing</em> (file loading). Copied from the <code>html</code> lens, but worth fixing in new code for debuggability.</p>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>nit: The error log on line 98 says "Error executing template." but the actual failure is template *parsing* (loading the file). Consider changing to `"Error parsing template."` for easier debugging.</code></pre>
+  </details>
+</div>
+
+<div class="finding low">
+  <div class="finding-title"><span class="badge low">Suggestion</span> Silent empty result on all-artifact failure</div>
+  <p class="file-ref">pkg/spyglass/lenses/summary/summary.go:80-93</p>
+  <p>If all artifacts fail to read, <code>documents</code> is nil and the template renders an empty body with no user-facing error. Consider rendering an error message when <code>len(documents) == 0</code> after the loop.</p>
+</div>
+
+<div class="finding low">
+  <div class="finding-title"><span class="badge low">Nit</span> Priority collision with buildlog</div>
+  <p class="file-ref">pkg/spyglass/lenses/summary/summary.go:51</p>
+  <p><code>Priority: 10</code> is the same as <code>buildlog</code>. If both lenses match the same artifacts, ordering becomes unpredictable.</p>
+</div>
+
+<div class="finding low">
+  <div class="finding-title"><span class="badge low">Nit</span> <span class="badge converge">2/3 reviewers</span> Missing newline at EOF</div>
+  <p class="file-ref">pkg/spyglass/lenses/summary/template.html</p>
+  <p><code>template.html</code> is missing a trailing newline.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Summary table</h2>
+<table>
+  <tr><th>Priority</th><th>Finding</th><th>Flagged by</th><th>Action</th></tr>
+  <tr><td><span class="badge high">Required</span></td><td>XSS via unsanitized Markdown</td><td>All 3 reviewers</td><td>Add sanitization or sandbox</td></tr>
+  <tr><td><span class="badge high">Required</span></td><td>No unit tests</td><td>Code Quality, Maintainability</td><td>Add tests for Body method</td></tr>
+  <tr><td><span class="badge medium">Suggestion</span></td><td>Unmaintained blackfriday dependency</td><td>Code Quality, Maintainability</td><td>Consider goldmark</td></tr>
+  <tr><td><span class="badge medium">Suggestion</span></td><td>Misleading error message</td><td>Code Quality, Maintainability</td><td>Fix log string</td></tr>
+  <tr><td><span class="badge low">Nit</span></td><td>Silent empty result</td><td>Code Quality</td><td>Add fallback message</td></tr>
+  <tr><td><span class="badge low">Nit</span></td><td>Priority collision with buildlog</td><td>Code Quality</td><td>Choose different priority</td></tr>
+  <tr><td><span class="badge low">Nit</span></td><td>Missing newline at EOF</td><td>Code Quality, Maintainability</td><td>Add trailing newline</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Ready-to-post PR comment</h2>
+<div class="pr-comment-box">
+  <p>Thanks for adding the summary lens &mdash; the structure is clean and follows established patterns well. Requesting changes on two items before this can merge:</p>
+  <p><strong>1. HTML sanitization:</strong> The Markdown-to-HTML output from blackfriday is cast directly to <code>template.HTML</code> without sanitization, creating an XSS vector. Unlike the <code>html</code> lens which uses an iframe sandbox, this lens renders directly into the Deck DOM, so malicious content in artifacts could execute scripts in the application context. Please sanitize the output (e.g. with <code>bluemonday</code>) or strip raw HTML via blackfriday's <code>SkipHTML</code> option.</p>
+  <p><strong>2. Tests:</strong> Please add tests &mdash; every comparable lens in the codebase has them.</p>
+  <p>Minor items: fix the misleading "executing template" error message on line 98 (it's a parse error) and add a trailing newline to <code>template.html</code>.</p>
+  <p class="copy-hint">Select and copy the text above to post as a PR comment.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Review checklist</h2>
+<ul class="checklist">
+  <li><input type="checkbox"> XSS issue addressed (sanitization, SkipHTML, or iframe sandboxing)</li>
+  <li><input type="checkbox"> Unit tests added (happy path + XSS mitigation + empty artifacts)</li>
+  <li><input type="checkbox"> Dependency choice discussed (blackfriday vs goldmark)</li>
+  <li><input type="checkbox"> Error message fixed ("executing" &rarr; "parsing")</li>
+  <li><input type="checkbox"> EOF newline added to template.html</li>
+</ul>
+
+</body>
+</html>

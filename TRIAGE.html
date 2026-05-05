@@ -1,0 +1,378 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triage: Issue #693 — Integrate with Netlify for /retest</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --card: #16213e;
+    --accent: #e94560;
+    --accent2: #0f3460;
+    --text: #eee;
+    --muted: #999;
+    --green: #2ecc71;
+    --yellow: #f1c40f;
+    --orange: #e67e22;
+    --red: #e74c3c;
+    --blue: #3498db;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.6rem; color: var(--accent); margin-bottom: 0.2rem; }
+  .subtitle { color: var(--muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .subtitle a { color: var(--blue); text-decoration: none; }
+  h2 {
+    font-size: 1.15rem;
+    margin: 1.8rem 0 0.6rem;
+    padding-bottom: 0.3rem;
+    border-bottom: 2px solid var(--accent2);
+    color: var(--blue);
+  }
+  h3 { font-size: 1rem; margin: 0.8rem 0 0.4rem; }
+  .card {
+    background: var(--card);
+    border: 1px solid var(--accent2);
+    border-radius: 8px;
+    padding: 1rem 1.2rem;
+    margin: 0.6rem 0;
+  }
+  .verdict {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 4px;
+    font-weight: bold;
+    font-size: 0.85rem;
+  }
+  .v-legit { background: var(--green); color: #000; }
+  .v-blocked { background: var(--red); color: #fff; }
+  .v-partial { background: var(--yellow); color: #000; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.6rem 0;
+    font-size: 0.88rem;
+  }
+  th, td {
+    padding: 0.45rem 0.7rem;
+    border: 1px solid var(--accent2);
+    text-align: left;
+  }
+  th { background: var(--accent2); font-weight: 600; }
+  code {
+    background: rgba(255,255,255,0.1);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.84rem;
+    font-family: 'SF Mono', 'Fira Code', monospace;
+  }
+  ul, ol { padding-left: 1.4rem; margin: 0.4rem 0; }
+  li { margin: 0.25rem 0; font-size: 0.92rem; }
+  .tldr {
+    background: rgba(233,69,96,0.12);
+    border-left: 4px solid var(--accent);
+    padding: 0.8rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 1rem 0;
+    font-size: 0.95rem;
+  }
+  .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 0.6rem; }
+  @media (max-width: 650px) { .grid2 { grid-template-columns: 1fr; } }
+  .pro { color: var(--green); }
+  .con { color: var(--red); }
+  .label {
+    display: inline-block;
+    padding: 0.15rem 0.5rem;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    font-weight: 600;
+    margin: 0.1rem 0.2rem;
+  }
+  .l-area { background: #0f3460; color: #7ec8e3; }
+  .l-kind { background: #1a3a5c; color: #c7def8; }
+  pre {
+    background: rgba(0,0,0,0.3);
+    padding: 0.8rem 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    font-size: 0.83rem;
+    line-height: 1.5;
+    margin: 0.5rem 0;
+    white-space: pre-wrap;
+  }
+  .footer {
+    margin-top: 2.5rem;
+    padding-top: 0.8rem;
+    border-top: 1px solid var(--accent2);
+    color: var(--muted);
+    font-size: 0.78rem;
+    text-align: center;
+  }
+  .footer a { color: var(--blue); text-decoration: none; }
+</style>
+</head>
+<body>
+
+<h1>Issue #693: Integrate with Netlify for /retest Prow command</h1>
+<div class="subtitle">
+  <a href="https://github.com/kubernetes-sigs/prow/issues/693">github.com/kubernetes-sigs/prow/issues/693</a>
+  &mdash; Reported by Caesarsage (2026-04-28)
+  &mdash; Originally: <a href="https://github.com/kubernetes/test-infra/issues/35103">test-infra#35103</a> by lmktfy (Tim Bannister)
+</div>
+
+<div class="tldr">
+  <strong>TL;DR:</strong> Netlify has no <em>documented</em> API to trigger deploy preview rebuilds. However, Caesarsage found an <strong>undocumented</strong> <code>POST /api/v1/deploys/{deploy_id}/retry</code> endpoint that may preserve deploy preview identity. If validated, this changes feasibility from Level 4 to Level 2-3. Needs verification before investing effort.
+</div>
+
+<!-- ============ LEGITIMACY ============ -->
+<h2>Legitimacy</h2>
+<div class="card">
+  <span class="verdict v-legit">LEGITIMATE</span>
+  <p style="margin-top:0.5rem">Valid feature request for the trigger plugin. <code>/retest</code> handling lives in this repo. Real user pain point: no self-service way to retrigger a flaky Netlify deploy preview.</p>
+</div>
+
+<!-- ============ THE PROBLEM ============ -->
+<h2>What's Being Asked</h2>
+<div class="card">
+  <p>When an org member uses <code>/retest</code> on a PR in k/website or k/contributor-site, trigger Netlify to rebuild the deploy preview. Currently the only option is for the PR author to push an amended commit.</p>
+</div>
+
+<!-- ============ THE BLOCKER ============ -->
+<h2>The Core Blocker: Netlify API</h2>
+<div class="card">
+  <p><strong>Netlify does not have an API endpoint to trigger deploy preview rebuilds.</strong> Deploy previews are triggered exclusively by GitHub push webhook events.</p>
+
+  <table>
+    <tr><th>Method</th><th>Triggers build?</th><th>True deploy preview?</th><th>Updates PR status?</th></tr>
+    <tr><td>Build hook + <code>trigger_branch</code></td><td>Yes</td><td class="con">No (branch deploy)</td><td class="con">No</td></tr>
+    <tr><td><code>POST /sites/{id}/builds</code></td><td>Yes</td><td class="con">No (prod only)</td><td class="con">No</td></tr>
+    <tr><td><code>POST /sites/{id}/deploys</code> with branch</td><td>Partial</td><td class="con">No</td><td class="con">No</td></tr>
+    <tr><td>Push empty commit to PR branch</td><td>Yes</td><td class="pro">Yes</td><td class="pro">Yes</td></tr>
+    <tr><td>Re-deliver GitHub webhook</td><td>Yes</td><td class="pro">Yes</td><td class="pro">Yes</td></tr>
+    <tr style="background:rgba(241,196,15,0.12)"><td><code>POST /deploys/{deploy_id}/retry</code></td><td>Yes</td><td style="color:var(--yellow)">Claimed yes</td><td style="color:var(--yellow)">Unverified</td></tr>
+  </table>
+
+  <h3>Key distinction</h3>
+  <ul>
+    <li><strong>Deploy preview</strong>: tied to PR number, URL <code>deploy-preview-N--site.netlify.app</code>, posts status to GitHub PR</li>
+    <li><strong>Branch deploy</strong>: builds from branch, no PR linkage, no GitHub status update</li>
+  </ul>
+
+  <h3>Security</h3>
+  <ul>
+    <li>Netlify PATs have <strong>no granular scoping</strong> &mdash; full account access (confirms BenTheElder's concern)</li>
+    <li>Build hook URLs are safer (URL-is-secret, single-site, build-only) but can't trigger deploy previews</li>
+  </ul>
+</div>
+
+<!-- ============ NEW FINDING ============ -->
+<h2>Update: Caesarsage's Spike (2026-04-30)</h2>
+<div class="card" style="border-color: var(--yellow);">
+  <h3>Undocumented Retry Endpoint</h3>
+  <p>Caesarsage posted a spike result on the issue confirming our build hook / <code>POST /sites/{id}/builds</code> findings, but also claiming a <code>POST /api/v1/deploys/{deploy_id}/retry</code> endpoint exists that reruns the same deploy preview and preserves PR preview identity.</p>
+
+  <h3>What we know</h3>
+  <ul>
+    <li class="pro">Caesarsage claims it works for deploy previews on forked PRs</li>
+    <li class="con"><strong>Not in Netlify's official OpenAPI spec</strong> (v2.53.0) &mdash; undocumented</li>
+    <li class="con">Only evidence: a single <a href="https://answers.netlify.com/t/how-to-retry-preview-build-after-branch-environment-variables-have-been-set/107149" style="color:var(--blue)">Netlify support thread</a> from Nov 2023 where even the poster couldn't find it in official docs</li>
+    <li class="con">Still requires a Netlify PAT (no granular scoping &mdash; full account access)</li>
+  </ul>
+
+  <h3>If validated, this changes the picture</h3>
+  <table>
+    <tr><th>Aspect</th><th>Before</th><th>After (if confirmed)</th></tr>
+    <tr><td>Feasibility</td><td class="con">Level 4 &mdash; Blocked</td><td style="color:var(--yellow)">Level 2-3 &mdash; Feasible</td></tr>
+    <tr><td>Approach</td><td>No viable API path</td><td>Look up deploy preview <code>deploy_id</code> for PR, POST <code>/retry</code></td></tr>
+    <tr><td>Security concern</td><td>Moot (no API)</td><td>Active: PAT has full account access, no scope restriction</td></tr>
+    <tr><td>Stability risk</td><td>N/A</td><td>Relying on undocumented API &mdash; could break without notice</td></tr>
+  </table>
+
+  <h3 style="color:var(--orange)">Action needed</h3>
+  <p>Before investing in implementation, validate:</p>
+  <ol>
+    <li>Does <code>POST /api/v1/deploys/{deploy_id}/retry</code> actually work?</li>
+    <li>Does it preserve the <code>deploy-preview-N</code> URL and update GitHub PR status?</li>
+    <li>How to get the <code>deploy_id</code> for a PR's latest deploy preview? (likely <code>GET /sites/{site_id}/deploys?branch=...</code>)</li>
+    <li>Is Netlify willing to support this endpoint long-term, or is it internal/deprecated?</li>
+  </ol>
+</div>
+
+<!-- ============ PROW ARCHITECTURE ============ -->
+<h2>Prow Architecture Context</h2>
+<div class="card">
+  <h3>How /retest works</h3>
+  <ol>
+    <li><code>handleGenericComment()</code> receives the event &mdash; <code>generic-comment.go:38</code></li>
+    <li><code>commentMatchesTrigger()</code> matches <code>/retest</code> regex &mdash; <code>generic-comment.go:213-231</code></li>
+    <li><code>FilterPresubmits()</code> selects failed jobs &mdash; <code>generic-comment.go:254-274</code></li>
+    <li><code>RunRequestedWithLabels()</code> creates new ProwJobs &mdash; <code>trigger.go:332-356</code></li>
+  </ol>
+
+  <h3>Existing external CI pattern: GitHub Actions</h3>
+  <p>At <code>generic-comment.go:168-196</code>, the <code>TriggerGitHubWorkflows</code> config option re-triggers failed GitHub Action runs on <code>/retest</code>. This is the exact template a Netlify integration would follow &mdash; <strong>if the API existed</strong>.</p>
+</div>
+
+<!-- ============ SOLUTION OPTIONS ============ -->
+<h2>Solution Options</h2>
+
+<div class="grid2">
+  <div class="card">
+    <h3>A: Build Hook Integration</h3>
+    <span class="verdict v-partial">Partial</span>
+    <ul>
+      <li class="pro">Simple: POST to build hook URL with <code>trigger_branch</code></li>
+      <li class="pro">Safe: no PAT needed, URL-as-secret</li>
+      <li class="pro">Follows <code>TriggerGitHubWorkflows</code> pattern</li>
+      <li class="con">Produces branch deploy, NOT deploy preview</li>
+      <li class="con">PR check status stays failed</li>
+    </ul>
+    <p><strong>Effort:</strong> Level 2 &mdash; ~50-100 LOC, 2-3 files</p>
+  </div>
+
+  <div class="card">
+    <h3>B: Push Empty Commit</h3>
+    <span class="verdict v-blocked">Problematic</span>
+    <ul>
+      <li class="pro">Only method producing true deploy preview</li>
+      <li class="con">Needs push access to contributor forks</li>
+      <li class="con">Pollutes git history</li>
+      <li class="con">Retriggers ALL CI, not just Netlify</li>
+    </ul>
+    <p><strong>Effort:</strong> Level 2-3</p>
+  </div>
+
+  <div class="card">
+    <h3>C: External Plugin</h3>
+    <span class="verdict v-blocked">Still blocked</span>
+    <ul>
+      <li class="pro">Keeps Prow clean of vendor code</li>
+      <li class="con">Same Netlify API limitation applies</li>
+      <li class="con">New infra to deploy and maintain</li>
+      <li class="con">Needs own <code>/retest</code> parsing</li>
+    </ul>
+    <p><strong>Effort:</strong> Level 3 (new service)</p>
+  </div>
+
+  <div class="card" style="border-color: var(--yellow);">
+    <h3>E: Deploy Retry Endpoint (NEW)</h3>
+    <span class="verdict v-partial">Unverified</span>
+    <ul>
+      <li class="pro">May produce true deploy preview with PR status</li>
+      <li class="pro">Follows <code>TriggerGitHubWorkflows</code> pattern</li>
+      <li class="pro">No git manipulation needed</li>
+      <li class="con">Undocumented endpoint &mdash; could break anytime</li>
+      <li class="con">Requires PAT with full account access</li>
+      <li class="con">Need extra API call to look up <code>deploy_id</code> first</li>
+    </ul>
+    <p><strong>Effort:</strong> Level 2-3 (if endpoint works as claimed)</p>
+  </div>
+
+  <div class="card">
+    <h3>D: Document Workaround</h3>
+    <span class="verdict v-legit">Honest</span>
+    <ul>
+      <li class="pro">Zero code changes</li>
+      <li class="pro">Addresses immediate need</li>
+      <li class="con">Doesn't solve the UX problem</li>
+    </ul>
+    <p><strong>Workarounds:</strong></p>
+    <ul>
+      <li><code>git commit --allow-empty -m "retrigger" && git push</code></li>
+      <li>Repo admin re-delivers GitHub webhook</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ============ EFFORT ============ -->
+<h2>Effort Assessment</h2>
+<div class="card">
+  <div class="grid2">
+    <div>
+      <h3>Full solution (documented APIs)</h3>
+      <span class="verdict v-blocked">Level 4 &mdash; Blocked</span>
+      <p>No documented Netlify API can trigger deploy preview rebuilds.</p>
+    </div>
+    <div>
+      <h3>Partial (build hooks)</h3>
+      <span class="verdict v-partial">Level 2 &mdash; Moderate</span>
+      <p>Feasible but doesn't fix the actual problem (PR status stays failed).</p>
+    </div>
+  </div>
+  <div style="margin-top:0.6rem; padding:0.7rem; background:rgba(241,196,15,0.1); border-radius:6px; border:1px solid var(--yellow);">
+    <h3 style="color:var(--yellow)">Via undocumented retry endpoint (if validated)</h3>
+    <span class="verdict v-partial">Level 2-3 &mdash; Feasible</span>
+    <p>If <code>POST /deploys/{id}/retry</code> works as Caesarsage claims, the full solution becomes achievable. Still carries risk of relying on undocumented API and requires a full-access PAT.</p>
+  </div>
+</div>
+
+<!-- ============ LABELS ============ -->
+<h2>Recommended Labels</h2>
+<div class="card">
+  <span class="label l-area">/area plugins</span>
+  <span class="label l-kind">/kind feature</span>
+  <p style="margin-top:0.5rem;font-size:0.88rem;color:var(--muted)">
+    No <code>/good-first-issue</code> or <code>/help-wanted</code> &mdash; blocked by external API, don't invite contributors to a dead end.
+  </p>
+</div>
+
+<!-- ============ PROPOSED COMMENT ============ -->
+<h2>Proposed GitHub Comment</h2>
+<div class="card">
+<pre>## Netlify API Limitation
+
+After researching this, the main blocker is on Netlify's side rather than Prow's: **Netlify does not expose an API to trigger deploy preview rebuilds for a specific PR.** Deploy previews are triggered exclusively by GitHub push webhook events. The available alternatives each have significant limitations:
+
+- **Build hooks** (`POST https://api.netlify.com/build_hooks/{id}?trigger_branch=&lt;branch&gt;`) trigger *branch deploys*, not deploy previews. These don't create the `deploy-preview-N` URL and don't update GitHub PR status checks — so the failed check that prompted `/retest` would remain failed.
+- **Netlify API tokens** (PATs) have no granular scoping — they grant full account access, which makes @BenTheElder's security concern from the [original issue](https://github.com/kubernetes/test-infra/issues/35103) even more relevant.
+- **Pushing an empty commit** to the PR branch is the only method that triggers a true deploy preview rebuild with proper GitHub status updates, but this requires push access to contributor forks and pollutes git history.
+
+## Prow Architecture Context
+
+Prow already has a pattern for re-triggering external CI on `/retest`: the `TriggerGitHubWorkflows` option in the trigger plugin config (`pkg/plugins/trigger/generic-comment.go:168-196`) fetches failed GitHub Action runs and re-triggers them via the GitHub API. If Netlify were to add an API for deploy preview rebuilds, the Prow integration would follow this exact pattern and be straightforward to implement.
+
+Until then, the available workaround for contributors is pushing an empty commit (`git commit --allow-empty -m "retrigger" && git push`) or asking a repo admin to re-deliver the GitHub webhook from the repository's webhook settings.
+
+/area plugins
+/kind feature</pre>
+  <p style="margin-top:0.5rem;font-size:0.85rem;color:var(--muted)">Status: <strong>not posted</strong> (skipped during wrapup)</p>
+</div>
+
+<!-- ============ KEY PEOPLE ============ -->
+<h2>Key People</h2>
+<div class="card">
+  <table>
+    <tr><th>Who</th><th>Role</th><th>Position</th></tr>
+    <tr><td>Caesarsage (Destiny Erhabor)</td><td>Issue author, self-assigned</td><td>Posted spike: found undocumented <code>/deploys/{id}/retry</code> endpoint</td></tr>
+    <tr><td>lmktfy (Tim Bannister)</td><td>Original reporter (test-infra#35103)</td><td>SIG Docs chair, believes only a rebuild-trigger token is needed</td></tr>
+    <tr><td>BenTheElder</td><td>Prow maintainer</td><td>Raised security concerns about Netlify creds in presubmits</td></tr>
+  </table>
+</div>
+
+<!-- ============ LINKS ============ -->
+<h2>Links</h2>
+<div class="card">
+  <ul>
+    <li><a href="https://github.com/kubernetes-sigs/prow/issues/693" style="color:var(--blue)">Issue #693</a></li>
+    <li><a href="https://github.com/kubernetes/test-infra/issues/35103" style="color:var(--blue)">Original issue: test-infra#35103</a></li>
+    <li><a href="https://github.com/petr-muller/prow/blob/issue-triage-693/ISSUE-TRIAGE.md" style="color:var(--blue)">Full triage document</a></li>
+    <li><a href="https://docs.netlify.com/build/configure-builds/build-hooks/" style="color:var(--blue)">Netlify Build Hooks docs</a></li>
+    <li><a href="https://docs.netlify.com/deploy/deploy-types/deploy-previews/" style="color:var(--blue)">Netlify Deploy Previews docs</a></li>
+  </ul>
+</div>
+
+<div class="footer">
+  Triage for <a href="https://github.com/kubernetes-sigs/prow/issues/693">#693</a> &mdash; Updated 2026-05-04
+</div>
+
+</body>
+</html>

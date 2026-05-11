@@ -1,0 +1,397 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #695 Review: Introduce new summary component (Round 2)</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --red: #f85149;
+    --orange: #d29922;
+    --green: #3fb950;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.6rem; margin-bottom: 0.3rem; }
+  h2 { font-size: 1.2rem; margin: 2rem 0 0.8rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1rem; margin: 1.2rem 0 0.5rem; color: var(--purple); }
+  .meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+
+  .recommendation-box {
+    border: 2px solid var(--green);
+    background: #3fb95011;
+    border-radius: 8px;
+    padding: 1.2rem 1.5rem;
+    margin: 1.5rem 0;
+  }
+  .recommendation-box h2 { color: var(--green); border: none; margin: 0 0 0.5rem; padding: 0; font-size: 1.3rem; }
+  .recommendation-box p { font-size: 0.95rem; }
+
+  .round-banner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1.2rem;
+    margin-bottom: 1.5rem;
+    font-size: 0.9rem;
+  }
+  .round-banner strong { color: var(--cyan); }
+
+  .resolved-section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .resolved-section h3 { color: var(--green); margin-top: 0; }
+  .resolved-item {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    padding: 0.5rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.92rem;
+  }
+  .resolved-item:last-child { border-bottom: none; }
+  .resolved-check { color: var(--green); font-weight: bold; flex-shrink: 0; }
+  .resolved-detail { color: var(--text-muted); font-size: 0.85rem; }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+    border-left: 3px solid var(--border);
+  }
+  .finding.medium { border-left-color: var(--orange); }
+  .finding.low { border-left-color: var(--text-muted); }
+  .finding.info { border-left-color: var(--cyan); }
+
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    margin-right: 0.5rem;
+    vertical-align: middle;
+  }
+  .badge.medium { background: #d2992222; color: var(--orange); border: 1px solid #d2992244; }
+  .badge.low { background: #8b949e22; color: var(--text-muted); border: 1px solid #8b949e44; }
+  .badge.resolved { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+  .badge.info { background: #39d2c022; color: var(--cyan); border: 1px solid #39d2c044; }
+  .badge.positive { background: #3fb95022; color: var(--green); border: 1px solid #3fb95044; }
+
+  .finding-title { font-weight: 600; margin-bottom: 0.5rem; }
+  .finding p, .finding ul { margin-top: 0.4rem; color: var(--text); font-size: 0.92rem; }
+  .finding ul { padding-left: 1.4rem; }
+  .finding li { margin-bottom: 0.3rem; }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85rem;
+    margin: 0.6rem 0;
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+  }
+  :not(pre) > code {
+    background: var(--code-bg);
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+    border: 1px solid var(--border);
+  }
+
+  .file-ref { color: var(--text-muted); font-size: 0.82rem; font-style: italic; }
+
+  .comment-template {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-top: 0.6rem;
+    overflow: hidden;
+  }
+  .comment-template summary {
+    padding: 0.5rem 0.8rem;
+    cursor: pointer;
+    font-size: 0.85rem;
+    color: var(--accent);
+    user-select: none;
+  }
+  .comment-template summary:hover { background: var(--surface); }
+  .comment-template pre {
+    border: none;
+    border-radius: 0;
+    margin: 0;
+    border-top: 1px solid var(--border);
+  }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.8rem;
+    border: 1px solid var(--border);
+  }
+  th { background: var(--surface); color: var(--text-muted); font-size: 0.8rem; text-transform: uppercase; }
+
+  .checklist { list-style: none; padding: 0; }
+  .checklist li {
+    padding: 0.4rem 0;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.92rem;
+  }
+  .checklist li:last-child { border-bottom: none; }
+  .checklist input[type="checkbox"] { margin-right: 0.5rem; accent-color: var(--green); }
+
+  .pr-comment-box {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin: 1rem 0;
+    position: relative;
+  }
+  .pr-comment-box p { font-size: 0.92rem; margin-bottom: 0.5rem; }
+  .pr-comment-box .copy-hint { color: var(--text-muted); font-size: 0.8rem; font-style: italic; }
+
+  .verified-tag {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    padding: 0.15rem 0.5rem;
+    border-radius: 3px;
+    background: #3fb95022;
+    color: var(--green);
+    border: 1px solid #3fb95044;
+    margin-left: 0.4rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #695: Introduce new markdown lens</h1>
+<p class="meta">
+  Author: <a href="https://github.com/vovakrk">@vovakrk</a> |
+  Files: 5 | +137 &rarr; +292 |
+  <a href="https://github.com/kubernetes-sigs/prow/pull/695">github.com/kubernetes-sigs/prow/pull/695</a> |
+  <a href="https://deploy-preview-695--k8s-prow.netlify.app">Netlify preview</a>
+</p>
+
+<div class="round-banner">
+  <strong>Round 2 review</strong> &mdash; Author pushed 4 commits on May 7 addressing your review feedback. Original review was May 5.
+</div>
+
+<!-- ============================================================ -->
+<div class="recommendation-box">
+  <h2>Recommendation: APPROVE with minor suggestions</h2>
+  <p>All three required changes from Round 1 are addressed. The migration to <code>goldmark</code> resolves the XSS concern (verified: raw HTML, <code>javascript:</code> URIs, and <code>data:</code> URIs are all stripped by default). Tests are present. The lens is renamed to "markdown". Remaining items are minor suggestions, none blocking.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Round 1 Issues &mdash; Resolution Status</h2>
+
+<div class="resolved-section">
+  <h3>All required changes addressed</h3>
+
+  <div class="resolved-item">
+    <span class="resolved-check">&check;</span>
+    <div>
+      <strong>XSS via unsanitized Markdown</strong> <span class="verified-tag">verified safe</span>
+      <div class="resolved-detail">Migrated from <code>blackfriday</code> to <code>goldmark</code> v1.8.2. Goldmark defaults <code>Unsafe: false</code> &mdash; raw HTML is replaced with <code>&lt;!-- raw HTML omitted --&gt;</code>, and <code>javascript:</code> / <code>data:</code> URIs are stripped to empty <code>href=""</code>. The <code>template.HTML</code> cast is still present but safe because goldmark never produces dangerous HTML from its default renderer.</div>
+    </div>
+  </div>
+
+  <div class="resolved-item">
+    <span class="resolved-check">&check;</span>
+    <div>
+      <strong>Unmaintained blackfriday dependency</strong>
+      <div class="resolved-detail">Replaced with <code>goldmark</code> v1.8.2 &mdash; actively maintained, CommonMark-compliant, with GFM extension enabled.</div>
+    </div>
+  </div>
+
+  <div class="resolved-item">
+    <span class="resolved-check">&check;</span>
+    <div>
+      <strong>Rename from "summary" to "markdown"</strong>
+      <div class="resolved-detail">Package, files, and lens <code>Name</code> all renamed to <code>markdown</code>.</div>
+    </div>
+  </div>
+
+  <div class="resolved-item">
+    <span class="resolved-check">&check;</span>
+    <div>
+      <strong>Add unit tests</strong>
+      <div class="resolved-detail">Added <code>markdown_test.go</code> with 3 table-driven test cases using the existing <code>fake.Artifact</code> helper: basic rendering, file filter, and hide-when-no-match. All pass.</div>
+    </div>
+  </div>
+
+  <div class="resolved-item">
+    <span class="resolved-check">&check;</span>
+    <div>
+      <strong>Fix misleading error message</strong>
+      <div class="resolved-detail">Line 143 now reads <code>"Error parsing template."</code> instead of <code>"Error executing template."</code></div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================================================ -->
+<h2>New features added</h2>
+
+<div class="finding info">
+  <div class="finding-title"><span class="badge info">New</span> File filtering via config</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown.go:87-95</p>
+  <p>The lens now accepts a <code>"file"</code> config option to filter which artifacts to render. Uses <code>strings.HasSuffix(artifact.JobPath(), targetFile)</code> to match. Useful for operators who match broad file patterns but want to render only specific ones.</p>
+</div>
+
+<div class="finding info">
+  <div class="finding-title"><span class="badge info">New</span> Custom title via config</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown.go:87-95, 119-121</p>
+  <p>The lens accepts a <code>"title"</code> config option to override the document title displayed in the UI, instead of defaulting to the artifact filename.</p>
+</div>
+
+<div class="finding info">
+  <div class="finding-title"><span class="badge info">New</span> Priority changed from 10 to 5</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown.go:55</p>
+  <p>Resolves the priority collision with <code>buildlog</code> (which uses 10).</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Remaining findings</h2>
+
+<div class="finding medium">
+  <div class="finding-title"><span class="badge medium">Worth discussing</span> Fragile DOM-walking hide script</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown.go:131-138</p>
+  <p>When no documents match the file filter, the lens returns a <code>&lt;script&gt;</code> that hides its container by walking up the DOM tree:</p>
+  <pre><code>const container = window.frameElement.parentElement.parentElement;
+if (container) {
+    container.style.display = 'none';
+}</code></pre>
+  <p>This relies on the specific DOM nesting of the Spyglass layout. If the layout changes, this will break silently (the lens panel stays visible but empty, or worse, hides a parent it shouldn't). Worth asking if there's a standard Spyglass mechanism for a lens to signal "I have nothing to show."</p>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>When no documents match the file filter, the lens injects a script that hides its container by walking up the DOM via `window.frameElement.parentElement.parentElement`. This is fragile — it depends on the specific Spyglass layout nesting and will break silently if the layout changes.
+
+Is there a standard Spyglass mechanism for a lens to signal "nothing to show"? If not, this approach works for now, but a comment explaining the DOM structure assumption would help future maintainers.</code></pre>
+  </details>
+</div>
+
+<div class="finding low">
+  <div class="finding-title"><span class="badge low">Nit</span> Lens Title vs Name mismatch</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown.go:54-55</p>
+  <p><code>Name</code> is <code>"markdown"</code> but <code>Title</code> (the user-visible label in Spyglass) is still <code>"Summary"</code>. Is this intentional &mdash; keeping the old UX label &mdash; or should it be <code>"Markdown"</code>?</p>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>nit: The lens `Name` is `"markdown"` but the `Title` (user-visible label in Spyglass) is still `"Summary"`. Is that intentional?</code></pre>
+  </details>
+</div>
+
+<div class="finding low">
+  <div class="finding-title"><span class="badge low">Nit</span> No test for empty artifact list</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown_test.go</p>
+  <p>The test file covers rendering, file filtering, and the hide-script path, but doesn't test <code>Body()</code> with an empty <code>[]api.Artifact{}</code> (which hits the early return with the error log on line 83).</p>
+</div>
+
+<div class="finding low">
+  <div class="finding-title"><span class="badge low">Nit</span> No test for XSS resistance</div>
+  <p class="file-ref">pkg/spyglass/lenses/markdown/markdown_test.go</p>
+  <p>Given XSS was the original critical concern, a test confirming <code>&lt;script&gt;</code> tags in Markdown input don't appear in the output would be a valuable regression guard &mdash; ensuring nobody later adds <code>goldmark.WithRendererOptions(html.WithUnsafe())</code> without noticing.</p>
+
+  <details class="comment-template">
+    <summary>Copy-paste PR comment</summary>
+    <pre><code>Optional: since XSS was the main concern in the original review, a test case confirming that `&lt;script&gt;` tags in Markdown input are stripped from the output would be a nice regression guard. It would catch if someone later adds `html.WithUnsafe()` to the goldmark config.</code></pre>
+  </details>
+</div>
+
+<!-- ============================================================ -->
+<h2>Positives</h2>
+
+<div class="finding" style="border-left-color: var(--green);">
+  <div class="finding-title"><span class="badge positive">Good</span> Things done well in this iteration</div>
+  <ul>
+    <li><strong>Goldmark with GFM extension</strong> is the right choice &mdash; actively maintained, safe defaults, CommonMark-compliant</li>
+    <li><strong>File filtering and custom titles</strong> are useful operator-facing features that go beyond the minimum ask</li>
+    <li><strong>Error message</strong> on line 143 is now correct (<code>"Error parsing template."</code>)</li>
+    <li><strong>Dark theme CSS</strong> in the template matches the Spyglass aesthetic</li>
+    <li><strong>Tests use <code>fake.Artifact</code></strong> helper &mdash; consistent with other lenses</li>
+    <li><strong>Priority 5</strong> resolves the collision with buildlog (10)</li>
+    <li><strong>Conversion errors are handled</strong> &mdash; goldmark conversion failures now logged and skipped (line 113-116), which the original blackfriday version didn't handle</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2>Summary table</h2>
+<table>
+  <tr><th>Status</th><th>Finding</th><th>Action</th></tr>
+  <tr><td><span class="badge resolved">Resolved</span></td><td>XSS via unsanitized Markdown</td><td>Goldmark defaults are safe &mdash; verified</td></tr>
+  <tr><td><span class="badge resolved">Resolved</span></td><td>Unmaintained blackfriday dependency</td><td>Replaced with goldmark v1.8.2</td></tr>
+  <tr><td><span class="badge resolved">Resolved</span></td><td>Rename to "markdown"</td><td>Done</td></tr>
+  <tr><td><span class="badge resolved">Resolved</span></td><td>Add unit tests</td><td>3 test cases added</td></tr>
+  <tr><td><span class="badge resolved">Resolved</span></td><td>Fix error message</td><td>Done</td></tr>
+  <tr><td><span class="badge medium">Discuss</span></td><td>Fragile DOM-walking hide script</td><td>Ask about standard Spyglass mechanism</td></tr>
+  <tr><td><span class="badge low">Nit</span></td><td>Title "Summary" vs Name "markdown"</td><td>Clarify if intentional</td></tr>
+  <tr><td><span class="badge low">Nit</span></td><td>No test for empty artifacts</td><td>Nice to have</td></tr>
+  <tr><td><span class="badge low">Nit</span></td><td>No XSS regression test</td><td>Nice to have</td></tr>
+</table>
+
+<!-- ============================================================ -->
+<h2>Ready-to-post PR comment</h2>
+<div class="pr-comment-box">
+  <p>Thanks for the updates! The migration to goldmark addresses the XSS concern (I verified that raw HTML, <code>javascript:</code> URIs, and <code>data:</code> URIs are all stripped by goldmark's default renderer), the tests look good, and the rename to "markdown" makes sense.</p>
+  <p>A couple of minor things:</p>
+  <p><strong>1.</strong> The hide-when-empty script (lines 131-138) walks the DOM via <code>window.frameElement.parentElement.parentElement</code> to hide the lens container. This is fragile &mdash; it'll break silently if the Spyglass layout changes. Is there a standard mechanism for a lens to signal "nothing to show"? If not, a comment explaining the DOM assumption would help.</p>
+  <p><strong>2.</strong> The lens <code>Name</code> is <code>"markdown"</code> but the <code>Title</code> (user-visible label) is still <code>"Summary"</code> &mdash; is that intentional?</p>
+  <p>Neither is blocking. Nice work on the file filtering and custom title features.</p>
+  <p class="copy-hint">Select and copy the text above to post as a PR comment.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2>Review checklist</h2>
+<ul class="checklist">
+  <li><input type="checkbox" checked disabled> XSS addressed &mdash; goldmark safe by default (verified)</li>
+  <li><input type="checkbox" checked disabled> blackfriday replaced with goldmark v1.8.2</li>
+  <li><input type="checkbox" checked disabled> Renamed to "markdown"</li>
+  <li><input type="checkbox" checked disabled> Unit tests added</li>
+  <li><input type="checkbox" checked disabled> Error message fixed</li>
+  <li><input type="checkbox"> Discuss: DOM-walking hide script fragility</li>
+  <li><input type="checkbox"> Clarify: Title "Summary" vs Name "markdown"</li>
+  <li><input type="checkbox"> Optional: add XSS regression test</li>
+  <li><input type="checkbox"> Remove /hold and approve when satisfied</li>
+</ul>
+
+</body>
+</html>

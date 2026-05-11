@@ -1,0 +1,444 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #681 Review: Fix DCO trusted_apps</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --orange: #db6d28;
+    --code-bg: #1c2128;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.2rem; margin-top: 2rem; margin-bottom: 0.75rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.5rem; }
+  .meta { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
+  .meta a { color: var(--accent); text-decoration: none; }
+
+  .verdict {
+    display: inline-block;
+    padding: 0.2rem 0.7rem;
+    border-radius: 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .verdict.approve { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .verdict.note    { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
+  .verdict.concern { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card-title {
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0.75rem 0;
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+  }
+  :not(pre) > code {
+    background: var(--code-bg);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+
+  .diff-line { display: block; }
+  .diff-add { color: var(--green); }
+  .diff-del { color: var(--red); }
+  .diff-ctx { color: var(--text-muted); }
+
+  ul, ol { padding-left: 1.5rem; margin: 0.5rem 0; }
+  li { margin-bottom: 0.3rem; }
+  p { margin-bottom: 0.6rem; }
+
+  .callout {
+    border-left: 3px solid var(--yellow);
+    padding: 0.75rem 1rem;
+    background: rgba(210,153,34,0.08);
+    border-radius: 0 6px 6px 0;
+    margin: 1rem 0;
+  }
+  .callout.info { border-left-color: var(--accent); background: rgba(88,166,255,0.08); }
+  .callout.green { border-left-color: var(--green); background: rgba(63,185,80,0.08); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+  }
+  th { background: var(--code-bg); color: var(--text-muted); font-weight: 600; }
+
+  .file-ref { color: var(--accent); font-family: monospace; font-size: 0.85em; }
+
+  .toc { margin: 1rem 0 2rem; }
+  .toc a { color: var(--text-muted); text-decoration: none; font-size: 0.9rem; }
+  .toc a:hover { color: var(--accent); }
+  .toc li { margin-bottom: 0.2rem; }
+
+  .flow-diagram {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    margin: 0.75rem 0;
+    font-size: 0.85rem;
+  }
+  .flow-box {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.3rem 0.6rem;
+    white-space: nowrap;
+  }
+  .flow-box.highlight { border-color: var(--yellow); background: rgba(210,153,34,0.1); }
+  .flow-arrow { color: var(--text-muted); }
+
+  .reviewer-header {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    margin-bottom: 0.75rem;
+  }
+  .reviewer-icon {
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1rem;
+    flex-shrink: 0;
+  }
+  .reviewer-icon.quality { background: rgba(88,166,255,0.2); border: 1px solid rgba(88,166,255,0.4); }
+  .reviewer-icon.maintain { background: rgba(210,153,34,0.2); border: 1px solid rgba(210,153,34,0.4); }
+  .reviewer-icon.deploy { background: rgba(63,185,80,0.2); border: 1px solid rgba(63,185,80,0.4); }
+  .reviewer-icon.advisor { background: rgba(136,108,228,0.2); border: 1px solid rgba(136,108,228,0.4); }
+
+  .convergence-badge {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 0.75rem;
+    font-size: 0.7rem;
+    font-weight: 600;
+    background: rgba(210,153,34,0.15);
+    color: var(--yellow);
+    border: 1px solid rgba(210,153,34,0.3);
+    vertical-align: middle;
+    margin-left: 0.3rem;
+  }
+
+  details { margin: 0.5rem 0; }
+  details summary {
+    cursor: pointer;
+    color: var(--accent);
+    font-size: 0.9rem;
+    padding: 0.3rem 0;
+  }
+  details summary:hover { text-decoration: underline; }
+  details > div { padding: 0.5rem 0 0.5rem 1rem; }
+</style>
+</head>
+<body>
+
+<h1>PR #681: Fix DCO plugin <code>trusted_apps</code> not working without skip flags</h1>
+<div class="meta">
+  <a href="https://github.com/kubernetes-sigs/prow/pull/681">github.com/kubernetes-sigs/prow/pull/681</a>
+  &middot; Author: vigneshakaviki &middot; Fixes <a href="https://github.com/kubernetes-sigs/prow/issues/606">#606</a>
+  &middot; +26 &minus;1 &middot; <span class="verdict approve">Approve with suggestions</span>
+</div>
+
+<nav class="toc">
+  <ol>
+    <li><a href="#summary">Summary</a></li>
+    <li><a href="#recommendation">Recommendation</a></li>
+    <li><a href="#change">The change</a></li>
+    <li><a href="#call-chain">Call chain analysis</a></li>
+    <li><a href="#reviewers">Multi-perspective review</a></li>
+    <li><a href="#convergence">Converging concerns</a></li>
+    <li><a href="#side-effect">Side effect: implicit org-member trust</a></li>
+    <li><a href="#tests">Test coverage</a></li>
+    <li><a href="#checklist">Review checklist</a></li>
+    <li><a href="#pr-comment">Draft PR comment</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="summary">Summary</h2>
+<div class="card">
+  <p>When <code>trusted_apps</code> (e.g. <code>["dependabot"]</code>) is configured in the DCO plugin but neither <code>SkipDCOCheckForMembers</code> nor <code>SkipDCOCheckForCollaborators</code> is <code>true</code>, the <code>filterTrustedUsers()</code> call is completely skipped. This makes <code>trusted_apps</code> silently ineffective.</p>
+  <p>The fix adds <code>len(config.TrustedApps) > 0</code> to the guard condition so that trusted apps are filtered even without the skip flags.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="recommendation">Recommendation</h2>
+
+<div class="callout green">
+  <strong>APPROVE WITH SUGGESTIONS</strong> &mdash; All three independent reviewers unanimously approve. This is a minimal, correct bug fix for a clear defect. The fix is proportional, well-tested, and carries negligible deployment risk. Two non-blocking suggestions for follow-up are noted below.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="change">The change</h2>
+
+<div class="card">
+  <div class="card-title"><span class="file-ref">pkg/plugins/dco/dco.go:300</span></div>
+<pre><span class="diff-ctx"> commitsMissingDCO, err := checkCommitMessages(gc, l, org, repo, pr.Number)
+ if err != nil {
+     ...
+ }</span>
+
+<span class="diff-del">-if config.SkipDCOCheckForMembers || config.SkipDCOCheckForCollaborators {</span>
+<span class="diff-add">+if config.SkipDCOCheckForMembers || config.SkipDCOCheckForCollaborators || len(config.TrustedApps) > 0 {</span>
+<span class="diff-ctx">     commitsMissingDCO, err = filterTrustedUsers(gc, l, config.SkipDCOCheckForCollaborators,
+         config.TrustedApps, config.TrustedOrg, org, repo, commitsMissingDCO)
+     ...
+ }</span></pre>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="call-chain">Call chain analysis</h2>
+
+<p>When only <code>TrustedApps</code> is set (both skip flags <code>false</code>), here's what <code>filterTrustedUsers</code> invokes:</p>
+
+<div class="flow-diagram">
+  <span class="flow-box">handle()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-box">filterTrustedUsers()</span>
+  <span class="flow-arrow">&rarr;</span>
+  <span class="flow-box highlight">trigger.TrustedUser(onlyOrgMembers=true, ...)</span>
+</div>
+
+<p>Inside <code>trigger.TrustedUser()</code> (<span class="file-ref">pkg/plugins/trigger/trigger.go:245</span>), checks run in this order:</p>
+
+<table>
+  <thead>
+    <tr><th>#</th><th>Check</th><th>Runs when only TrustedApps set?</th><th>Effect</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>1</td><td>Bot self-check</td><td>Yes</td><td>Prow bot always trusted</td></tr>
+    <tr><td>2</td><td><code>IsMember(org, user)</code></td><td style="color:var(--yellow)">Yes &mdash; always runs</td><td>Org members trusted unconditionally</td></tr>
+    <tr><td>3</td><td><code>IsCollaborator(org, repo, user)</code></td><td>No &mdash; skipped (<code>onlyOrgMembers=true</code>)</td><td>&mdash;</td></tr>
+    <tr><td>4</td><td>TrustedApps match</td><td>Yes</td><td>App name matched against <code>user</code></td></tr>
+    <tr><td>5</td><td>TrustedOrg fallback</td><td>If configured</td><td>Secondary org check</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="reviewers">Multi-perspective review</h2>
+
+<p>Three independent reviewers analyzed this PR in parallel. Their findings are summarized below.</p>
+
+<!-- Code Quality -->
+<div class="card">
+  <div class="reviewer-header">
+    <div class="reviewer-icon quality">Q</div>
+    <div>
+      <strong>Code Quality</strong> &mdash; Senior Go Engineer<br>
+      <span class="verdict approve">Approve</span>
+    </div>
+  </div>
+  <ul>
+    <li><strong>Correctness:</strong> Fix does exactly what the PR claims. No off-by-one, nil dereference, or unhandled error issues.</li>
+    <li><strong>Idiomatic Go:</strong> Follows existing codebase patterns. <code>len(config.TrustedApps) > 0</code> is idiomatic and consistent.</li>
+    <li><strong>Performance (minor):</strong> When only <code>TrustedApps</code> is set, <code>IsMember()</code> is called for each commit author even though membership skipping wasn't requested. Not a bug &mdash; non-members fall through correctly &mdash; but unnecessary API calls. Membership checks are cached, so impact is minimal.</li>
+    <li><strong>Testing:</strong> New test follows existing table-driven patterns exactly. Properly sets up <code>Author</code> field with <code>[bot]</code> suffix matching the <code>TrustedUser</code> stripping logic.</li>
+    <li><strong>Guard optimization preserved:</strong> <code>len(config.TrustedApps) > 0</code> avoids entering <code>filterTrustedUsers</code> when no trusted apps are configured and skip flags are off.</li>
+  </ul>
+</div>
+
+<!-- Maintainability -->
+<div class="card">
+  <div class="reviewer-header">
+    <div class="reviewer-icon maintain">M</div>
+    <div>
+      <strong>Maintainability</strong> &mdash; Long-term Project Maintainer<br>
+      <span class="verdict approve">Approve</span> &middot; Maintenance Burden: <strong>LOW</strong>
+    </div>
+  </div>
+  <ul>
+    <li><strong>Proportional fix:</strong> One line of production code changed, one test case added. Complexity proportional to value.</li>
+    <li><strong>Growing disjunction:</strong> The three-way OR condition <code>SkipDCOCheckForMembers || SkipDCOCheckForCollaborators || len(TrustedApps) > 0</code> invites future bugs of the same kind. A helper like <code>config.HasAnyTrustPolicy()</code> would centralize the logic. Non-blocking.</li>
+    <li><strong>Self-documenting test:</strong> Test name <em>"should skip dco check for trusted app even without skip flags"</em> clearly documents the exact scenario.</li>
+    <li><strong>Cleanly revertible:</strong> Change can be reverted with no side effects beyond re-introducing the original bug.</li>
+  </ul>
+  <details>
+    <summary>Suggestions for follow-up</summary>
+    <div>
+      <ul>
+        <li>Extract a helper method like <code>shouldFilterTrustedUsers()</code> on the <code>Dco</code> struct to centralize the guard condition and prevent the same class of bug if new trust mechanisms are added.</li>
+        <li>Add a brief inline comment explaining why <code>TrustedApps</code> needs its own independent check, to prevent a future contributor from "simplifying" the condition back.</li>
+      </ul>
+    </div>
+  </details>
+</div>
+
+<!-- Deployment Risk -->
+<div class="card">
+  <div class="reviewer-header">
+    <div class="reviewer-icon deploy">D</div>
+    <div>
+      <strong>Deployment Risk</strong> &mdash; Prow Platform Operator<br>
+      <span class="verdict approve">Approve</span> &middot; Risk Level: <strong>LOW</strong>
+    </div>
+  </div>
+  <ul>
+    <li><strong>No breaking changes.</strong> No config fields renamed, removed, or semantically altered. Existing YAML/JSON configs parse identically.</li>
+    <li><strong>Only affects installations with <code>trusted_apps</code> configured.</strong> The guard <code>len(config.TrustedApps) > 0</code> is a no-op when <code>trusted_apps</code> is empty (the default).</li>
+    <li><strong>No upgrade steps needed.</strong> No config migration, no ordering dependencies, no downtime required.</li>
+    <li><strong>Safe rollback.</strong> Reverting simply re-introduces the original bug.</li>
+    <li><strong>No new API calls.</strong> <code>filterTrustedUsers</code> makes the same calls it always did &mdash; this change only adjusts <em>when</em> it runs.</li>
+  </ul>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="convergence">Converging concerns</h2>
+
+<p>Issues independently flagged by two or more reviewers carry higher confidence.</p>
+
+<table>
+  <thead>
+    <tr><th>Concern</th><th>Flagged by</th><th>Severity</th><th>Action</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Unnecessary <code>IsMember()</code> API calls when only <code>TrustedApps</code> is configured <span class="convergence-badge">2 reviewers</span></td>
+      <td>Code Quality, Maintainability</td>
+      <td style="color:var(--text-muted)">Minor</td>
+      <td>Pre-existing behavior, not a regression. Membership checks are cached. No action needed in this PR.</td>
+    </tr>
+    <tr>
+      <td>Growing disjunction in guard condition is a future-bug magnet <span class="convergence-badge">2 reviewers</span></td>
+      <td>Maintainability (explicit), Code Quality (implicit)</td>
+      <td style="color:var(--text-muted)">Minor</td>
+      <td>Non-blocking. Suggest follow-up to extract <code>shouldFilterTrustedUsers()</code> helper.</td>
+    </tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="side-effect">Side effect: implicit org-member trust</h2>
+
+<div class="callout">
+  <strong>Worth discussing:</strong> When only <code>TrustedApps</code> is configured (skip flags are both <code>false</code>), the fix causes <code>filterTrustedUsers</code> to run, which calls <code>trigger.TrustedUser()</code>. That function <strong>always</strong> checks org membership first (line 261). This means <strong>all org members will also have their DCO check skipped</strong>, even though <code>SkipDCOCheckForMembers</code> is explicitly <code>false</code>.
+</div>
+
+<h3>Is this a real problem?</h3>
+<ul>
+  <li><strong>In practice, probably not.</strong> Repos that care about DCO enforcement for members are unlikely to configure only <code>TrustedApps</code> without the skip flags. The typical use case is: "I have skip flags on, and I also want to trust dependabot."</li>
+  <li><strong>In principle, it's a semantic violation.</strong> <code>SkipDCOCheckForMembers: false</code> should mean members are not skipped, but entering the trusted-user path makes that setting a no-op for org members.</li>
+  <li><strong>The root cause is in <code>trigger.TrustedUser()</code></strong>, not in this PR. The function bundles too many checks together. Fixing it properly would require refactoring <code>TrustedUser()</code> or passing additional flags &mdash; out of scope for this bug fix.</li>
+</ul>
+
+<h3>Possible follow-up</h3>
+
+<div class="callout info">
+  <strong>If you want to flag this:</strong> Consider suggesting a follow-up issue where <code>filterTrustedUsers</code> or <code>trigger.TrustedUser()</code> is refactored to separate the trusted-apps check from the membership checks. That way <code>TrustedApps</code> could be evaluated independently without side effects on the skip-flag semantics.
+</div>
+
+<!-- ============================================================ -->
+<h2 id="tests">Test coverage</h2>
+
+<div class="card">
+  <div class="card-title">New test: <code>should skip dco check for trusted app even without skip flags</code></div>
+  <ul>
+    <li>Configures only <code>TrustedApps: ["dependabot"]</code> (no skip flags)</li>
+    <li>Verifies a <code>dependabot[bot]</code> unsigned commit passes DCO</li>
+    <li>Follows the existing table-driven test pattern</li>
+    <li>Asserts correct label (<code>dco-signoff: yes</code>) and status (<code>success</code>)</li>
+  </ul>
+</div>
+
+<h3>Test gap</h3>
+<p>No test covers the side-effect scenario: an <strong>org-member</strong> with unsigned commits when only <code>TrustedApps</code> is set. Adding such a test would document the implicit behavior, whether it's intentional or not.</p>
+
+<!-- ============================================================ -->
+<h2 id="checklist">Review checklist</h2>
+
+<table>
+  <thead>
+    <tr><th>Aspect</th><th>Status</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Fix correctness for reported bug</td><td style="color:var(--green)">Pass</td><td>Trusted apps now filtered regardless of skip flags</td></tr>
+    <tr><td>Code style / conventions</td><td style="color:var(--green)">Pass</td><td>Minimal change, follows existing patterns</td></tr>
+    <tr><td>Test for reported scenario</td><td style="color:var(--green)">Pass</td><td>Direct test added</td></tr>
+    <tr><td>Side-effect: org-member trust leak</td><td style="color:var(--yellow)">Note</td><td>Pre-existing <code>TrustedUser()</code> design; low practical risk</td></tr>
+    <tr><td>Test for side-effect scenario</td><td style="color:var(--yellow)">Gap</td><td>Nice-to-have, not blocking</td></tr>
+    <tr><td>Security</td><td style="color:var(--green)">Pass</td><td>No new attack surface; expands trust only as configured</td></tr>
+    <tr><td>Performance</td><td style="color:var(--green)">Pass</td><td>Extra API calls only when <code>TrustedApps</code> is non-empty; cached</td></tr>
+    <tr><td>Deployment risk</td><td style="color:var(--green)">Pass</td><td>No config changes; no-op for installations without <code>trusted_apps</code></td></tr>
+    <tr><td>Backwards compatibility</td><td style="color:var(--green)">Pass</td><td>Existing configs parse identically; safe rollback</td></tr>
+  </tbody>
+</table>
+
+<!-- ============================================================ -->
+<h2 id="pr-comment">Draft PR comment</h2>
+
+<div class="card">
+<pre style="white-space: pre-wrap; border: none; margin: 0;">LGTM. Clean, minimal fix for a real bug where `trusted_apps` was silently
+ignored unless skip flags were also enabled. The fix is correct, the test
+coverage is appropriate, and deployment risk is negligible.
+
+Two minor suggestions for follow-up (neither blocking):
+
+1. Consider extracting the growing guard condition into a helper method on the
+   `Dco` struct (e.g. `shouldFilterTrustedUsers()`) to prevent the same class
+   of bug recurring if new trust mechanisms are added.
+
+2. A brief inline comment explaining why `TrustedApps` needs its own
+   independent check would help prevent a future contributor from
+   "simplifying" the condition back.
+
+Note: when only `TrustedApps` is configured (both skip flags false),
+`trigger.TrustedUser()` will also implicitly trust org members via its
+`IsMember()` check. This is pre-existing behavior in `TrustedUser()`, not
+introduced by this PR, but worth being aware of.</pre>
+</div>
+
+</body>
+</html>

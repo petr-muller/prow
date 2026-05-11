@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #706 Review: Add custom KIND_CONFIG support to make dev</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --red: #f85149;
+    --orange: #d29922;
+    --green: #3fb950;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    margin-bottom: 0.25rem;
+    color: #fff;
+  }
+  .pr-meta {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .pr-meta a { color: var(--accent); text-decoration: none; }
+  .pr-meta a:hover { text-decoration: underline; }
+  .summary {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2rem;
+  }
+  .summary p { margin-bottom: 0.5rem; }
+  .summary p:last-child { margin-bottom: 0; }
+  .verdict {
+    display: inline-block;
+    padding: 0.15rem 0.6rem;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .verdict-changes { background: rgba(210,153,34,0.15); color: var(--orange); border: 1px solid rgba(210,153,34,0.3); }
+
+  .section-title {
+    font-size: 1.1rem;
+    font-weight: 600;
+    margin: 2rem 0 1rem;
+    color: #fff;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .finding-header {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.75rem;
+    padding: 0.85rem 1rem;
+    border-bottom: 1px solid var(--border);
+    cursor: pointer;
+    user-select: none;
+  }
+  .finding-header:hover { background: rgba(255,255,255,0.02); }
+  .severity {
+    display: inline-block;
+    padding: 0.1rem 0.5rem;
+    border-radius: 10px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 0.15rem;
+  }
+  .sev-bug { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .sev-regression { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+  .sev-suggestion { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
+  .sev-nit { background: rgba(139,148,158,0.15); color: var(--text-muted); border: 1px solid rgba(139,148,158,0.3); }
+  .sev-doc { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
+  .sev-fixed { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
+  .sev-partial { background: rgba(210,153,34,0.15); color: var(--orange); border: 1px solid rgba(210,153,34,0.3); }
+
+  .activity-log {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 2rem;
+  }
+  .activity-log h2 {
+    font-size: 1rem;
+    color: #fff;
+    margin-bottom: 0.75rem;
+  }
+  .activity-entry {
+    display: flex;
+    gap: 0.75rem;
+    padding: 0.4rem 0;
+    font-size: 0.88rem;
+    border-bottom: 1px solid rgba(48,54,61,0.5);
+  }
+  .activity-entry:last-child { border-bottom: none; }
+  .activity-date {
+    color: var(--text-muted);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.8rem;
+    white-space: nowrap;
+    flex-shrink: 0;
+    margin-top: 0.1rem;
+  }
+  .activity-actor {
+    font-weight: 600;
+    color: var(--accent);
+  }
+  .status-badge {
+    display: inline-block;
+    padding: 0.05rem 0.45rem;
+    border-radius: 8px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-left: 0.3rem;
+  }
+  .status-open { background: rgba(63,185,80,0.15); color: var(--green); }
+  .status-needs { background: rgba(210,153,34,0.15); color: var(--orange); }
+  .finding.resolved { opacity: 0.55; }
+  .finding.resolved .finding-header { border-left: 3px solid var(--green); }
+
+  .finding-title {
+    font-weight: 600;
+    font-size: 0.95rem;
+    flex-grow: 1;
+  }
+  .chevron {
+    color: var(--text-muted);
+    flex-shrink: 0;
+    transition: transform 0.2s;
+    margin-top: 0.15rem;
+  }
+  .finding.open .chevron { transform: rotate(90deg); }
+  .finding-body {
+    display: none;
+    padding: 1rem 1.25rem;
+    font-size: 0.9rem;
+  }
+  .finding.open .finding-body { display: block; }
+  .finding-body p { margin-bottom: 0.6rem; }
+  .finding-body p:last-child { margin-bottom: 0; }
+  .file-ref {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.82rem;
+    color: var(--accent);
+    background: rgba(88,166,255,0.08);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85rem;
+    background: rgba(110,118,129,0.15);
+    padding: 0.15rem 0.35rem;
+    border-radius: 3px;
+  }
+  .files-touched {
+    margin-top: 2rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+  }
+  .files-touched h2 {
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    color: #fff;
+  }
+  .file-list {
+    list-style: none;
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', monospace;
+    font-size: 0.85rem;
+  }
+  .file-list li {
+    padding: 0.3rem 0;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .file-list .badge {
+    font-size: 0.7rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 8px;
+    font-weight: 600;
+  }
+  .badge-m { background: rgba(210,153,34,0.15); color: var(--orange); }
+  .badge-a { background: rgba(63,185,80,0.15); color: var(--green); }
+  .checklist {
+    margin-top: 2rem;
+    border-top: 1px solid var(--border);
+    padding-top: 1rem;
+  }
+  .checklist h2 {
+    font-size: 1rem;
+    margin-bottom: 0.75rem;
+    color: #fff;
+  }
+  .checklist label {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+    padding: 0.35rem 0;
+    font-size: 0.9rem;
+    cursor: pointer;
+  }
+  .checklist input[type="checkbox"] {
+    margin-top: 0.25rem;
+    accent-color: var(--green);
+  }
+  .checklist label.checked { color: var(--text-muted); text-decoration: line-through; }
+  .positives {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 1.5rem;
+    font-size: 0.9rem;
+  }
+  .positives h3 { font-size: 0.95rem; color: var(--green); margin-bottom: 0.5rem; }
+  .positives ul { list-style: disc; padding-left: 1.25rem; }
+  .positives li { margin-bottom: 0.3rem; }
+
+  .advisor {
+    background: var(--surface);
+    border: 2px solid var(--orange);
+    border-radius: 6px;
+    padding: 1.25rem 1.5rem;
+    margin-top: 2rem;
+  }
+  .advisor h2 {
+    font-size: 1.15rem;
+    color: #fff;
+    margin-bottom: 0.75rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .advisor h3 {
+    font-size: 0.95rem;
+    color: var(--accent);
+    margin: 1rem 0 0.5rem;
+  }
+  .advisor p { margin-bottom: 0.5rem; font-size: 0.9rem; }
+  .advisor ol, .advisor ul { padding-left: 1.25rem; font-size: 0.9rem; }
+  .advisor li { margin-bottom: 0.4rem; }
+
+  .convergence {
+    background: rgba(248,81,73,0.06);
+    border: 1px solid rgba(248,81,73,0.2);
+    border-radius: 4px;
+    padding: 0.75rem 1rem;
+    margin: 0.5rem 0;
+    font-size: 0.88rem;
+  }
+  .convergence strong { color: var(--red); }
+
+  .reviewer-tags {
+    display: inline-flex;
+    gap: 0.3rem;
+    margin-left: 0.4rem;
+  }
+  .reviewer-tag {
+    font-size: 0.65rem;
+    padding: 0.05rem 0.4rem;
+    border-radius: 8px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .tag-cq { background: rgba(88,166,255,0.15); color: var(--accent); }
+  .tag-mt { background: rgba(188,140,255,0.15); color: var(--purple); }
+  .tag-dr { background: rgba(63,185,80,0.15); color: var(--green); }
+
+  .pr-comment-box {
+    background: rgba(110,118,129,0.08);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.85rem 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.88rem;
+    font-style: italic;
+    line-height: 1.65;
+    cursor: pointer;
+    position: relative;
+  }
+  .pr-comment-box::after {
+    content: "click to copy";
+    position: absolute;
+    top: 0.4rem;
+    right: 0.6rem;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    font-style: normal;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    opacity: 0;
+    transition: opacity 0.2s;
+  }
+  .pr-comment-box:hover::after { opacity: 1; }
+  .copied-toast {
+    position: fixed;
+    bottom: 2rem;
+    left: 50%;
+    transform: translateX(-50%);
+    background: var(--green);
+    color: var(--bg);
+    padding: 0.4rem 1rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    opacity: 0;
+    transition: opacity 0.3s;
+    pointer-events: none;
+  }
+  .copied-toast.show { opacity: 1; }
+</style>
+</head>
+<body>
+
+<h1>PR #706: Add custom KIND_CONFIG support to make dev</h1>
+<div class="pr-meta">
+  <a href="https://github.com/kubernetes-sigs/prow/pull/706" target="_blank">github.com/kubernetes-sigs/prow/pull/706</a>
+  &middot; Author: Daniel-Giszpenc (NeoStudyHat)
+  &middot; +235 / -8
+  &middot; <span class="verdict verdict-changes">Request Changes</span>
+</div>
+
+<div class="summary">
+  <p>Adds a <code>KIND_CONFIG</code> environment variable to <code>make dev</code> / <code>make dev-full</code>, allowing users to pass a custom KinD cluster configuration file. The main use case is running the KinD cluster on a remote server and connecting from a dev workstation via Tailscale.</p>
+  <p>The core plumbing is correctly implemented. <strong>@Prucek</strong> reviewed on May 5 and flagged 3 issues (all overlapping with our findings). The author pushed a fix commit <code>f282197</code> addressing those. <strong>Prucek approved on May 6</strong> and ran <code>/ok-to-test</code>. Some findings remain open but were deemed non-blocking. Still needs <code>lgtm</code> and final approval from <strong>@smg247</strong>.</p>
+</div>
+
+<div class="activity-log">
+  <h2>PR Activity Log</h2>
+  <div class="activity-entry">
+    <span class="activity-date">May 4</span>
+    <span><span class="activity-actor">Daniel-Giszpenc</span> opened PR with 3 commits: initial feature, documentation, if-check reorder</span>
+  </div>
+  <div class="activity-entry">
+    <span class="activity-date">May 5</span>
+    <span><span class="activity-actor">Prucek</span> reviewed (COMMENTED) &mdash; 3 inline comments:
+      <br>&bull; <code>setup-kind-cluster.sh</code>: sentinel <code>"default"</code> should be empty string
+      <br>&bull; <code>dev-env.sh</code>: TODO/custom-config note "probably not supposed to be here anymore"
+      <br>&bull; <code>dev-env.sh:234</code>: warn when <code>DEV_HTTP_PORT</code>/<code>DEV_HTTPS_PORT</code> are ignored
+    </span>
+  </div>
+  <div class="activity-entry">
+    <span class="activity-date">May 5</span>
+    <span><span class="activity-actor">Daniel-Giszpenc</span> pushed <code>f282197</code> ("fix comments"):
+      <br>&bull; Changed sentinel from <code>"default"</code> to empty string <span class="status-badge status-open">resolved</span>
+      <br>&bull; Added warning log about port env vars being ignored <span class="status-badge status-open">resolved</span>
+      <br>&bull; Removed the <code>#TODO</code> comment <span class="status-badge status-needs">partial</span> &mdash; TODO removed but the unconditional note text remains
+      <br>&bull; Fixed personal tailnet hostname in docs (<code>debian12-dev.pleco-koi.ts.net</code> &rarr; placeholder)
+    </span>
+  </div>
+  <div class="activity-entry">
+    <span class="activity-date">May 6</span>
+    <span><span class="activity-actor">Prucek</span> approved the PR:
+      <br>&bull; Submitted formal <span class="status-badge status-open">APPROVED</span> review
+      <br>&bull; Ran <code>/ok-to-test</code> (CI unblocked)
+      <br>&bull; Added <code>/label tide/merge-method-squash</code>
+      <br>Note: approved despite unconditional <code>print_connection_info</code> note still being present &mdash; considers remaining findings non-blocking.
+    </span>
+  </div>
+  <div class="activity-entry">
+    <span class="activity-date">Status</span>
+    <span>
+      <span class="status-badge status-open">/ok-to-test</span>
+      <span class="status-badge status-open">approved (Prucek)</span>
+      <span class="status-badge status-needs">lgtm</span>
+      <span class="status-badge status-needs">approve (@smg247)</span>
+    </span>
+  </div>
+</div>
+
+<div class="section-title">Findings &mdash; Converging Concerns (flagged by 2+ reviewers)</div>
+
+<!-- Finding 1 -->
+<div class="finding open" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-partial">Partial</span>
+    <span class="finding-title">print_connection_info degraded for all users <span class="reviewer-tags"><span class="reviewer-tag tag-cq">CQ</span><span class="reviewer-tag tag-mt">MT</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p><strong>Update (May 5):</strong> The <code>#TODO</code> comment was removed in <code>f282197</code>, but the "Custom KIND_CONFIG Note" block itself is still printed unconditionally for all users. @Prucek flagged this as "probably not supposed to be here anymore" &mdash; the author removed the TODO but didn't make the note conditional or remove it. <strong>Still needs fixing.</strong></p>
+    <p>The "APISeverAddress" typo also remains.</p>
+  </div>
+</div>
+
+<!-- Finding 2 -->
+<div class="finding resolved" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-fixed">Fixed</span>
+    <span class="finding-title">Port options silently ignored with custom config <span class="reviewer-tags"><span class="reviewer-tag tag-cq">CQ</span><span class="reviewer-tag tag-mt">MT</span><span class="reviewer-tag tag-dr">DR</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p><strong>Resolved in <code>f282197</code>.</strong> Author added two warning log lines in <code>dev-env.sh</code> when <code>kind_config</code> is set: <code>log "WARNING: env vars DEV_HTTP_PORT and DEV_HTTPS_PORT are not used when KIND_CONFIG is set."</code> and <code>log "All values are set in the yaml file specified at the KIND_CONFIG path."</code></p>
+    <p>Note: the connection info still prints <code>${DEV_HTTP_PORT}</code> even with custom config, but the warning makes this much less confusing.</p>
+  </div>
+</div>
+
+<!-- Finding 3 -->
+<div class="finding" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-bug">Bug</span>
+    <span class="finding-title">No validation that custom config file exists <span class="reviewer-tags"><span class="reviewer-tag tag-cq">CQ</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p>When a user passes a custom config, it goes directly to <code>kind create cluster --config=</code> at <span class="file-ref">test/integration/setup-kind-cluster.sh:191</span> without checking that the file exists or is readable. A missing file produces a cryptic <code>kind</code> error instead of a clear message.</p>
+    <p>One-line fix: <code>if [[ ! -f "${kind_config}" ]]; then log "ERROR: kind config file not found: ${kind_config}"; return 1; fi</code></p>
+  </div>
+</div>
+
+<!-- Finding 4 -->
+<div class="finding" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-suggestion">Suggestion</span>
+    <span class="finding-title">Custom config silently skips containerdConfigPatches <span class="reviewer-tags"><span class="reviewer-tag tag-mt">MT</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p>The default heredoc in <span class="file-ref">test/integration/setup-kind-cluster.sh:161-189</span> includes a <code>containerdConfigPatches</code> block that configures the local registry cert directory. When a custom config is used, this is entirely bypassed with no warning.</p>
+    <p>Users who forget to include this stanza in their custom YAML will get a broken local registry with no helpful error. Consider emitting a warning: <code>log "WARNING: Using custom KIND config &mdash; ensure containerdConfigPatches for /etc/containerd/certs.d is included for the local registry to work"</code></p>
+  </div>
+</div>
+
+<!-- Finding 5 -->
+<div class="finding resolved" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-fixed">Fixed</span>
+    <span class="finding-title">Sentinel value inconsistency between scripts <span class="reviewer-tags"><span class="reviewer-tag tag-mt">MT</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p><strong>Resolved in <code>f282197</code>.</strong> Both scripts now use empty string. <code>setup-kind-cluster.sh</code> changed from <code>kind_config=default</code> to <code>kind_config=""</code>, and the conditional changed from <code>[ "${kind_config}" == "default" ]</code> to <code>[[ -z "${kind_config}" ]]</code>.</p>
+  </div>
+</div>
+
+<div class="section-title">Additional Findings</div>
+
+<!-- Finding 6 -->
+<div class="finding" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-suggestion">Suggestion</span>
+    <span class="finding-title">Inconsistent --wait=5m only in custom config path <span class="reviewer-tags"><span class="reviewer-tag tag-cq">CQ</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p>At <span class="file-ref">test/integration/setup-kind-cluster.sh:191</span>, the custom config path uses <code>--wait=5m</code>, but the default heredoc path does not. If the wait is needed to handle clusters that take longer to come up (likely with remote/custom networking), it should be documented why it's only there. If it's generally useful, consider adding it to the default path too.</p>
+  </div>
+</div>
+
+<!-- Finding 7 -->
+<div class="finding" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-doc">Doc</span>
+    <span class="finding-title">Two-machine guide needs revision <span class="reviewer-tags"><span class="reviewer-tag tag-mt">MT</span><span class="reviewer-tag tag-dr">DR</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p><span class="file-ref">site/content/en/docs/local-dev-two-machines.md</span></p>
+    <p><strong>Tone and scope:</strong> The doc is quite opinionated (Tailscale, Debian, specific Go version, specific firewall tool) for a project-level guide. It reads more like a personal blog post. Consider whether this belongs in the official site or as a linked community guide.</p>
+    <p><strong>Security:</strong> Exposing the Docker daemon on TCP without TLS is a significant security concern. Docker's own docs strongly recommend TLS for remote daemon access. The current warning is too brief for the risk involved. The <code>scp root@...</code> example also encourages SSHing as root.</p>
+    <p><strong>Staleness risk:</strong> Hardcoded Go version <code>1.22.12</code> will go stale. Better to point at <a href="https://go.dev/doc/install" style="color:var(--accent)">go.dev/doc/install</a>.</p>
+    <p><strong>Phrasing:</strong> "ways are available and possibly required based on your systems" is unclear.</p>
+  </div>
+</div>
+
+<!-- Finding 8 -->
+<div class="finding" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-nit">Nit</span>
+    <span class="finding-title">Usage help formatting inconsistency <span class="reviewer-tags"><span class="reviewer-tag tag-cq">CQ</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p><span class="file-ref">test/integration/setup-kind-cluster.sh:57</span> uses a semicolon (<code>-kind-config='';</code>) while all other option entries in the same block use a colon. Should match existing style.</p>
+  </div>
+</div>
+
+<!-- Finding 9 -->
+<div class="finding" onclick="this.classList.toggle('open')">
+  <div class="finding-header">
+    <span class="severity sev-nit">Nit</span>
+    <span class="finding-title">dev-env.sh missing -kind-config in usage text <span class="reviewer-tags"><span class="reviewer-tag tag-dr">DR</span></span></span>
+    <span class="chevron">&#9654;</span>
+  </div>
+  <div class="finding-body">
+    <p>The <code>usage()</code> function in <span class="file-ref">hack/dev-env.sh:46-96</span> documents <code>-profile</code>, <code>-no-build</code>, <code>-rebuild</code>, <code>-teardown</code>, and <code>-help</code> but does not mention the new <code>-kind-config</code> option. Users calling <code>hack/dev-env.sh -help</code> won't discover it.</p>
+  </div>
+</div>
+
+<div class="positives">
+  <h3>What's good</h3>
+  <ul>
+    <li>Makefile syntax (<code>$(if $(strip ...),&hellip;)</code>) is correct and idiomatic GNU Make</li>
+    <li>Shell argument parsing follows existing project conventions (single-dash flags, <code>${arg#-flag=}</code>)</li>
+    <li>The feature itself is reasonable &mdash; custom KinD configs are a legitimate need for remote dev</li>
+    <li>The Makefile change is minimal and doesn't affect the default path when <code>KIND_CONFIG</code> is unset</li>
+    <li>Change is additive and would revert cleanly</li>
+    <li><code>--wait=5m</code> on the custom config path is a reasonable safety net</li>
+  </ul>
+</div>
+
+<div class="advisor">
+  <h2>Maintainer Advisor &mdash; Final Recommendation</h2>
+  <p><span class="verdict verdict-changes">Request Changes</span></p>
+  <p>All three reviewers agree this is a low-risk, well-scoped change to dev tooling, but two out of three independently request changes for the same core issues: unconditional output that degrades the default UX, and silent parameter dropping. The fixes are small and straightforward.</p>
+
+  <h3>Required Changes</h3>
+  <ol>
+    <li><strong>Gate the "Custom KIND_CONFIG Note" behind a conditional</strong> &mdash; only print when <code>kind_config</code> is set. Ship it fixed, not with a TODO.</li>
+    <li><strong>Warn when port env vars are ignored</strong> &mdash; when <code>KIND_CONFIG</code> is set alongside <code>DEV_HTTP_PORT</code>/<code>DEV_HTTPS_PORT</code>, log a clear warning.</li>
+    <li><strong>Validate the custom config file exists</strong> &mdash; one-line check before passing to <code>kind create cluster</code>.</li>
+  </ol>
+
+  <h3>Suggested PR Comment</h3>
+  <div class="pr-comment-box" onclick="navigator.clipboard.writeText(this.innerText.replace('click to copy','')).then(()=>{const t=document.getElementById('toast');t.classList.add('show');setTimeout(()=>t.classList.remove('show'),1500)})">Thanks for this addition — custom KIND_CONFIG support is a useful feature and the overall approach is sound. I'm requesting changes for three specific items before merging: (1) the "Custom KIND_CONFIG Note" in print_connection_info is printed unconditionally for all users — please gate it behind a conditional and remove the TODO; (2) when a user sets DEV_HTTP_PORT/DEV_HTTPS_PORT alongside KIND_CONFIG, those port variables are silently ignored — please emit a warning; (3) please validate that the custom config file exists before passing it to kind create cluster. These are all small fixes and the rest of the PR looks good.</div>
+</div>
+
+<div id="toast" class="copied-toast">Copied to clipboard</div>
+
+<div class="files-touched">
+  <h2>Files touched</h2>
+  <ul class="file-list">
+    <li><span class="badge badge-m">M</span> Makefile</li>
+    <li><span class="badge badge-m">M</span> hack/dev-env.sh</li>
+    <li><span class="badge badge-m">M</span> test/integration/setup-kind-cluster.sh</li>
+    <li><span class="badge badge-a">A</span> site/content/en/docs/local-dev-two-machines.md</li>
+  </ul>
+</div>
+
+<div class="checklist">
+  <h2>Review checklist</h2>
+  <p style="font-size:0.8rem; color:var(--text-muted); margin-bottom:0.75rem;">Required changes marked with *. Pre-checked items were resolved in <code>f282197</code>.</p>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> * print_connection_info note made conditional on custom config (TODO removed but note still unconditional)</label>
+  <label class="checked"><input type="checkbox" checked onchange="this.parentElement.classList.toggle('checked')"> * Warning when DEV_HTTP_PORT/DEV_HTTPS_PORT ignored with KIND_CONFIG</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> * Custom config file validated before passing to kind</label>
+  <label class="checked"><input type="checkbox" checked onchange="this.parentElement.classList.toggle('checked')"> * TODO comment at dev-env.sh:118 removed</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> "APISeverAddress" typo fixed</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> Warning about containerdConfigPatches when using custom config</label>
+  <label class="checked"><input type="checkbox" checked onchange="this.parentElement.classList.toggle('checked')"> Sentinel value "default" &rarr; empty string for consistency</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> -kind-config added to dev-env.sh usage()</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> Usage help semicolon &rarr; colon in setup-kind-cluster.sh</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> --wait=5m inconsistency addressed or justified</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> Doc security warnings strengthened (Docker TLS, root SSH)</label>
+  <label><input type="checkbox" onchange="this.parentElement.classList.toggle('checked')"> Hardcoded Go version replaced with link</label>
+  <label class="checked"><input type="checkbox" checked onchange="this.parentElement.classList.toggle('checked')"> Personal tailnet hostname replaced with placeholder in docs</label>
+</div>
+
+</body>
+</html>

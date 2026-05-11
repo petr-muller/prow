@@ -1,0 +1,537 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #692 Review: Document horologium component</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #c9d1d9;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --cyan: #39d2c0;
+    --code-bg: #1c2128;
+    --purple: #bc8cff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1060px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.5rem;
+    margin-bottom: 0.5rem;
+  }
+  .pr-meta {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 2rem;
+  }
+  .pr-meta a { color: var(--accent); text-decoration: none; }
+  .pr-meta a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 1.2rem;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    color: var(--accent);
+  }
+  h3 {
+    font-size: 1rem;
+    margin-top: 1.25rem;
+    margin-bottom: 0.5rem;
+    color: var(--text);
+  }
+  .verdict-box {
+    background: var(--surface);
+    border-left: 4px solid var(--green);
+    padding: 1rem 1.25rem;
+    border-radius: 6px;
+    margin-bottom: 1.5rem;
+    font-size: 1rem;
+  }
+  .verdict-box .label {
+    font-weight: 700;
+    color: var(--green);
+    text-transform: uppercase;
+    font-size: 0.75rem;
+    letter-spacing: 0.05em;
+    margin-bottom: 0.25rem;
+  }
+  table.checks {
+    width: 100%;
+    border-collapse: collapse;
+    margin-bottom: 1.5rem;
+  }
+  table.checks th {
+    text-align: left;
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+  }
+  table.checks td {
+    padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid var(--border);
+    font-size: 0.9rem;
+    vertical-align: top;
+  }
+  table.checks tr:last-child td { border-bottom: none; }
+  .status {
+    display: inline-block;
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    margin-right: 0.5rem;
+    position: relative;
+    top: -1px;
+  }
+  .status.ok { background: var(--green); }
+  .status.warn { background: var(--yellow); }
+  .status.err { background: var(--red); }
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .finding .severity {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 2px 8px;
+    border-radius: 12px;
+    display: inline-block;
+    margin-bottom: 0.5rem;
+  }
+  .finding .severity.converging { background: #2a1f3f; color: var(--purple); }
+  .finding .severity.suggestion { background: #1f3a5f; color: var(--accent); }
+  .finding .severity.nit { background: #2d2a1d; color: var(--yellow); }
+  .finding .title { font-weight: 600; margin-bottom: 0.5rem; }
+  .finding .location {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+  .finding .flagged-by {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+  .finding .flagged-by .reviewer-tag {
+    display: inline-block;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    margin-left: 2px;
+  }
+  .finding p { font-size: 0.9rem; color: var(--text); }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+    font-size: 0.85em;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.75rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0.5rem 0;
+  }
+  pre code { background: none; padding: 0; }
+  .ref {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.8rem;
+    color: var(--cyan);
+  }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .summary-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+  }
+  .summary-card .label {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-muted);
+    margin-bottom: 0.25rem;
+  }
+  .summary-card .value {
+    font-size: 1.4rem;
+    font-weight: 700;
+  }
+  .reviewer-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1rem;
+    margin-bottom: 1.5rem;
+  }
+  .reviewer-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+  }
+  .reviewer-card .reviewer-name {
+    font-weight: 700;
+    font-size: 0.85rem;
+    margin-bottom: 0.25rem;
+  }
+  .reviewer-card .reviewer-verdict {
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    margin-bottom: 0.5rem;
+  }
+  .reviewer-card .reviewer-verdict.approve { color: var(--green); }
+  .reviewer-card .reviewer-verdict.request-changes { color: var(--yellow); }
+  .reviewer-card .reviewer-verdict.low { color: var(--green); }
+  .reviewer-card ul {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+  }
+  .reviewer-card ul li {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    padding: 0.15rem 0;
+    padding-left: 0.75rem;
+    position: relative;
+  }
+  .reviewer-card ul li::before {
+    content: "\2022";
+    position: absolute;
+    left: 0;
+    color: var(--border);
+  }
+  .pr-comment-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    margin-top: 0.75rem;
+    font-size: 0.9rem;
+    white-space: pre-wrap;
+  }
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #692: Document horologium component</h1>
+<div class="pr-meta">
+  Author: <strong>VPC-byte</strong> (Zijie Zhong) &middot;
+  Branch: <code>joe/document-horologium</code> &rarr; <code>main</code> &middot;
+  File: <code>site/content/en/docs/components/core/horologium.md</code> &middot;
+  <a href="https://github.com/kubernetes-sigs/prow/pull/692">View on GitHub</a>
+</div>
+
+<div class="verdict-box">
+  <div class="label">Recommendation: Approve with Suggestions</div>
+  High-quality documentation replacing a useless placeholder. All core claims verified accurate against source code.
+  Two converging concerns identified by all three independent reviewers: the <code>minimum_interval</code> scheduling
+  mode is mischaracterized as a modifier rather than a mutually exclusive mode, and the retry hard cap of 10 is undocumented.
+  Neither is a merge blocker, but a quick fix would improve accuracy.
+</div>
+
+<div class="summary-grid">
+  <div class="summary-card">
+    <div class="label">Changes</div>
+    <div class="value" style="color:var(--green)">+69 / -2</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">Converging</div>
+    <div class="value" style="color:var(--purple)">2</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">Suggestions</div>
+    <div class="value" style="color:var(--accent)">1</div>
+  </div>
+  <div class="summary-card">
+    <div class="label">Deployment Risk</div>
+    <div class="value" style="color:var(--green)">LOW</div>
+  </div>
+</div>
+
+<h2>Reviewer Perspectives</h2>
+
+<div class="reviewer-grid">
+  <div class="reviewer-card">
+    <div class="reviewer-name">Code Quality</div>
+    <div class="reviewer-verdict approve">Approve</div>
+    <ul>
+      <li>All claims verified against source</li>
+      <li><code>interval</code> mode wording imprecise</li>
+      <li>Retry hard cap undocumented</li>
+      <li>YAML examples valid</li>
+      <li>Well-structured for operators</li>
+    </ul>
+  </div>
+  <div class="reviewer-card">
+    <div class="reviewer-name">Maintainability</div>
+    <div class="reviewer-verdict request-changes">Request Changes</div>
+    <ul>
+      <li><code>minimum_interval</code> is a 3rd mode, not a modifier</li>
+      <li>Right level of abstraction</li>
+      <li>Valuable Sinker cross-reference</li>
+      <li>Pragmatic CLI flags section</li>
+      <li>Maintenance burden: LOW</li>
+    </ul>
+  </div>
+  <div class="reviewer-card">
+    <div class="reviewer-name">Deployment Risk</div>
+    <div class="reviewer-verdict low">Risk: Low</div>
+    <ul>
+      <li>Documentation only, zero runtime risk</li>
+      <li>All documented defaults verified</li>
+      <li>Could mislead operators re: <code>minimum_interval</code></li>
+      <li>Net positive for operators</li>
+    </ul>
+  </div>
+</div>
+
+<h2>Accuracy Verification</h2>
+<p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:0.75rem;">
+  Each claim in the doc was checked against the source code by independent reviewers.
+</p>
+
+<table class="checks">
+  <thead>
+    <tr><th>Claim</th><th>Source</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td><code>tick_interval</code> defaults to 1 minute</td>
+      <td class="ref">cmd/horologium/main.go:50</td>
+      <td><span class="status ok"></span>Correct</td>
+    </tr>
+    <tr>
+      <td>Scheduling modes: <code>interval</code> and <code>cron</code></td>
+      <td class="ref">cmd/horologium/main.go:183-206</td>
+      <td><span class="status warn"></span>Incomplete &mdash; <code>minimum_interval</code> is a 3rd mode</td>
+    </tr>
+    <tr>
+      <td><code>minimum_interval</code> measures from completion time</td>
+      <td class="ref">cmd/horologium/main.go:188-190</td>
+      <td><span class="status ok"></span>Correct (but mischaracterized as modifier)</td>
+    </tr>
+    <tr>
+      <td><code>cron</code>, <code>interval</code>, <code>minimum_interval</code> mutually exclusive</td>
+      <td class="ref">pkg/config/config.go:2428-2429</td>
+      <td><span class="status warn"></span>Not mentioned in doc</td>
+    </tr>
+    <tr>
+      <td>Retry support with attempt limit</td>
+      <td class="ref">cmd/horologium/main.go:243-289</td>
+      <td><span class="status warn"></span>Correct, but hard cap of 10 omitted</td>
+    </tr>
+    <tr>
+      <td>Retains latest ProwJob per periodic (Sinker reference)</td>
+      <td class="ref">cmd/horologium/main.go:163, cmd/sinker/main.go:387</td>
+      <td><span class="status ok"></span>Correct</td>
+    </tr>
+    <tr>
+      <td><code>--dry-run</code> defaults to <code>true</code></td>
+      <td class="ref">cmd/horologium/main.go:66</td>
+      <td><span class="status ok"></span>Correct</td>
+    </tr>
+    <tr>
+      <td>Metrics exposed as <code>"horologium"</code></td>
+      <td class="ref">cmd/horologium/main.go:138</td>
+      <td><span class="status ok"></span>Correct</td>
+    </tr>
+    <tr>
+      <td>Config under <code>horologium:</code> key</td>
+      <td class="ref">pkg/config/config.go:154</td>
+      <td><span class="status ok"></span>Correct</td>
+    </tr>
+    <tr>
+      <td><code>interval</code> mode: previous run must be complete</td>
+      <td class="ref">cmd/horologium/main.go:185</td>
+      <td><span class="status warn"></span>Missing from doc</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Converging Concerns</h2>
+<p style="font-size:0.9rem; color:var(--text-muted); margin-bottom:0.75rem;">
+  Issues independently flagged by multiple reviewers carry the highest confidence.
+</p>
+
+<div class="finding">
+  <span class="severity converging">Converging &mdash; All 3 Reviewers</span>
+  <div class="title">Scheduling modes: <code>minimum_interval</code> is a 3rd mutually exclusive mode, not a modifier</div>
+  <div class="location">horologium.md:15-19</div>
+  <div class="flagged-by">
+    Flagged by:
+    <span class="reviewer-tag">Code Quality</span>
+    <span class="reviewer-tag">Maintainability</span>
+    <span class="reviewer-tag">Deployment Risk</span>
+  </div>
+  <p>
+    The doc presents two scheduling modes (<code>interval</code> and <code>cron</code>) and describes
+    <code>minimum_interval</code> as a modifier on <code>interval</code>. Config validation at
+    <code>pkg/config/config.go:2428-2429</code> explicitly enforces that <code>cron</code>,
+    <code>interval</code>, and <code>minimum_interval</code> are <strong>mutually exclusive</strong>.
+    An operator reading this doc might try to set both <code>interval</code> and <code>minimum_interval</code>
+    on the same job, which would be rejected.
+  </p>
+  <p style="margin-top:0.5rem;">Suggested rewrite:</p>
+  <pre><code>Horologium supports three mutually exclusive scheduling modes for periodic jobs:
+
+* `interval`: run after the configured duration has elapsed since the
+  previous run's start time, provided the previous run has completed.
+* `minimum_interval`: run after the configured duration has elapsed since
+  the previous run's completion time.
+* `cron`: run when the configured cron schedule fires, provided the
+  previous run has completed.</code></pre>
+</div>
+
+<div class="finding">
+  <span class="severity converging">Converging &mdash; 2 Reviewers</span>
+  <div class="title">Retry hard cap of 10 not documented</div>
+  <div class="location">horologium.md:27</div>
+  <div class="flagged-by">
+    Flagged by:
+    <span class="reviewer-tag">Code Quality</span>
+    <span class="reviewer-tag">Maintainability</span>
+  </div>
+  <p>
+    The doc says <em>"until the configured attempt limit is reached"</em>. The code also applies a hard cap of
+    <code>maxRetries = 10</code> (<code>main.go:51-52</code>) via <code>min(p.Retry.Attempts, maxRetries)</code>.
+    Operators configuring more than 10 retry attempts would be silently capped.
+  </p>
+  <p style="margin-top:0.5rem;">Suggested wording:</p>
+  <pre><code>If a periodic job config includes retry settings, Horologium can also create
+retry ProwJobs until the configured attempt limit is reached (hard-capped at 10).</code></pre>
+</div>
+
+<h2>Additional Suggestions</h2>
+
+<div class="finding">
+  <span class="severity suggestion">Suggestion</span>
+  <div class="title">Example YAML shows the default value for <code>tick_interval</code></div>
+  <div class="location">horologium.md:54</div>
+  <p>
+    The <code>tick_interval: 1m</code> example is the default. Showing a non-default like
+    <code>30s</code> or <code>2m</code> would better demonstrate that the setting is configurable.
+  </p>
+</div>
+
+<h2>Positive Observations</h2>
+<table class="checks">
+  <thead>
+    <tr><th>Observation</th><th>Noted By</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td>Right level of abstraction &mdash; describes behavior, not implementation details</td>
+      <td>Maintainability</td>
+    </tr>
+    <tr>
+      <td>Valuable cross-component insight about Sinker's relationship to latest-run tracking</td>
+      <td>Maintainability</td>
+    </tr>
+    <tr>
+      <td>CLI flags section focuses on commonly used flags, avoiding staleness</td>
+      <td>Maintainability</td>
+    </tr>
+    <tr>
+      <td>YAML examples are minimal, valid, and self-contained</td>
+      <td>Code Quality, Maintainability</td>
+    </tr>
+    <tr>
+      <td>Maintenance burden is LOW &mdash; describes stable concepts unlikely to change</td>
+      <td>Maintainability</td>
+    </tr>
+    <tr>
+      <td>Clear improvement over a zero-value placeholder page</td>
+      <td>All reviewers</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Source Cross-References</h2>
+<table class="checks">
+  <thead>
+    <tr><th>File</th><th>Relevance</th></tr>
+  </thead>
+  <tbody>
+    <tr>
+      <td class="ref">cmd/horologium/main.go</td>
+      <td>Main binary: flags, tick loop, <code>sync()</code>, retry logic</td>
+    </tr>
+    <tr>
+      <td class="ref">cmd/horologium/main_test.go</td>
+      <td>Tests for scheduling and retry behavior</td>
+    </tr>
+    <tr>
+      <td class="ref">cmd/sinker/main.go:387</td>
+      <td>Sinker's use of <code>GetLatestProwJobs</code> for periodic jobs</td>
+    </tr>
+    <tr>
+      <td class="ref">pkg/config/config.go:1057-1062</td>
+      <td><code>Horologium</code> config struct (<code>tick_interval</code> field)</td>
+    </tr>
+    <tr>
+      <td class="ref">pkg/config/config.go:154</td>
+      <td>Embedding in main <code>ProwConfig</code> with JSON tag <code>"horologium"</code></td>
+    </tr>
+    <tr>
+      <td class="ref">pkg/config/config.go:2428-2429</td>
+      <td>Validation: <code>cron</code>, <code>interval</code>, <code>minimum_interval</code> mutually exclusive</td>
+    </tr>
+  </tbody>
+</table>
+
+<h2>Draft PR Comment</h2>
+<div class="pr-comment-box">Good documentation that accurately describes Horologium's behavior &mdash; a clear improvement over the placeholder. All defaults and claims verified against source code.
+
+One issue worth addressing: the scheduling section presents <code>minimum_interval</code> as a modifier on <code>interval</code>, but config validation enforces these as three mutually exclusive modes (<code>interval</code>, <code>minimum_interval</code>, <code>cron</code>). As written, an operator might try combining <code>interval</code> and <code>minimum_interval</code> on the same job, which would be rejected. I'd suggest restructuring that section to list three separate modes.
+
+Minor: the retry description could mention the hard cap of 10 from <code>maxRetries</code>.</div>
+
+<footer>
+  Generated 2026-04-27 &middot; Multi-perspective maintainer review &middot; PR #692 &middot; kubernetes-sigs/prow
+</footer>
+
+</body>
+</html>

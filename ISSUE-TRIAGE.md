@@ -168,6 +168,77 @@ prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollector
 - Missing: Test that `ExposeMetricsWithRegistry` produces valid gathered metrics
 - Missing: Test that controller-runtime Go collectors are successfully unregistered
 
+## Effort Assessment
+
+**Effort Level**: 1 - Easy (good-first-issue)
+
+### Summary
+
+The fix requires changing 2 lines in a single file (`pkg/metrics/metrics.go`) to match the collector options that controller-runtime v0.21.0 now uses. The root cause is fully understood, the solution is clear, and the change is purely internal with no backwards compatibility concerns.
+
+### Factor Analysis
+
+#### Scope of Changes
+- **Assessment**: Small
+- **Details**: 1 file (`pkg/metrics/metrics.go`), ~5 lines changed (update imports, change 2 `Unregister` calls)
+- **Level Indication**: 1-2
+
+#### Complexity
+- **Assessment**: Simple
+- **Details**: Direct fix — change the collector constructor to match what controller-runtime registers. No logic changes, no new patterns.
+- **Level Indication**: 1-2
+
+#### Required Expertise
+- **Assessment**: Minimal
+- **Details**: Requires understanding of Prometheus collector registration (well-documented). The root cause analysis in this triage provides all necessary context.
+- **Level Indication**: 1-2
+
+#### Clarity and Certainty
+- **Assessment**: Well-defined
+- **Details**: Root cause fully identified. The exact mismatch (default options vs `MetricsAll`) is known. Solution is mechanical.
+- **Level Indication**: 1-2
+
+#### Testing Requirements
+- **Assessment**: Simple
+- **Details**: A unit test calling `prometheus.Gatherers{DefaultGatherer, ctrlruntimemetrics.Registry}.Gather()` and checking for no errors would validate the fix. Follows standard Go test patterns.
+- **Level Indication**: 1-2
+
+#### Backwards Compatibility
+- **Assessment**: Fully compatible
+- **Details**: Purely internal metrics registration. The metrics endpoint will serve the same `go_*` metrics it always did (just without errors). No configuration or API changes.
+- **Level Indication**: 1-2
+
+#### Architectural Alignment
+- **Assessment**: Perfect fit
+- **Details**: Fixing the existing deduplication mechanism to work with updated dependencies. No new patterns.
+- **Level Indication**: 1-2
+
+#### External Dependencies
+- **Assessment**: None
+- **Details**: Internal code change adapting to already-bumped dependencies. No external system changes needed.
+- **Level Indication**: 1-3
+
+### Recommended Labels
+
+- [x] `good-first-issue`: Clear, well-defined, small scope, root cause documented
+- [x] `kind/bug`: Regression from dependency bump
+- [x] `area/prow`: Core Prow infrastructure
+- [ ] `help-needed`: Too simple for this label
+
+### Guidance for Contributors
+
+- Read the root cause analysis in this triage document
+- The fix is in `pkg/metrics/metrics.go` lines 53-56
+- Change `prometheus.NewGoCollector()` to `collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll))`
+- Change `prometheus.NewProcessCollector(...)` to `collectors.NewProcessCollector(collectors.ProcessCollectorOpts{})`
+- Add import for `github.com/prometheus/client_golang/prometheus/collectors`
+- Consider adding a test in `pkg/metrics/metrics_test.go` that validates gathering from both registries succeeds
+
+### Caveats and Considerations
+
+- The `Unregister`-by-creating-equivalent-collector approach is inherently fragile. If controller-runtime changes its collector options again, this will break again. A comment noting this coupling would be valuable.
+- The `nolint:staticcheck` directives may need updating since `collectors.NewGoCollector()` is the non-deprecated API.
+
 ## Next Steps
 
 (Action items will be added here)

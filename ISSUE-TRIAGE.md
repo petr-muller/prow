@@ -44,9 +44,129 @@ This is a clear, well-documented regression report. The metrics endpoints being 
 - Keep open and continue triage
 - Investigate the dependency bump for prometheus/controller-runtime changes that cause duplicate Go collector registration
 
-## Findings
+## Code Research
 
-(Research findings will be added here)
+### Current Implementation
+
+**Primary Components**:
+- `pkg/metrics/metrics.go` — Central metrics serving logic for all Prow components
+- `cmd/crier/main.go:321` — Calls `metrics.ExposeMetrics("crier", ...)`
+- `cmd/prow-controller-manager/main.go:220` — Calls `metrics.ExposeMetrics("plank", ...)`
+
+**Architecture Overview**:
+Prow combines two Prometheus registries when serving metrics:
+
+1. `prometheus.DefaultRegistry` — Where Prow's own metrics are registered via `init()` functions throughout the codebase (pkg/crier/metrics.go, pkg/kube/metrics.go, etc.). This registry also auto-registers Go runtime and process collectors in its own `init()`.
+2. `ctrlruntimemetrics.Registry` — Controller-runtime's own registry, where controller-runtime registers its reconcile metrics AND Go/process collectors via `init()` in `pkg/internal/controller/metrics/metrics.go`.
+
+These are merged at serve time via `prometheus.Gatherers{reg, ctrlruntimemetrics.Registry}` (metrics.go:62).
+
+**The Deduplication Mechanism** (metrics.go:53-56):
+To avoid duplicate Go runtime metrics from both registries, Prow attempts to unregister the Go and process collectors from controller-runtime's registry:
+```go
+ctrlruntimemetrics.Registry.Unregister(prometheus.NewGoCollector())
+ctrlruntimemetrics.Registry.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+```
+
+### Root Cause Analysis
+
+**Primary Cause**: Mismatch between the Go collector registered by controller-runtime and the one Prow tries to unregister.
+
+**Dependency changes in PR #713**:
+- `prometheus/client_golang`: v1.20.5 → v1.22.0
+- `sigs.k8s.io/controller-runtime`: v0.20.1 → v0.21.0
+
+**What changed in controller-runtime v0.21.0**:
+
+The Go collector registration in `pkg/internal/controller/metrics/metrics.go` init changed:
+- **v0.20.1**: `collectors.NewGoCollector()` — default options
+- **v0.21.0**: `collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll))` — with ALL runtime metrics enabled
+
+**Why the unregister fails**:
+
+Prow's unregister call creates `prometheus.NewGoCollector()` (deprecated API, default options). The `Unregister()` method compares collectors by their `Describe()` output (descriptor sets). Since `collectors.MetricsAll` produces a different/larger set of descriptors than the default, the newly created collector doesn't match the one registered by controller-runtime. The unregister silently fails (returns false), leaving the Go collector in controller-runtime's registry.
+
+**Result**: When both registries are gathered, `go_*` metrics appear from both `prometheus.DefaultRegistry` (auto-registered) and `ctrlruntimemetrics.Registry` (failed to unregister), causing the "collected before with the same name and label values" error.
+
+**Contributing Factors**:
+1. The unregister approach was always fragile — it relied on creating an equivalent collector that would match by descriptor identity
+2. Using the deprecated `prometheus.NewGoCollector()` API instead of the `collectors` package API
+3. No error checking on the `Unregister()` return value (it returns bool)
+
+### Affected Components
+
+All Prow components that call `ExposeMetrics` or `ExposeMetricsWithRegistry` AND import controller-runtime (directly or transitively):
+- **crier** (confirmed broken by reporter)
+- **prow-controller-manager** (confirmed broken by reporter)
+- Potentially: sinker, hook, deck, tide, horologium — if they import controller-runtime
+
+Components that use their own registry are NOT affected:
+- **exporter** (cmd/exporter/main.go) — creates `prometheus.NewRegistry()` and registers its own collectors
+
+### Proposed Solutions
+
+#### Approach 1: Match controller-runtime's collector options
+
+Update the unregister call to create a collector with the same options controller-runtime uses:
+```go
+ctrlruntimemetrics.Registry.Unregister(collectors.NewGoCollector(
+    collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll)))
+```
+
+**Pros**: Minimal change, directly addresses the mismatch
+**Cons**: Still fragile — will break again if controller-runtime changes its options. Couples Prow to controller-runtime internals.
+**Complexity**: Low
+**Backwards Compatibility**: None — purely internal change
+
+#### Approach 2: Clear and rebuild controller-runtime registry
+
+Instead of trying to unregister specific collectors, clear everything from `ctrlruntimemetrics.Registry` and re-register only the controller-runtime specific metrics (reconcile counters, etc.):
+
+**Pros**: More robust, doesn't depend on matching collector options
+**Cons**: More invasive, needs to know which controller-runtime metrics to keep. The registry doesn't expose a "clear all" operation — would need to iterate.
+**Complexity**: Medium
+**Backwards Compatibility**: Could lose controller-runtime metrics if not careful
+
+#### Approach 3: Use a single custom registry for everything
+
+Create a fresh `prometheus.NewRegistry()`, register Go/process collectors once, and use it for everything (similar to what exporter does). Don't combine with controller-runtime's registry.
+
+**Pros**: Clean, no duplication possible, follows exporter's proven pattern
+**Cons**: Loses controller-runtime metrics (reconcile counters etc.) unless they're re-registered. Larger change.
+**Complexity**: Medium-High
+**Backwards Compatibility**: May lose controller-runtime metrics
+
+#### Approach 4: Unregister Go collectors from DefaultRegistry instead
+
+Since DefaultRegistry auto-registers Go/process collectors too, unregister them from there and keep controller-runtime's (which has the richer MetricsAll set):
+```go
+prometheus.Unregister(prometheus.NewGoCollector())
+prometheus.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
+```
+
+**Pros**: Keeps the richer MetricsAll runtime metrics from controller-runtime. DefaultRegistry's own Go collector matches `prometheus.NewGoCollector()` exactly (same init code), so unregister will succeed.
+**Cons**: Still fragile if prometheus changes its init. Slightly different metric set served (MetricsAll includes more).
+**Complexity**: Low
+**Backwards Compatibility**: Slightly different metric set (more runtime metrics exposed, which is arguably better)
+
+#### Recommendation
+
+**Preferred Approach**: Approach 1 (match controller-runtime's options) for the immediate fix, as it's the smallest change and directly addresses the regression. However, a follow-up should consider Approach 4 (unregister from DefaultRegistry instead) as a more robust long-term solution, since the default registry's own collectors are guaranteed to match its own `init()`.
+
+**Key Implementation Considerations**:
+1. Import `collectors` package instead of using deprecated `prometheus.NewGoCollector()`
+2. Check `Unregister()` return value and log a warning if it fails
+3. Add a test that verifies metrics endpoint returns valid data when both registries are combined
+
+### Test Coverage
+
+**Existing Tests**:
+- No test currently validates that the combined metrics endpoint works without errors
+- `pkg/metrics/` has no test file for `metrics.go`
+
+**Test Gaps**:
+- Missing: Test that `ExposeMetricsWithRegistry` produces valid gathered metrics
+- Missing: Test that controller-runtime Go collectors are successfully unregistered
 
 ## Next Steps
 

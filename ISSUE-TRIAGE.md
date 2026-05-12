@@ -239,6 +239,46 @@ The fix requires changing 2 lines in a single file (`pkg/metrics/metrics.go`) to
 - The `Unregister`-by-creating-equivalent-collector approach is inherently fragile. If controller-runtime changes its collector options again, this will break again. A comment noting this coupling would be valuable.
 - The `nolint:staticcheck` directives may need updating since `collectors.NewGoCollector()` is the non-deprecated API.
 
+## Proposed Issue Augmentation
+
+### Title Change
+
+- **Current**: Metric endpoints for `crier` and `prow-controller-manager` are broken
+- **Proposed**: Metrics endpoints broken for components using controller-runtime after k8s v0.33.11 bump
+- **Rationale**: The issue affects more components than just crier and prow-controller-manager. The title also says "sinker" which contradicts the body. The proposed title identifies the actual scope and cause.
+
+### Proposed GitHub Comment
+
+```
+/retitle Metrics endpoints broken for components using controller-runtime after k8s v0.33.11 bump
+
+The root cause is a mismatch in `pkg/metrics/metrics.go`. To avoid duplicate `go_*` metrics when combining `prometheus.DefaultRegistry` with controller-runtime's registry, Prow [unregisters](https://github.com/kubernetes-sigs/prow/blob/5c4ab968b/pkg/metrics/metrics.go#L54-L56) Go and process collectors from controller-runtime's registry by creating equivalent collector instances and passing them to `Unregister()`. This works because `Unregister` matches collectors by their descriptor sets.
+
+However, controller-runtime v0.21.0 (pulled in by the k8s v0.33.11 bump) [changed](https://github.com/kubernetes/controller-runtime/compare/v0.20.1...v0.21.0) its Go collector registration from `collectors.NewGoCollector()` to `collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll))`. The `MetricsAll` option produces a different descriptor set, so Prow's unregister call (which still uses `prometheus.NewGoCollector()` with default options) no longer matches, fails silently, and both registries end up serving `go_*` metrics — hence the "collected before with the same name and label values" error.
+
+This affects all components that both call `ExposeMetrics` and import controller-runtime: crier, deck, horologium, prow-controller-manager, sinker, and tide. The fix is to update the unregister calls in `pkg/metrics/metrics.go` to use `collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll))` to match what controller-runtime now registers.
+
+/area prow
+/kind bug
+/good-first-issue
+```
+
+### Rationale
+
+**What's being added**:
+- Root cause explanation with links to the exact code and the controller-runtime change
+- Complete list of affected components (reporter only identified 2 of 6)
+- Specific fix location and approach for potential contributors
+
+**Why these labels**:
+- `/area prow`: This affects core Prow metrics infrastructure, not a specific component
+- `/kind bug`: Already applied by reporter, confirming it
+- `/good-first-issue`: Level 1 effort — single file, ~5 lines, clear root cause, mechanical fix
+
+**What's NOT included**:
+- No priority label: While this breaks monitoring, it doesn't break Prow's core functionality. Let maintainers decide priority.
+- No workaround: There isn't a simple config-level workaround; it requires a code fix.
+
 ## Next Steps
 
 (Action items will be added here)

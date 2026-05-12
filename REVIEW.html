@@ -1,0 +1,613 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #628 Review: status-reconciler fail closed</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --orange: #db6d28;
+    --cyan: #39d2c0;
+    --purple: #bc8cff;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 1020px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: var(--accent); }
+  h2 { font-size: 1.2rem; margin: 2rem 0 1rem; color: var(--cyan); border-bottom: 1px solid var(--border); padding-bottom: 0.4rem; }
+  h3 { font-size: 1rem; margin: 1.2rem 0 0.5rem; }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .meta { color: var(--text-muted); font-size: 0.9rem; margin-bottom: 1.5rem; }
+  .meta span { margin-right: 1.5rem; }
+
+  .finding {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1rem;
+    border-left: 3px solid var(--border);
+    position: relative;
+  }
+  .finding.severity-high { border-left-color: var(--red); }
+  .finding.severity-medium { border-left-color: var(--yellow); }
+  .finding.severity-low { border-left-color: var(--text-muted); }
+  .finding.positive { border-left-color: var(--green); }
+  .finding.converging { border-left-color: var(--orange); }
+
+  .finding-header {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .finding-title { font-weight: 600; }
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge-high { background: var(--red); color: #fff; }
+  .badge-medium { background: var(--yellow); color: #000; }
+  .badge-low { background: var(--border); color: var(--text-muted); }
+  .badge-positive { background: var(--green); color: #000; }
+  .badge-converging { background: var(--orange); color: #fff; }
+  .badge-file {
+    background: none;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    font-family: monospace;
+    font-size: 0.75rem;
+  }
+  .badge-reviewer {
+    background: none;
+    border: 1px solid var(--purple);
+    color: var(--purple);
+    font-size: 0.65rem;
+  }
+
+  .finding p { margin: 0.4rem 0; color: var(--text); font-size: 0.9rem; }
+  .finding .suggestion { color: var(--cyan); font-size: 0.85rem; margin-top: 0.5rem; }
+  .finding .suggestion::before { content: "Suggestion: "; font-weight: 600; }
+
+  pre {
+    background: #0d1117;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    padding: 0.7rem 1rem;
+    overflow-x: auto;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    margin: 0.5rem 0;
+    color: var(--text-muted);
+  }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+    background: rgba(110,118,129,0.15);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+  pre code { background: none; padding: 0; }
+
+  .checklist {
+    list-style: none;
+    margin: 0.5rem 0;
+  }
+  .checklist li {
+    padding: 0.3rem 0;
+    font-size: 0.9rem;
+  }
+  .checklist li::before {
+    content: "";
+    display: inline-block;
+    width: 1rem;
+    height: 1rem;
+    border: 1.5px solid var(--border);
+    border-radius: 3px;
+    margin-right: 0.6rem;
+    vertical-align: middle;
+    cursor: pointer;
+  }
+  .checklist li.checked::before {
+    background: var(--green);
+    border-color: var(--green);
+    content: "\2713";
+    color: #000;
+    font-size: 0.7rem;
+    text-align: center;
+    line-height: 1rem;
+    font-weight: bold;
+  }
+
+  .stats { display: flex; gap: 1.5rem; margin: 1rem 0; flex-wrap: wrap; }
+  .stat {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.6rem 1rem;
+    text-align: center;
+    min-width: 100px;
+  }
+  .stat-value { font-size: 1.4rem; font-weight: 700; }
+  .stat-label { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .stat-green .stat-value { color: var(--green); }
+  .stat-red .stat-value { color: var(--red); }
+  .stat-yellow .stat-value { color: var(--yellow); }
+
+  .file-list { font-size: 0.85rem; color: var(--text-muted); }
+  .file-list details { margin: 0.3rem 0; }
+  .file-list summary { cursor: pointer; color: var(--text); }
+  .file-list summary:hover { color: var(--accent); }
+  .file-list ul { margin: 0.3rem 0 0.3rem 1.5rem; }
+  .file-list li { margin: 0.15rem 0; }
+
+  .verdict {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.2rem;
+    margin-top: 2rem;
+    text-align: center;
+  }
+  .verdict-label { font-size: 0.8rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.1em; margin-bottom: 0.3rem; }
+  .verdict-value { font-size: 1.3rem; font-weight: 700; color: var(--green); }
+
+  .reviewer-verdicts {
+    display: flex;
+    gap: 1rem;
+    margin: 1rem 0;
+    flex-wrap: wrap;
+  }
+  .reviewer-verdict {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    flex: 1;
+    min-width: 200px;
+  }
+  .reviewer-verdict-name { font-size: 0.75rem; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.05em; }
+  .reviewer-verdict-result { font-weight: 600; margin-top: 0.2rem; }
+  .reviewer-verdict-result.approve { color: var(--green); }
+  .reviewer-verdict-result.comment { color: var(--yellow); }
+  .reviewer-verdict-detail { font-size: 0.8rem; color: var(--text-muted); margin-top: 0.2rem; }
+
+  .deployment-note {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 0.8rem 1rem;
+    margin-bottom: 0.6rem;
+    font-size: 0.9rem;
+  }
+  .deployment-note strong { color: var(--yellow); }
+
+  .pr-comment-box {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    position: relative;
+  }
+  .pr-comment-box .copy-btn {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    background: var(--border);
+    border: none;
+    color: var(--text);
+    padding: 0.3rem 0.7rem;
+    border-radius: 4px;
+    font-size: 0.75rem;
+    cursor: pointer;
+  }
+  .pr-comment-box .copy-btn:hover { background: var(--accent); color: #000; }
+
+  .checklist li { cursor: pointer; user-select: none; }
+  @media print {
+    body { background: #fff; color: #000; }
+    .finding { border-color: #ccc; background: #f8f8f8; }
+    pre { background: #f0f0f0; border-color: #ccc; }
+    .badge { border: 1px solid #999; }
+  }
+</style>
+</head>
+<body>
+
+<h1>PR #628: fix(status-reconciler): fail closed on config load errors and add operational metrics</h1>
+<div class="meta">
+  <span>Author: <a href="https://github.com/miltalex">@miltalex</a></span>
+  <span>Branch: <code>fix/status-reconciler</code></span>
+  <span>Fixes: <a href="https://github.com/kubernetes-sigs/prow/issues/540">#540</a></span>
+  <span>Labels: <code>lgtm</code>, <code>size/L</code></span>
+</div>
+
+<div class="stats">
+  <div class="stat stat-green"><div class="stat-value">+270</div><div class="stat-label">Additions</div></div>
+  <div class="stat stat-red"><div class="stat-value">-29</div><div class="stat-label">Deletions</div></div>
+  <div class="stat"><div class="stat-value">25</div><div class="stat-label">Files</div></div>
+  <div class="stat"><div class="stat-value">6</div><div class="stat-label">Commits</div></div>
+</div>
+
+<!-- ====== REVIEWER VERDICTS ====== -->
+<h2>Reviewer Verdicts</h2>
+<div class="reviewer-verdicts">
+  <div class="reviewer-verdict">
+    <div class="reviewer-verdict-name">Code Quality</div>
+    <div class="reviewer-verdict-result approve">APPROVE</div>
+    <div class="reviewer-verdict-detail">Correct, idiomatic Go. No critical issues. Only liveness probe timing warrants reconsideration.</div>
+  </div>
+  <div class="reviewer-verdict">
+    <div class="reviewer-verdict-name">Maintainability</div>
+    <div class="reviewer-verdict-result approve">APPROVE</div>
+    <div class="reviewer-verdict-detail">Burden: LOW. Follows existing patterns, functional options simplify API surface. Concerns are documentation nits.</div>
+  </div>
+  <div class="reviewer-verdict">
+    <div class="reviewer-verdict-name">Deployment Risk</div>
+    <div class="reviewer-verdict-result comment">MEDIUM RISK</div>
+    <div class="reviewer-verdict-detail">/healthz registration model changes all binaries simultaneously. ConfigAgent API is a compile-time breaking change.</div>
+  </div>
+</div>
+
+<!-- ====== CHANGED FILES ====== -->
+<h2>Changed Files</h2>
+<div class="file-list">
+  <details>
+    <summary>Core changes (5 files)</summary>
+    <ul>
+      <li><code>pkg/statusreconciler/controller.go</code> &mdash; healthy flag, onConfigLoadError callback, metrics emission, countLoadedPresubmits</li>
+      <li><code>pkg/statusreconciler/status.go</code> &mdash; corrupted state rejection, ConfigAgent option wiring</li>
+      <li><code>pkg/statusreconciler/metrics.go</code> &mdash; <strong>NEW</strong> &mdash; gauge + counter metrics</li>
+      <li><code>pkg/statusreconciler/status_test.go</code> &mdash; corrupted status file test case</li>
+      <li><code>cmd/status-reconciler/main.go</code> &mdash; health, metrics, ServeLive(c.Healthy)</li>
+    </ul>
+  </details>
+  <details>
+    <summary>Config agent refactor (2 files)</summary>
+    <ul>
+      <li><code>pkg/config/agent.go</code> &mdash; watchConfigs onError, StartWithErrorHandler, StartWatch error propagation</li>
+      <li><code>pkg/flagutil/config/config.go</code> &mdash; functional options: WithErrorHandler, WithAdditionals, WithReuseAgent</li>
+    </ul>
+  </details>
+  <details>
+    <summary>Health infrastructure (1 file)</summary>
+    <ul>
+      <li><code>pkg/pjutil/health.go</code> &mdash; /healthz moved from constructor to ServeLive(), LivenessCheck type</li>
+    </ul>
+  </details>
+  <details>
+    <summary>ServeLive() added to all binaries (13 files)</summary>
+    <ul>
+      <li><code>cmd/admission/main.go</code></li>
+      <li><code>cmd/deck/main.go</code> (also migrated to new ConfigAgent options)</li>
+      <li><code>cmd/exporter/main.go</code></li>
+      <li><code>cmd/external-plugins/cherrypicker/main.go</code></li>
+      <li><code>cmd/external-plugins/needs-rebase/main.go</code></li>
+      <li><code>cmd/external-plugins/refresh/main.go</code></li>
+      <li><code>cmd/gangway/main.go</code></li>
+      <li><code>cmd/ghproxy/ghproxy.go</code></li>
+      <li><code>cmd/hook/main.go</code></li>
+      <li><code>cmd/moonraker/main.go</code></li>
+      <li><code>cmd/prow-controller-manager/main.go</code></li>
+      <li><code>cmd/tot/main.go</code></li>
+      <li><code>cmd/webhook-server/main.go</code></li>
+    </ul>
+  </details>
+  <details>
+    <summary>Starter manifests (4 files)</summary>
+    <ul>
+      <li><code>config/prow/cluster/starter/starter-azure.yaml</code></li>
+      <li><code>config/prow/cluster/starter/starter-gcs.yaml</code></li>
+      <li><code>config/prow/cluster/starter/starter-s3-kind.yaml</code></li>
+      <li><code>config/prow/cluster/starter/starter-s3.yaml</code></li>
+    </ul>
+  </details>
+</div>
+
+<!-- ====== POSITIVE ====== -->
+<h2>What Works Well</h2>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="badge badge-positive">Good</span>
+    <span class="finding-title">Fail-closed design via onConfigLoadError callback</span>
+    <span class="badge badge-reviewer">All 3 reviewers</span>
+  </div>
+  <p>The callback pattern correctly propagates config-agent goroutine errors back to the controller's health state. This is the right solution for the goroutine boundary problem identified in review feedback. The fail-closed design is sound: corrupted state &rarr; <code>Load()</code> fails &rarr; <code>Run()</code> returns &rarr; liveness check fails &rarr; pod restart.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="badge badge-positive">Good</span>
+    <span class="finding-title">Functional options for ConfigAgent</span>
+    <span class="badge badge-reviewer">Code Quality + Maintainability</span>
+  </div>
+  <p><code>WithErrorHandler</code>, <code>WithAdditionals</code>, <code>WithReuseAgent</code> is idiomatic Go. Consolidates <code>ConfigAgent</code> + <code>ConfigAgentWithAdditionals</code> into one method. Extensible for future needs without API breakage. Deck's call site is cleaner.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="badge badge-positive">Good</span>
+    <span class="finding-title">Corrupted state file now fails Load()</span>
+    <span class="badge badge-reviewer">All 3 reviewers</span>
+  </div>
+  <p>Only <code>io.IsNotExist</code> errors are tolerated. Previously, the reconciler could silently proceed with empty state on corruption, treating all presubmits as "new" and triggering spurious job runs across every PR. Test coverage added for this path.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="badge badge-positive">Good</span>
+    <span class="finding-title">Metrics are well-scoped and directly address #540</span>
+    <span class="badge badge-reviewer">Maintainability</span>
+  </div>
+  <p><code>status_reconciler_loaded_presubmit_count</code> (Gauge) gives immediate signal for the "all presubmits disappeared" failure mode. <code>status_reconciler_contexts_retired_total</code> (Counter with org/repo labels) enables alerting on unexpected retirements.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="badge badge-positive">Good</span>
+    <span class="finding-title">StartWatch fix propagates watchConfigs errors</span>
+    <span class="badge badge-reviewer">Code Quality</span>
+  </div>
+  <p>Previously <code>StartWatch</code> silently discarded <code>watchConfigs</code> return value. Now it's propagated. Good correctness improvement &mdash; if fsnotify setup fails, callers will know.</p>
+</div>
+
+<div class="finding positive">
+  <div class="finding-header">
+    <span class="badge badge-positive">Good</span>
+    <span class="finding-title">sync/atomic for healthy flag</span>
+    <span class="badge badge-reviewer">Code Quality + Maintainability</span>
+  </div>
+  <p>Appropriate for a simple boolean, avoids mutex overhead. Matches the existing <code>ReadinessCheck</code> pattern in the same file.</p>
+</div>
+
+<!-- ====== CONVERGING CONCERNS ====== -->
+<h2>Converging Concerns</h2>
+<p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1rem;">Issues independently flagged by 2+ reviewers. These carry the most weight.</p>
+
+<div class="finding converging">
+  <div class="finding-header">
+    <span class="badge badge-converging">All 3</span>
+    <span class="finding-title">Liveness probe initialDelaySeconds: 3 is too aggressive</span>
+    <span class="badge badge-file">config/prow/cluster/starter/starter-*.yaml</span>
+  </div>
+  <p>The liveness probe has <code>initialDelaySeconds: 3</code> with <code>periodSeconds: 3</code>. For status-reconciler, <code>ServeLive(c.Healthy)</code> is called <strong>after</strong> config agent, plugin agent, GitHub client, and controller init. During this window, <code>/healthz</code> returns 404. The kubelet could start probing before the handler exists and restart the pod.</p>
+  <p>The readiness probe uses <code>initialDelaySeconds: 10</code>, acknowledging startup time. The liveness probe should be at least as generous.</p>
+  <pre><code>livenessProbe:
+  httpGet:
+    path: /healthz
+    port: 8081
+  initialDelaySeconds: 3   # &lt;-- too low if ServeLive() isn't called yet
+  periodSeconds: 3</code></pre>
+  <p class="suggestion">Bump liveness <code>initialDelaySeconds</code> to at least 10 (matching readiness). Consider adding <code>failureThreshold: 3</code> for additional safety.</p>
+</div>
+
+<div class="finding converging">
+  <div class="finding-header">
+    <span class="badge badge-converging">CQ + DR</span>
+    <span class="finding-title">ServeLive() registration window &mdash; /healthz will 404 until called</span>
+    <span class="badge badge-file">pkg/pjutil/health.go:46</span>
+  </div>
+  <p>Previously, <code>NewHealthOnPort</code> registered <code>/healthz</code> unconditionally. Now the handler is only registered when <code>ServeLive()</code> is called. The HTTP server starts in <code>NewHealthOnPort</code>, so there's a window where <code>/healthz</code> returns 404.</p>
+  <p>For most binaries this window is tiny (ServeLive is called right after). But in <code>cmd/status-reconciler/main.go</code>, <code>ServeLive(c.Healthy)</code> is called much later &mdash; a potentially multi-second window.</p>
+  <pre><code>// main.go order:
+health := pjutil.NewHealthOnPort(...)   // server starts, /healthz = 404
+health.ServeReady()                     // /healthz/ready registered
+configAgent, err := o.config.ConfigAgent()  // may take time
+// ... plugin agent, github client, opener ...
+c := statusreconciler.NewController(...)
+health.ServeLive(c.Healthy)             // /healthz finally registered</code></pre>
+  <p class="suggestion">The <code>initialDelaySeconds</code> bump above is the primary mitigation. Optionally, update <code>NewHealthOnPort</code> godoc to state that <code>ServeLive()</code> must be called.</p>
+</div>
+
+<div class="finding converging">
+  <div class="finding-header">
+    <span class="badge badge-converging">MT + CQ</span>
+    <span class="finding-title">onConfigLoadError produces redundant log lines</span>
+    <span class="badge badge-file">pkg/statusreconciler/controller.go:204</span>
+  </div>
+  <p>The <code>onConfigLoadError</code> callback logs <code>"Config load failed; marking status-reconciler unhealthy."</code> with the error. The config agent's own goroutine <em>also</em> logs the same error with <code>"Error loading config."</code>. Every config failure produces two error lines about the same event, which could confuse on-call.</p>
+  <p class="suggestion">Remove the log line from <code>onConfigLoadError</code> (the health flip is the important action), or change it to <code>Warn</code> to differentiate from the agent's <code>Error</code>.</p>
+</div>
+
+<div class="finding converging">
+  <div class="finding-header">
+    <span class="badge badge-converging">CQ + MT</span>
+    <span class="finding-title">init() MustRegister can panic in tests</span>
+    <span class="badge badge-file">pkg/statusreconciler/metrics.go:38-40</span>
+  </div>
+  <p><code>prometheus.MustRegister</code> in <code>init()</code> will panic if metrics are already registered (e.g., tests importing the package alongside another package with the same metric name). Follows existing Prow patterns, so consistent and not blocking.</p>
+</div>
+
+<!-- ====== ADDITIONAL FINDINGS ====== -->
+<h2>Additional Findings</h2>
+
+<div class="finding severity-medium">
+  <div class="finding-header">
+    <span class="badge badge-medium">Medium</span>
+    <span class="finding-title">Integration test fake servers missing ServeLive()</span>
+    <span class="badge badge-reviewer">Deployment Risk</span>
+    <span class="badge badge-file">test/integration/cmd/fake*/main.go</span>
+  </div>
+  <p>Five test fake servers (<code>fakepubsub</code>, <code>fakegitserver</code>, <code>fakeghserver</code>, <code>fakegerritserver</code>, <code>fakegcsserver</code>) call <code>NewHealth()</code> but <strong>not</strong> <code>ServeLive()</code>. After this change, they won't have a <code>/healthz</code> endpoint at all. If integration tests rely on liveness probes for these, they'll get 404s.</p>
+  <p class="suggestion">Audit these five files and add <code>ServeLive()</code> calls where needed.</p>
+</div>
+
+<div class="finding severity-medium">
+  <div class="finding-header">
+    <span class="badge badge-medium">Medium</span>
+    <span class="finding-title">ConfigAgentWithAdditionals removal is a breaking API change</span>
+    <span class="badge badge-reviewer">Deployment Risk</span>
+    <span class="badge badge-file">pkg/flagutil/config/config.go</span>
+  </div>
+  <p><code>ConfigAgentWithAdditionals</code> and the old <code>ConfigAgent(reuse ...*config.Agent)</code> signature are both removed. Downstream Go consumers importing these will fail to compile. The breaks are compile-time (not silent runtime), but should be documented.</p>
+  <p class="suggestion">Document in release notes. The functional options pattern is the replacement.</p>
+</div>
+
+<div class="finding severity-low">
+  <div class="finding-header">
+    <span class="badge badge-low">Low</span>
+    <span class="finding-title">Health recovery semantics are implicit</span>
+    <span class="badge badge-reviewer">Maintainability + Code Quality</span>
+    <span class="badge badge-file">pkg/statusreconciler/controller.go:179</span>
+  </div>
+  <p><code>c.setHealthy(true)</code> on every channel receive works because a Delta only arrives after successful config load (<code>Agent.Set()</code> publishes the delta). This depends on understanding <code>config.Agent</code> internals. No log message on recovery makes debugging liveness flaps harder.</p>
+  <p class="suggestion">Add a comment explaining recovery semantics. Consider adding a log line when transitioning from unhealthy to healthy.</p>
+</div>
+
+<div class="finding severity-low">
+  <div class="finding-header">
+    <span class="badge badge-low">Low</span>
+    <span class="finding-title">Run exits permanently on Load failure &mdash; no retry</span>
+    <span class="badge badge-reviewer">Maintainability</span>
+    <span class="badge badge-file">pkg/statusreconciler/controller.go:167-172</span>
+  </div>
+  <p>When <code>Load()</code> fails, <code>Run</code> logs and returns. The goroutine silently exits. If the saved status file is transiently unreadable (NFS hiccup, GCS error), the reconciler is permanently dead until the liveness probe restarts the pod. Correct behavior, but the intentional coupling should be documented.</p>
+  <p class="suggestion">Add a comment: "Run exits on Load failure; the liveness probe will restart the pod."</p>
+</div>
+
+<div class="finding severity-low">
+  <div class="finding-header">
+    <span class="badge badge-low">Low</span>
+    <span class="finding-title">onConfigLoadError: dead nil check on err</span>
+    <span class="badge badge-reviewer">Code Quality</span>
+    <span class="badge badge-file">pkg/statusreconciler/controller.go:204-209</span>
+  </div>
+  <p><code>onConfigLoadError</code> checks <code>if err != nil</code> before logging, but it's only ever called from paths where <code>err</code> is already non-nil. The unconditional <code>setHealthy(false)</code> means calling with nil would still mark unhealthy.</p>
+  <pre><code>func (c *Controller) onConfigLoadError(err error) {
+    if err != nil {  // always true when called
+        logrus.WithError(err).Error("Config load failed; ...")
+    }
+    c.setHealthy(false)  // runs even if err is nil?
+}</code></pre>
+  <p class="suggestion">Remove the nil check, or guard <code>setHealthy(false)</code> behind it too for consistency.</p>
+</div>
+
+<div class="finding severity-low">
+  <div class="finding-header">
+    <span class="badge badge-low">Low</span>
+    <span class="finding-title">StartWatch now propagates watchConfigs error (undocumented behavior change)</span>
+    <span class="badge badge-reviewer">Code Quality + Deployment Risk</span>
+    <span class="badge badge-file">pkg/config/agent.go:316</span>
+  </div>
+  <p>Previously <code>StartWatch</code> silently discarded <code>watchConfigs</code> return value. Now it returns it. If fsnotify setup fails (e.g., inotify limits), callers will see an error they previously didn't.</p>
+  <p class="suggestion">Call out this behavioral change in the PR description.</p>
+</div>
+
+<div class="finding severity-low">
+  <div class="finding-header">
+    <span class="badge badge-low">Low</span>
+    <span class="finding-title">StartWithErrorHandler has a 7-parameter signature</span>
+    <span class="badge badge-reviewer">Maintainability</span>
+    <span class="badge badge-file">pkg/config/agent.go:351</span>
+  </div>
+  <p>Adding <code>onError</code> to an already-long parameter list. Pre-existing debt slightly worsened. The functional options pattern used at the <code>ConfigOptions</code> level could eventually replace this too.</p>
+</div>
+
+<!-- ====== DEPLOYMENT NOTES ====== -->
+<h2>Deployment Notes</h2>
+
+<div class="deployment-note">
+  <strong>API Breaking Change:</strong> <code>ConfigAgentWithAdditionals</code> removed and <code>ConfigAgent</code> signature changed. Downstream Go consumers must update to functional options (<code>WithReuseAgent</code>, <code>WithAdditionals</code>).
+</div>
+<div class="deployment-note">
+  <strong>Health API Change:</strong> <code>/healthz</code> no longer auto-registered by <code>NewHealthOnPort</code>. Out-of-tree consumers of <code>pkg/pjutil/health.go</code> must add <code>ServeLive()</code>.
+</div>
+<div class="deployment-note">
+  <strong>Behavioral Change:</strong> status-reconciler now crash-loops on corrupted state files instead of running with stale/empty config. Intended improvement &mdash; operators with a corrupted file will need to fix or remove it.
+</div>
+<div class="deployment-note">
+  <strong>Behavioral Change:</strong> Transient config load failures (NFS glitch, ConfigMap race) now trigger pod restarts via liveness probe instead of running with stale config. This is the desired "fail closed" behavior.
+</div>
+<div class="deployment-note">
+  <strong>Rollback:</strong> Safe. No config file format changes, no persistent state format changes.
+</div>
+
+<!-- ====== REVIEW CHECKLIST ====== -->
+<h2>Review Checklist</h2>
+<ul class="checklist" id="checklist">
+  <li onclick="this.classList.toggle('checked')">Liveness initialDelaySeconds bumped to &ge;10 in starter manifests</li>
+  <li onclick="this.classList.toggle('checked')">Integration test fake servers audited for missing ServeLive()</li>
+  <li onclick="this.classList.toggle('checked')">ConfigAgentWithAdditionals removal documented in release notes</li>
+  <li onclick="this.classList.toggle('checked')">Comment added at controller.go:179 explaining health recovery semantics</li>
+  <li onclick="this.classList.toggle('checked')">Log on health recovery transition (unhealthy &rarr; healthy)</li>
+  <li onclick="this.classList.toggle('checked')">Redundant log in onConfigLoadError addressed (remove or change to Warn)</li>
+  <li onclick="this.classList.toggle('checked')">onConfigLoadError nil-check cleaned up</li>
+  <li onclick="this.classList.toggle('checked')">Comment at controller.go:167 re: Run exit + liveness restart coupling</li>
+  <li onclick="this.classList.toggle('checked')">NewHealthOnPort godoc updated re: ServeLive() requirement</li>
+  <li onclick="this.classList.toggle('checked')">StartWatch error propagation noted in PR description</li>
+  <li onclick="this.classList.toggle('checked')">Commits squashed into logical units</li>
+  <li onclick="this.classList.toggle('checked')">All binaries compile and pass tests</li>
+</ul>
+
+<!-- ====== VERDICT ====== -->
+<div class="verdict">
+  <div class="verdict-label">Recommendation</div>
+  <div class="verdict-value">APPROVE WITH SUGGESTIONS</div>
+  <p style="color: var(--text-muted); font-size: 0.9rem; margin-top: 0.5rem;">All three reviewers approve. No critical issues. The liveness probe timing is the highest-priority suggestion (converging concern from all 3 reviewers). Remaining items are documentation and minor cleanup.</p>
+</div>
+
+<!-- ====== PR COMMENT ====== -->
+<h2>Draft PR Comment</h2>
+<div class="pr-comment-box" id="pr-comment">
+  <button class="copy-btn" onclick="copyComment()">Copy</button>
+  <p>LGTM. The fail-closed behavior and operational metrics are well-motivated and correctly implemented. All three independent reviews converge on approval.</p>
+  <p style="margin-top: 0.5rem;">Two suggestions worth considering before merge:</p>
+  <p style="margin-top: 0.3rem;">1. Bump the liveness probe <code>initialDelaySeconds</code> from 3 to 10 in the starter manifests to eliminate the <code>/healthz</code> 404 race window &mdash; all three reviewers flagged this independently.</p>
+  <p style="margin-top: 0.3rem;">2. Audit the five integration test fake servers that call <code>NewHealth()</code> but not <code>ServeLive()</code> to confirm no test relies on <code>/healthz</code> from those.</p>
+  <p style="margin-top: 0.5rem;">Neither is blocking. The <code>ConfigAgentWithAdditionals</code> removal should be called out in release notes for downstream consumers.</p>
+</div>
+
+<script>
+// Persist checklist state in localStorage
+const KEY = 'pr628-review-checklist-v2';
+function saveState() {
+  const items = document.querySelectorAll('#checklist li');
+  const state = Array.from(items).map(li => li.classList.contains('checked'));
+  localStorage.setItem(KEY, JSON.stringify(state));
+}
+function loadState() {
+  const state = JSON.parse(localStorage.getItem(KEY) || '[]');
+  const items = document.querySelectorAll('#checklist li');
+  state.forEach((checked, i) => { if (items[i] && checked) items[i].classList.add('checked'); });
+}
+document.querySelectorAll('#checklist li').forEach(li => li.addEventListener('click', () => setTimeout(saveState, 0)));
+loadState();
+
+function copyComment() {
+  const el = document.getElementById('pr-comment');
+  const text = el.innerText.replace('Copy\n', '').trim();
+  navigator.clipboard.writeText(text).then(() => {
+    const btn = el.querySelector('.copy-btn');
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy', 2000);
+  });
+}
+</script>
+
+</body>
+</html>

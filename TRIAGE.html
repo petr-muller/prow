@@ -1,0 +1,330 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Triage: Issue #718 — Metrics endpoints broken</title>
+<style>
+  :root {
+    --bg: #1a1a2e;
+    --surface: #16213e;
+    --surface2: #0f3460;
+    --accent: #e94560;
+    --accent2: #533483;
+    --text: #eee;
+    --text-dim: #aab;
+    --border: #2a2a4a;
+    --code-bg: #0d1117;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --blue: #58a6ff;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    border-bottom: 2px solid var(--accent);
+    padding-bottom: 0.5rem;
+    margin-bottom: 1.5rem;
+  }
+  h1 a { color: var(--blue); text-decoration: none; }
+  h1 a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 1.15rem;
+    color: var(--accent);
+    margin: 2rem 0 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  h3 {
+    font-size: 1rem;
+    color: var(--blue);
+    margin: 1.25rem 0 0.5rem;
+  }
+  p, li { color: var(--text); margin-bottom: 0.5rem; }
+  ul { padding-left: 1.5rem; }
+  a { color: var(--blue); }
+  code {
+    font-family: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    font-size: 0.85em;
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+  }
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    overflow-x: auto;
+    margin: 0.75rem 0;
+    font-size: 0.85rem;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  blockquote {
+    border-left: 3px solid var(--accent2);
+    padding: 0.5rem 1rem;
+    margin: 0.75rem 0;
+    background: rgba(83, 52, 131, 0.15);
+    color: var(--text-dim);
+    font-style: italic;
+  }
+
+  .badge {
+    display: inline-block;
+    padding: 0.2em 0.6em;
+    border-radius: 12px;
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-right: 0.4rem;
+  }
+  .badge-legitimate { background: var(--green); color: #000; }
+  .badge-bug { background: #e11d21; color: #fff; }
+  .badge-level1 { background: var(--green); color: #000; }
+
+  .meta-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1rem;
+    margin: 1rem 0;
+  }
+  .meta-card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+  }
+  .meta-card dt { color: var(--text-dim); font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.05em; }
+  .meta-card dd { font-size: 1rem; margin-top: 0.25rem; }
+
+  .flow-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1.25rem;
+    margin: 1rem 0;
+    font-family: monospace;
+    font-size: 0.85rem;
+    white-space: pre;
+    overflow-x: auto;
+    line-height: 1.7;
+    color: var(--text-dim);
+  }
+  .flow-diagram .hl { color: var(--accent); font-weight: bold; }
+  .flow-diagram .ok { color: var(--green); }
+  .flow-diagram .bad { color: var(--accent); }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  th {
+    text-align: left;
+    background: var(--surface2);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  td {
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+    background: var(--surface);
+  }
+
+  .approach {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 0.75rem 0;
+  }
+  .approach.recommended { border-color: var(--green); }
+  .approach h4 { margin: 0 0 0.5rem; font-size: 0.95rem; }
+  .approach .pros { color: var(--green); }
+  .approach .cons { color: var(--yellow); }
+
+  .comment-posted {
+    background: rgba(63, 185, 80, 0.1);
+    border: 1px solid var(--green);
+    border-radius: 6px;
+    padding: 1rem;
+    margin: 1rem 0;
+  }
+  .comment-posted a { color: var(--green); }
+
+  .section-divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2rem 0;
+  }
+
+  footer {
+    margin-top: 3rem;
+    padding-top: 1rem;
+    border-top: 1px solid var(--border);
+    color: var(--text-dim);
+    font-size: 0.8rem;
+  }
+</style>
+</head>
+<body>
+
+<h1>Triage: <a href="https://github.com/kubernetes-sigs/prow/issues/718">#718</a> &mdash; Metrics endpoints broken</h1>
+
+<div class="meta-grid">
+  <div class="meta-card">
+    <dt>Assessment</dt>
+    <dd><span class="badge badge-legitimate">LEGITIMATE</span> <span class="badge badge-bug">kind/bug</span></dd>
+  </div>
+  <div class="meta-card">
+    <dt>Effort</dt>
+    <dd><span class="badge badge-level1">Level 1 &mdash; Easy</span></dd>
+  </div>
+  <div class="meta-card">
+    <dt>Reporter</dt>
+    <dd>oliver-goetz &middot; 2026-05-12</dd>
+  </div>
+  <div class="meta-card">
+    <dt>Cause</dt>
+    <dd><a href="https://github.com/kubernetes-sigs/prow/pull/713">PR #713</a> &mdash; k8s v0.33.11 bump</dd>
+  </div>
+</div>
+
+<hr class="section-divider">
+
+<h2>Root Cause</h2>
+
+<p>Prow combines two Prometheus registries: <code>prometheus.DefaultRegistry</code> (Prow's own metrics + auto-registered Go/process collectors) and <code>ctrlruntimemetrics.Registry</code> (controller-runtime metrics + its own Go/process collectors). To avoid duplicates, Prow <a href="https://github.com/kubernetes-sigs/prow/blob/5c4ab968b/pkg/metrics/metrics.go#L54-L56">unregisters</a> Go/process collectors from controller-runtime's registry by creating equivalent instances and calling <code>Unregister()</code>, which matches by descriptor set.</p>
+
+<p><strong>The dependency bump changed controller-runtime's collector registration:</strong></p>
+
+<table>
+  <tr>
+    <th>Dependency</th>
+    <th>Before (working)</th>
+    <th>After (broken)</th>
+  </tr>
+  <tr>
+    <td><code>prometheus/client_golang</code></td>
+    <td>v1.20.5</td>
+    <td>v1.22.0</td>
+  </tr>
+  <tr>
+    <td><code>controller-runtime</code></td>
+    <td>v0.20.1</td>
+    <td>v0.21.0</td>
+  </tr>
+  <tr>
+    <td>Go collector init</td>
+    <td><code>collectors.NewGoCollector()</code></td>
+    <td><code>collectors.NewGoCollector(<wbr>collectors.WithGoCollectorRuntimeMetrics(<wbr>collectors.MetricsAll))</code></td>
+  </tr>
+</table>
+
+<p>The <code>MetricsAll</code> option produces a different descriptor set. Prow's unregister call (using <code>prometheus.NewGoCollector()</code> with default options) no longer matches, fails silently, and both registries serve <code>go_*</code> metrics &mdash; causing 29 "collected before with the same name and label values" errors.</p>
+
+<div class="flow-diagram"><span class="ok">prometheus.DefaultRegistry</span>          <span class="ok">ctrlruntimemetrics.Registry</span>
+  init(): NewGoCollector()              init(): NewGoCollector(<span class="hl">MetricsAll</span>)
+  init(): NewProcessCollector()         init(): NewProcessCollector()
+  + Prow custom metrics                 + controller-runtime reconcile metrics
+         |                                       |
+         |    Prow tries to Unregister:           |
+         |    <span class="bad">prometheus.NewGoCollector()</span>  !=  collectors.NewGoCollector(<span class="hl">MetricsAll</span>)
+         |    <span class="bad">MISMATCH &rarr; Unregister fails silently</span>
+         |                                       |
+         +----------- Gatherers{...} ------------+
+                          |
+                   <span class="bad">DUPLICATE go_* metrics &rarr; ERROR</span></div>
+
+<hr class="section-divider">
+
+<h2>Affected Components</h2>
+
+<p>All components that call <code>ExposeMetrics</code> AND import controller-runtime:</p>
+
+<table>
+  <tr><th>Component</th><th>Metrics call</th><th>Affected?</th></tr>
+  <tr><td>crier</td><td><code>cmd/crier/main.go:321</code></td><td>Yes (confirmed)</td></tr>
+  <tr><td>prow-controller-manager</td><td><code>cmd/prow-controller-manager/main.go:220</code></td><td>Yes (confirmed)</td></tr>
+  <tr><td>sinker</td><td><code>cmd/sinker/main.go:124</code></td><td>Yes</td></tr>
+  <tr><td>deck</td><td><code>cmd/deck/main.go</code></td><td>Yes</td></tr>
+  <tr><td>horologium</td><td><code>cmd/horologium/main.go</code></td><td>Yes</td></tr>
+  <tr><td>tide</td><td><code>cmd/tide/main.go</code></td><td>Yes</td></tr>
+  <tr><td>exporter</td><td>Uses own <code>NewRegistry()</code></td><td>No</td></tr>
+</table>
+
+<hr class="section-divider">
+
+<h2>Fix Location</h2>
+
+<p><strong>File:</strong> <code>pkg/metrics/metrics.go</code>, lines 53&ndash;56</p>
+
+<pre><code>// Current (broken):
+//nolint:staticcheck
+ctrlruntimemetrics.Registry.Unregister(prometheus.NewGoCollector())
+//nolint:staticcheck
+ctrlruntimemetrics.Registry.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))</code></pre>
+
+<pre><code>// Fixed:
+ctrlruntimemetrics.Registry.Unregister(collectors.NewGoCollector(
+    collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll)))
+ctrlruntimemetrics.Registry.Unregister(collectors.NewProcessCollector(
+    collectors.ProcessCollectorOpts{}))</code></pre>
+
+<p>Also add import: <code>"github.com/prometheus/client_golang/prometheus/collectors"</code></p>
+
+<hr class="section-divider">
+
+<h2>Solution Approaches</h2>
+
+<div class="approach recommended">
+  <h4>Approach 1: Match controller-runtime's collector options (Recommended)</h4>
+  <p>Update unregister calls to use <code>collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll))</code></p>
+  <p class="pros">+ Minimal change, 1 file, ~5 lines, directly fixes the mismatch</p>
+  <p class="cons">- Still fragile &mdash; will break if controller-runtime changes options again</p>
+</div>
+
+<div class="approach">
+  <h4>Approach 4: Unregister from DefaultRegistry instead</h4>
+  <p>Remove Go/process collectors from <code>prometheus.DefaultRegistry</code> (where they're guaranteed to match) and keep controller-runtime's richer <code>MetricsAll</code> set.</p>
+  <p class="pros">+ More robust long-term, keeps richer metrics</p>
+  <p class="cons">- Slightly different metric set exposed (more runtime metrics)</p>
+</div>
+
+<hr class="section-divider">
+
+<h2>Comment Posted</h2>
+
+<div class="comment-posted">
+  <p>Augmentation comment posted on 2026-05-12</p>
+  <p><a href="https://github.com/kubernetes-sigs/prow/issues/718#issuecomment-4433963503">View comment &rarr;</a></p>
+  <p>Labels applied: <code>/kind bug</code></p>
+  <p>Maintainer decision: no retitle, no <code>/area</code>, no <code>/good-first-issue</code> (understanding failure case + validating fix requires expertise)</p>
+</div>
+
+<hr class="section-divider">
+
+<h2>Full Triage Document</h2>
+
+<p><a href="https://github.com/petr-muller/prow/blob/issue-triage-718/ISSUE-TRIAGE.md">ISSUE-TRIAGE.md on issue-triage-718 branch</a></p>
+
+<footer>
+  Generated from triage session on 2026-05-12 &middot; Branch: <code>issue-triage-718</code>
+</footer>
+
+</body>
+</html>

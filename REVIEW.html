@@ -264,6 +264,7 @@
 </head>
 <body>
 
+<!-- review-meta: pr=kubernetes-sigs/prow#698 head_sha=773c479cad28d019abfabee63bdba190d2544280 base=main reviewed_at=2026-05-14T00:34:26Z verdict=request-changes -->
 <h1>PR #698: feat: manage non-k8s members assigning issues</h1>
 <div class="pr-meta">
   <a href="https://github.com/kubernetes-sigs/prow/pull/698" target="_blank">kubernetes-sigs/prow#698</a>
@@ -271,6 +272,8 @@
   &middot; Files: <code>assign.go</code>, <code>assign_test.go</code>
   &middot; <span style="color:var(--green)">+130</span> / <span style="color:var(--red)">&minus;5</span>
   &middot; <span class="verdict changes">Changes Requested</span>
+  <br>
+  <span style="font-size:0.8rem">HEAD: <code>773c479cad28d019abfabee63bdba190d2544280</code> &middot; Base: <code>main</code> &middot; Reviewed: 2026-05-14T00:34:26Z (refreshed; originally 2026-04-30)</span>
   <div class="reviewer-verdicts">
     <div class="reviewer-verdict"><span class="rv-name">Code Quality:</span> <span class="rv-result changes">REQUEST_CHANGES</span></div>
     <div class="reviewer-verdict"><span class="rv-name">Maintainability:</span> <span class="rv-result changes">REQUEST_CHANGES</span></div>
@@ -424,6 +427,15 @@
       <div class="file-ref">assign.go:153</div>
     </div>
 
+    <div class="issue concern">
+      <div class="issue-title">
+        <span class="severity concern">concern</span>
+        Entire <code>PluginConfig</code> passed unnecessarily
+      </div>
+      <p>Only <code>HelpGuidelinesURL</code> is used from the config, but the entire <code>PluginConfig</code> instance is passed as a parameter. Narrowing to just the needed field reduces coupling. (Raised by Amulyam24, 2026-05-13.)</p>
+      <div class="file-ref">assign.go</div>
+    </div>
+
   </div>
 </div>
 
@@ -478,6 +490,67 @@
       <p>"It looks like you're new!" may feel patronizing to experienced contributors from other orgs. Consider: "This issue hasn't been labeled as a good first issue."</p>
     </div>
 
+    <div class="issue nit">
+      <div class="issue-title">
+        <span class="severity nit">nit</span>
+        Variable naming: <code>hasGoodFirstIssue</code> vs <code>isGoodFirstIssue</code>
+      </div>
+      <p><code>isGoodFirstIssue</code> better matches the boolean's role as a predicate about the issue. Minor but reasonable. (Raised by Amulyam24, 2026-05-13.)</p>
+      <div class="file-ref">assign.go:154</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- WHAT THIS PR DOES -->
+<div class="section">
+  <div class="section-header" onclick="toggle(this)">
+    <span class="arrow">&#9660;</span> What This PR Does
+  </div>
+  <div class="section-body">
+    <ul style="margin-left:1.2rem; font-size:0.85rem; color:var(--text-muted);">
+      <li>Adds an educational comment when a non-org-member uses <code>/assign</code> on an issue that lacks the <code>good-first-issue</code> label, directing them to beginner-friendly issues and <code>CONTRIBUTING.md</code>.</li>
+      <li>Checks labels, then org membership, then looks for <code>CONTRIBUTING.md</code> in the repo (falling back to <code>HelpGuidelinesURL</code> config), and composes a message with relevant links.</li>
+      <li>Assignment itself still proceeds unconditionally — the message is purely informational.</li>
+      <li>Adds <code>GetRepo</code> to the <code>githubClient</code> interface (unused in production code).</li>
+      <li>Includes test cases for the new path but has gaps in error/fallback coverage.</li>
+    </ul>
+    <p style="margin-top:0.75rem; font-size:0.85rem; color:var(--text);"><strong>Since previous review (2026-04-30):</strong></p>
+    <ul style="margin-left:1.2rem; font-size:0.85rem; color:var(--text-muted);">
+      <li>No new commits pushed. HEAD unchanged at <code>773c479ca</code>.</li>
+      <li>Amulyam24 submitted a COMMENTED review (2026-05-13) with three inline comments: variable rename suggestion (<code>isGoodFirstIssue</code>), question about passing entire <code>PluginConfig</code>, message formatting consolidation, and request for user-facing error messages on API failures (aligns with existing error-swallowing blocker).</li>
+      <li>CLA bot confirmed committer authorization.</li>
+    </ul>
+  </div>
+</div>
+
+<!-- CHECKED -->
+<div class="section collapsed">
+  <div class="section-header" onclick="toggle(this)">
+    <span class="arrow">&#9660;</span> Checked &amp; Fine
+  </div>
+  <div class="section-body">
+    <ul style="margin-left:1.2rem; font-size:0.85rem; color:var(--text-muted);">
+      <li>Assignment still proceeds (no silent blocking of legitimate assigns)</li>
+      <li>Existing <code>/assign</code> and <code>/unassign</code> behavior unchanged for org members</li>
+      <li>Test structure follows existing patterns in <code>assign_test.go</code></li>
+      <li>No new dependencies introduced</li>
+      <li>Rollback is safe — reverting removes educational messages with no state to clean up</li>
+    </ul>
+  </div>
+</div>
+
+<!-- OPEN QUESTIONS -->
+<div class="section collapsed">
+  <div class="section-header" onclick="toggle(this)">
+    <span class="arrow">&#9660;</span> Open Questions for the Author
+  </div>
+  <div class="section-body">
+    <ul style="margin-left:1.2rem; font-size:0.85rem; color:var(--text-muted);">
+      <li>Is the intent to restrict (block) self-assignment or just warn? The PR title says "manage" / "restrict" but the code only warns.</li>
+      <li>Should this be opt-in rather than on-by-default for all Prow installations?</li>
+      <li>Why <code>good-first-issue</code> (with hyphens) rather than GitHub's default <code>good first issue</code> (with spaces)?</li>
+    </ul>
   </div>
 </div>
 

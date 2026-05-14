@@ -1,0 +1,116 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: PR #719 — mergecommitblocker excluded_paths</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; color: #24292f; max-width: 52em; margin: 2em auto; padding: 0 1em; }
+  h1 { font-size: 1.4em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
+  h2 { font-size: 1.2em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.2em; }
+  h3 { font-size: 1.05em; margin-top: 1.4em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.3em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1em; border-radius: 6px; overflow-x: auto; font-size: 0.85em; line-height: 1.45; }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8em 1em; margin-bottom: 1.5em; }
+  .meta td { padding: 0.15em 0.6em 0.15em 0; }
+  .meta td:first-child { font-weight: 600; white-space: nowrap; }
+  .verdict { background: #fff8c5; border: 1px solid #d4a72c; border-radius: 6px; padding: 0.8em 1em; margin: 1em 0; }
+  .verdict strong { color: #9a6700; }
+  .severity-blocking { color: #cf222e; font-weight: 600; }
+  .severity-should-fix { color: #9a6700; font-weight: 600; }
+  .severity-nit { color: #57606a; font-weight: 600; }
+  .severity-question { color: #0969da; font-weight: 600; }
+  ul { padding-left: 1.5em; }
+  li { margin-bottom: 0.4em; }
+  a { color: #0969da; }
+</style>
+</head>
+<body>
+
+<h1>Review: PR #719</h1>
+
+<div class="meta">
+<table>
+<tr><td>PR</td><td><a href="https://github.com/kubernetes-sigs/prow/pull/719">kubernetes-sigs/prow#719</a></td></tr>
+<tr><td>Title</td><td>mergecommitblocker: allow use of Git subtrees with <code>excluded_paths</code> config option</td></tr>
+<tr><td>Author</td><td>RadaBDimitrova</td></tr>
+<tr><td>Head SHA</td><td><code>941664570326bd59dfcbbdb62cc66f6c874f203f</code></td></tr>
+<tr><td>Base</td><td>main</td></tr>
+<tr><td>Reviewed at</td><td>2026-05-14T00:40:03Z</td></tr>
+</table>
+</div>
+
+<h2>Verdict</h2>
+
+<div class="verdict">
+<strong>REQUEST CHANGES</strong> &mdash; The new <code>MergeCommitBlocker</code> config must be registered in <code>HasConfigFor()</code> before merge.
+</div>
+<p>
+The PR is well-structured, follows established codebase patterns, and is fully backwards-compatible for unconfigured installations. Code quality is solid. The one blocking issue is that the new config type is not wired into the configuration sharding mechanism that all sibling configs participate in, which would cause silent misconfiguration in multi-shard Prow deployments.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+<li>Adds a <code>MergeCommitBlocker</code> config struct with <code>Repos</code> and <code>ExcludedPaths</code> fields, following the same shape as <code>Lgtm</code>, <code>Trigger</code>, etc.</li>
+<li>Adds two new methods to the git <code>Interactor</code> interface: <code>MergeCommitSHAsBetween</code> (enumerate merge commit SHAs) and <code>CommitChangedFiles</code> (list files changed by a commit).</li>
+<li>Extends the <code>mergecommitblocker</code> plugin to check whether merge commits touch only excluded paths &mdash; if so, they are allowed through without the <code>do-not-merge/contains-merge-commits</code> label.</li>
+<li>When no config is present, behavior is identical to before (short-circuit to existing <code>MergeCommitsExistBetween</code>).</li>
+<li>Adds integration tests using <code>localgit</code> with real merge commits, plus unit tests for the path-matching logic.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3><span class="severity-blocking">[Blocking]</span> <code>MergeCommitBlocker</code> missing from <code>HasConfigFor()</code></h3>
+<p><code>pkg/plugins/config.go:2371-2460</code></p>
+<p>
+<code>HasConfigFor()</code> explicitly enumerates every plugin config that uses the <code>Repos</code> pattern: <code>Approve</code>, <code>Lgtm</code>, <code>Triggers</code>, <code>Welcome</code>. The new <code>MergeCommitBlocker</code> follows the same shape but is not registered. In multi-shard Prow deployments, the sharding logic uses this method to determine which shard owns config for which repos. Without registration, the excluded paths config could silently not apply.
+</p>
+<p>Additionally, <code>MergeCommitBlocker</code> must be added to the <code>reflect.DeepEqual</code> check at line 2372 (which determines whether non-repo-scoped global config exists). Follow the <code>Lgtm</code> pattern at lines 2422&ndash;2430.</p>
+
+<h3><span class="severity-should-fix">[Should fix]</span> <code>diff-tree -m</code> can produce duplicate filenames</h3>
+<p><code>pkg/git/v2/interactor.go:622-634</code></p>
+<pre>out, err := i.executor.Run("diff-tree", "-m", "--no-commit-id", "--name-only", "-r", sha)</pre>
+<p>
+The <code>-m</code> flag diffs a merge commit against each parent separately, so a file changed relative to both parents appears twice in the output. This is harmless for the current caller (<code>isMergeCommitAllowed</code> just checks regex matches, so duplicates are redundant but correct). However, the method doc says "returns the list of files changed" without mentioning this. A one-line comment explaining the <code>-m</code> behavior would prevent future callers from being surprised.
+</p>
+
+<h3><span class="severity-should-fix">[Should fix]</span> Missing error test case for <code>MergeCommitSHAsBetween</code></h3>
+<p><code>pkg/git/v2/interactor_test.go:2071-2135</code></p>
+<p>
+The test table covers "no merges", "one merge", and "multiple merges" but has no error case (where the executor returns an error). The sibling <code>TestInteractor_CommitChangedFiles</code> does include an error case. Should be consistent.
+</p>
+
+<h3><span class="severity-nit">[Nit]</span> Consider Debug-level logging of rejected file list</h3>
+<p><code>pkg/plugins/mergecommitblocker/mergecommitblocker.go:170-172</code></p>
+<pre>log.Infof("Merge commit %s is not allowed because it modifies files outside excluded paths", sha)</pre>
+<p>
+When a merge commit is disallowed, only the SHA is logged. Logging the actual file list at Debug level would make it easier for operators to diagnose why a PR was flagged.
+</p>
+
+<h3><span class="severity-question">[Question]</span> <code>Interactor</code> interface expansion &mdash; release notes?</h3>
+<p><code>pkg/git/v2/interactor.go:77-80</code></p>
+<p>
+Two new methods are added to the public <code>Interactor</code> interface. Any external code implementing this interface directly (rather than embedding the concrete type) will fail to compile. Is this expected to be documented in release notes?
+</p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+<li>Backward compatibility: unconfigured repos hit the fast path (<code>cfg == nil || len(cfg.CompiledExcludedPaths) == 0</code>) and behave identically to before.</li>
+<li>Regex compilation happens at config load time in <code>compileRegexpsAndDurations</code> with clear error messages; invalid patterns fail fast.</li>
+<li><code>CompiledExcludedPaths</code> is tagged <code>json:"-"</code>, preventing serialization issues.</li>
+<li><code>MergeCommitBlockerFor</code> uses index-based range (<code>&amp;c.MergeCommitBlocker[i]</code>) returning a pointer to the actual slice element, not a loop-variable copy.</li>
+<li><code>isMergeCommitAllowed</code> is a pure function, independently testable, with good edge case coverage (empty files, empty patterns, partial matches).</li>
+<li>Integration tests use real git operations via <code>localgit</code> rather than mocks.</li>
+<li>Error wrapping is consistent throughout with <code>%w</code>.</li>
+<li>Config lookup pattern (<code>MergeCommitBlockerFor</code>) matches the established <code>LgtmFor</code> / <code>TriggerFor</code> precedent.</li>
+<li>No security concerns: SHA values passed to git commands originate from <code>git log</code> output.</li>
+<li>Deployment risk is low: no config migration needed, safe rollback, negligible performance impact.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+<li>The <code>-m</code> flag on <code>diff-tree</code> diffs against each parent of a merge commit, which means files changed on master between the branch point and the merge appear as "changed." For standard subtree merges this is fine, but have you considered edge cases with unusual merge topologies? Would <code>--first-parent</code> be more precise for this use case?</li>
+<li>Should the <code>Interactor</code> interface expansion be called out in release notes for external consumers?</li>
+</ul>
+
+</body>
+</html>

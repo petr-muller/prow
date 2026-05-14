@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #698 Review: feat: manage non-k8s members assigning issues</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --red: #f85149;
+    --orange: #d29922;
+    --green: #3fb950;
+    --purple: #bc8cff;
+    --cyan: #39c5cf;
+    --code-bg: #1c2128;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.5rem;
+    margin-bottom: 0.25rem;
+    color: var(--accent);
+  }
+  .pr-meta {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 1.5rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+  }
+  .pr-meta a { color: var(--accent); text-decoration: none; }
+  .pr-meta a:hover { text-decoration: underline; }
+  .verdict {
+    display: inline-block;
+    padding: 0.25rem 0.75rem;
+    border-radius: 1rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .verdict.changes { background: rgba(248,81,73,0.15); color: var(--red); border: 1px solid rgba(248,81,73,0.3); }
+
+  .section {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    margin-bottom: 1rem;
+    overflow: hidden;
+  }
+  .section-header {
+    padding: 0.75rem 1rem;
+    font-weight: 600;
+    font-size: 0.95rem;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+  }
+  .section-header:hover { background: rgba(255,255,255,0.03); }
+  .section-header .arrow { transition: transform 0.2s; font-size: 0.7rem; color: var(--text-muted); }
+  .section.collapsed .section-body { display: none; }
+  .section.collapsed .arrow { transform: rotate(-90deg); }
+  .section-body { padding: 1rem; }
+
+  .issue {
+    padding: 0.75rem 1rem;
+    border-left: 3px solid var(--border);
+    margin-bottom: 0.75rem;
+    border-radius: 0 4px 4px 0;
+    background: var(--code-bg);
+  }
+  .issue:last-child { margin-bottom: 0; }
+  .issue.blocker { border-left-color: var(--red); }
+  .issue.concern { border-left-color: var(--orange); }
+  .issue.nit { border-left-color: var(--text-muted); }
+
+  .issue-title {
+    font-weight: 600;
+    font-size: 0.9rem;
+    margin-bottom: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .severity {
+    font-size: 0.7rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .severity.blocker { background: rgba(248,81,73,0.15); color: var(--red); }
+  .severity.concern { background: rgba(210,153,34,0.15); color: var(--orange); }
+  .severity.nit { background: rgba(139,148,158,0.15); color: var(--text-muted); }
+
+  .convergence-badge {
+    font-size: 0.65rem;
+    padding: 0.1rem 0.4rem;
+    border-radius: 3px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+    background: rgba(57,197,207,0.15);
+    color: var(--cyan);
+    border: 1px solid rgba(57,197,207,0.3);
+  }
+
+  .issue p {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-top: 0.25rem;
+  }
+  .issue code {
+    background: var(--bg);
+    padding: 0.1rem 0.35rem;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    color: var(--purple);
+  }
+  .issue .file-ref {
+    font-size: 0.78rem;
+    color: var(--text-muted);
+    margin-top: 0.35rem;
+    font-family: monospace;
+  }
+
+  .summary-table {
+    width: 100%;
+    font-size: 0.85rem;
+    border-collapse: collapse;
+  }
+  .summary-table td {
+    padding: 0.35rem 0.5rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  .summary-table td:first-child {
+    color: var(--text-muted);
+    width: 140px;
+    white-space: nowrap;
+  }
+
+  .reviewer-verdicts {
+    display: flex;
+    gap: 1rem;
+    margin-top: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .reviewer-verdict {
+    font-size: 0.8rem;
+    padding: 0.3rem 0.6rem;
+    border-radius: 4px;
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+  }
+  .reviewer-verdict .rv-name { color: var(--text-muted); }
+  .reviewer-verdict .rv-result { font-weight: 600; }
+  .reviewer-verdict .rv-result.changes { color: var(--red); }
+
+  .checklist { list-style: none; padding: 0; }
+  .checklist li {
+    font-size: 0.85rem;
+    padding: 0.3rem 0;
+    display: flex;
+    align-items: flex-start;
+    gap: 0.5rem;
+  }
+  .checklist li::before {
+    content: '\2610';
+    font-size: 1rem;
+    flex-shrink: 0;
+    margin-top: -0.05rem;
+  }
+
+  .advisor-box {
+    background: var(--code-bg);
+    border: 1px solid rgba(57,197,207,0.3);
+    border-radius: 6px;
+    padding: 1rem;
+    margin-top: 0.5rem;
+    font-size: 0.85rem;
+  }
+  .advisor-box p { color: var(--text-muted); margin-top: 0.25rem; }
+  .advisor-box ul { margin: 0.5rem 0 0 1.2rem; color: var(--text-muted); font-size: 0.85rem; }
+  .advisor-box li { padding: 0.15rem 0; }
+
+  .deployment-note {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    padding: 0.3rem 0;
+    padding-left: 0.75rem;
+    border-left: 2px solid var(--orange);
+    margin-bottom: 0.5rem;
+  }
+  .deployment-note:last-child { margin-bottom: 0; }
+
+  .gh-comment {
+    display: none;
+    position: fixed;
+    top: 0; left: 0; right: 0; bottom: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 100;
+    justify-content: center;
+    align-items: center;
+  }
+  .gh-comment.visible { display: flex; }
+  .gh-comment-inner {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.5rem;
+    max-width: 700px;
+    width: 90%;
+    max-height: 80vh;
+    overflow-y: auto;
+  }
+  .gh-comment-inner h3 { margin-bottom: 0.75rem; }
+  .gh-comment-inner pre {
+    background: var(--bg);
+    padding: 1rem;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    line-height: 1.5;
+    color: var(--text);
+  }
+  .btn {
+    display: inline-block;
+    padding: 0.4rem 0.9rem;
+    border-radius: 4px;
+    font-size: 0.82rem;
+    font-weight: 500;
+    cursor: pointer;
+    border: 1px solid var(--border);
+    background: var(--surface);
+    color: var(--text);
+    text-decoration: none;
+    margin-top: 0.75rem;
+    margin-right: 0.5rem;
+  }
+  .btn:hover { background: var(--code-bg); }
+  .btn.primary { background: rgba(88,166,255,0.15); border-color: rgba(88,166,255,0.3); color: var(--accent); }
+  .btn.primary:hover { background: rgba(88,166,255,0.25); }
+</style>
+</head>
+<body>
+
+<h1>PR #698: feat: manage non-k8s members assigning issues</h1>
+<div class="pr-meta">
+  <a href="https://github.com/kubernetes-sigs/prow/pull/698" target="_blank">kubernetes-sigs/prow#698</a>
+  &middot; Author: <strong>TineoC</strong>
+  &middot; Files: <code>assign.go</code>, <code>assign_test.go</code>
+  &middot; <span style="color:var(--green)">+130</span> / <span style="color:var(--red)">&minus;5</span>
+  &middot; <span class="verdict changes">Changes Requested</span>
+  <div class="reviewer-verdicts">
+    <div class="reviewer-verdict"><span class="rv-name">Code Quality:</span> <span class="rv-result changes">REQUEST_CHANGES</span></div>
+    <div class="reviewer-verdict"><span class="rv-name">Maintainability:</span> <span class="rv-result changes">REQUEST_CHANGES</span></div>
+    <div class="reviewer-verdict"><span class="rv-name">Deployment Risk:</span> <span class="rv-result" style="color:var(--orange)">MEDIUM</span></div>
+  </div>
+</div>
+
+<!-- SUMMARY -->
+<div class="section">
+  <div class="section-header" onclick="toggle(this)">
+    <span class="arrow">&#9660;</span> Summary
+  </div>
+  <div class="section-body">
+    <table class="summary-table">
+      <tr><td>Purpose</td><td>Post an educational comment when a non-org-member uses <code>/assign</code> on an issue without the <code>good-first-issue</code> label, directing them to beginner-friendly issues.</td></tr>
+      <tr><td>Approach</td><td>Checks labels &rarr; checks org membership &rarr; looks for <code>CONTRIBUTING.md</code> &rarr; posts a comment with links. Assignment still proceeds.</td></tr>
+      <tr><td>Risk</td><td>Extra API calls on every <code>/assign</code>. Incorrect scope: checks commenter, not assignees. No opt-out mechanism.</td></tr>
+    </table>
+  </div>
+</div>
+
+<!-- ADVISOR RECOMMENDATION -->
+<div class="section">
+  <div class="section-header" onclick="toggle(this)" style="color:var(--cyan)">
+    <span class="arrow">&#9660;</span> Maintainer Advisor &mdash; Final Recommendation
+  </div>
+  <div class="section-body">
+    <div class="advisor-box">
+      <strong style="color:var(--red)">REQUEST_CHANGES</strong>
+      <p>All three reviewers independently identified overlapping correctness and design issues. The PR introduces two logic bugs (error swallowing on label fetch and wrong membership check target) that would cause the educational message to fire incorrectly in real-world scenarios. Combined with an unused interface method flagged by all three reviewers, these are functional defects that need fixing before merge.</p>
+    </div>
+  </div>
+</div>
+
+<!-- CONVERGING CONCERNS -->
+<div class="section">
+  <div class="section-header" onclick="toggle(this)" style="color:var(--cyan)">
+    <span class="arrow">&#9660;</span> Converging Concerns (4) &mdash; flagged by 2+ reviewers
+  </div>
+  <div class="section-body">
+
+    <div class="issue blocker">
+      <div class="issue-title">
+        <span class="severity blocker">blocker</span>
+        <span class="convergence-badge">3/3 reviewers</span>
+        Unused <code>GetRepo</code> in interface
+      </div>
+      <p>Added to <code>githubClient</code> but never called in production code. Widens the interface contract and forces all implementations and mocks to satisfy it for no reason. Remove it.</p>
+      <div class="file-ref">assign.go:76</div>
+    </div>
+
+    <div class="issue blocker">
+      <div class="issue-title">
+        <span class="severity blocker">blocker</span>
+        <span class="convergence-badge">2/3 reviewers</span>
+        Wrong membership check target (self-assign guard missing)
+      </div>
+      <p><code>IsMember(org, e.User.Login)</code> checks the commenter, not the assignees. <code>/assign @org-member</code> by a non-member fires the message incorrectly. <code>/assign @non-member</code> by an org member skips it. The check must be scoped to self-assignment only &mdash; verify the commenter is actually in <code>toAdd</code>.</p>
+      <div class="file-ref">assign.go:167</div>
+    </div>
+
+    <div class="issue blocker">
+      <div class="issue-title">
+        <span class="severity blocker">blocker</span>
+        <span class="convergence-badge">2/3 reviewers</span>
+        <code>GetIssueLabels</code> error swallowed &mdash; false positives
+      </div>
+      <p>When label fetch fails, <code>hasGoodFirstIssue</code> defaults to <code>false</code> and the code proceeds to check membership and potentially post an incorrect educational comment. Should fail open: skip the educational path entirely on error.</p>
+      <div class="file-ref">assign.go:154-156</div>
+    </div>
+
+    <div class="issue blocker">
+      <div class="issue-title">
+        <span class="severity blocker">blocker</span>
+        <span class="convergence-badge">3/3 reviewers</span>
+        Hardcoded <code>github.com</code> URLs
+      </div>
+      <p>Generated comment links use hardcoded <code>github.com</code> instead of <code>github.DefaultHost</code>. Prow installations on GitHub Enterprise get broken links. The default URL comparison at line 186 also creates hidden coupling to the help plugin's default.</p>
+      <div class="file-ref">assign.go:180, 186, 190</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- ADDITIONAL BLOCKERS -->
+<div class="section">
+  <div class="section-header" onclick="toggle(this)" style="color:var(--red)">
+    <span class="arrow">&#9660;</span> Additional Blockers (2)
+  </div>
+  <div class="section-body">
+
+    <div class="issue blocker">
+      <div class="issue-title">
+        <span class="severity blocker">blocker</span>
+        PR description vs. code behavior mismatch
+      </div>
+      <p>PR says "restrict self-assignment for non-organization members" but code still calls <code>h.add()</code> unconditionally &mdash; the user gets assigned and just sees a comment. Either the description is wrong or the code should skip assignment. Clarify intent.</p>
+      <div class="file-ref">assign.go:197</div>
+    </div>
+
+    <div class="issue blocker">
+      <div class="issue-title">
+        <span class="severity blocker">blocker</span>
+        Triggers on PRs unnecessarily
+      </div>
+      <p><code>userType == "assignee(s)"</code> doesn't exclude PRs. <code>/assign</code> on a PR calls <code>GetIssueLabels</code> + <code>IsMember</code> + <code>GetFile</code> for no reason &mdash; PRs don't carry <code>good-first-issue</code> labels. Gate on <code>!e.IsPR</code>.</p>
+      <div class="file-ref">assign.go:153</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- CONCERNS -->
+<div class="section">
+  <div class="section-header" onclick="toggle(this)" style="color:var(--orange)">
+    <span class="arrow">&#9660;</span> Concerns (4)
+  </div>
+  <div class="section-body">
+
+    <div class="issue concern">
+      <div class="issue-title">
+        <span class="severity concern">concern</span>
+        1&ndash;4 extra API calls per <code>/assign</code>, not cached
+      </div>
+      <p><code>GetIssueLabels</code> on every assign, then conditionally <code>IsMember</code> + up to 2x <code>GetFile</code>. For high-volume installations this meaningfully increases GitHub API token consumption. Consider checking membership first (often cached) to avoid label fetch for org members.</p>
+    </div>
+
+    <div class="issue concern">
+      <div class="issue-title">
+        <span class="severity concern">concern</span>
+        No opt-out mechanism
+      </div>
+      <p>Every Prow installation using the assign plugin gets this behavior upon upgrade. No per-org or per-repo configuration flag to disable it. Consider making this opt-in or at least opt-out.</p>
+    </div>
+
+    <div class="issue concern">
+      <div class="issue-title">
+        <span class="severity concern">concern</span>
+        ~45 lines of logic inlined in <code>handle()</code>
+      </div>
+      <p>Breaks the generic handler's symmetry by grafting assign-specific behavior via <code>h.userType == "assignee(s)"</code> (a display string used as type discriminator). Should be extracted into a dedicated function or wired as a callback on the <code>handler</code> struct, like <code>addFailureResponse</code>.</p>
+      <div class="file-ref">assign.go:153-196</div>
+    </div>
+
+    <div class="issue concern">
+      <div class="issue-title">
+        <span class="severity concern">concern</span>
+        <code>userType</code> string comparison for control flow
+      </div>
+      <p>Using a display-oriented string as a type discriminator is fragile. If someone changes the string for cosmetic reasons, the logic silently breaks. Use a dedicated boolean or enum field on the <code>handler</code> struct.</p>
+      <div class="file-ref">assign.go:153</div>
+    </div>
+
+  </div>
+</div>
+
+<!-- NITS & TEST GAPS -->
+<div class="section collapsed">
+  <div class="section-header" onclick="toggle(this)">
+    <span class="arrow">&#9660;</span> Nits &amp; Test Gaps (5)
+  </div>
+  <div class="section-body">
+
+    <div class="issue nit">
+      <div class="issue-title">
+        <span class="severity nit">nit</span>
+        <span class="convergence-badge">2/3 reviewers</span>
+        <code>isMemberCalled</code> assertions keyed off <code>tc.name</code> strings
+      </div>
+      <p>Lines 513&ndash;522 match test case names as strings outside the loop. If a name changes, the assertion silently stops running. Add <code>expectIsMemberCalled *bool</code> to the test case struct and check it inside the loop.</p>
+      <div class="file-ref">assign_test.go:513-522</div>
+    </div>
+
+    <div class="issue nit">
+      <div class="issue-title">
+        <span class="severity nit">nit</span>
+        <span class="convergence-badge">2/3 reviewers</span>
+        Test setup uses <code>tc.name</code> for conditional state
+      </div>
+      <p>Labels are set conditionally by matching <code>tc.name</code> (line 450). Add a <code>labels</code> field to the test case struct so each case is self-contained.</p>
+      <div class="file-ref">assign_test.go:450</div>
+    </div>
+
+    <div class="issue nit">
+      <div class="issue-title">
+        <span class="severity nit">nit</span>
+        Missing test coverage
+      </div>
+      <p>No test for: (1) <code>CONTRIBUTING.md</code> not found + <code>HelpGuidelinesURL</code> fallback, (2) <code>/assign @other-user</code> by a non-member, (3) <code>GetIssueLabels</code> returning an error, (4) non-nil <code>config</code> parameter.</p>
+    </div>
+
+    <div class="issue nit">
+      <div class="issue-title">
+        <span class="severity nit">nit</span>
+        Hardcoded <code>"good-first-issue"</code> label
+      </div>
+      <p>No constant, no comment explaining why this specific name (vs. <code>"good first issue"</code> with spaces, GitHub's default label). Define as a package-level constant.</p>
+    </div>
+
+    <div class="issue nit">
+      <div class="issue-title">
+        <span class="severity nit">nit</span>
+        Message tone
+      </div>
+      <p>"It looks like you're new!" may feel patronizing to experienced contributors from other orgs. Consider: "This issue hasn't been labeled as a good first issue."</p>
+    </div>
+
+  </div>
+</div>
+
+<!-- DEPLOYMENT NOTES -->
+<div class="section collapsed">
+  <div class="section-header" onclick="toggle(this)" style="color:var(--orange)">
+    <span class="arrow">&#9660;</span> Deployment Notes
+  </div>
+  <div class="section-body">
+    <div class="deployment-note">Each <code>/assign</code> now makes 1&ndash;4 additional GitHub API calls (<code>GetIssueLabels</code>, <code>IsMember</code>, up to 2x <code>GetFile</code>). Not cached. At scale, increases API token consumption.</div>
+    <div class="deployment-note">No opt-out mechanism &mdash; all orgs using the assign plugin get this behavior once deployed.</div>
+    <div class="deployment-note">Hardcoded <code>github.com</code> URLs produce broken links for GitHub Enterprise installations.</div>
+    <div class="deployment-note">Rollback is safe &mdash; reverting removes the educational messages with no state to clean up.</div>
+  </div>
+</div>
+
+<!-- CHECKLIST -->
+<div class="section collapsed">
+  <div class="section-header" onclick="toggle(this)">
+    <span class="arrow">&#9660;</span> Review Checklist
+  </div>
+  <div class="section-body">
+    <ul class="checklist">
+      <li><strong>Required:</strong> Remove unused <code>GetRepo</code> from interface</li>
+      <li><strong>Required:</strong> Fix self-assignment guard &mdash; only fire when commenter is in <code>toAdd</code></li>
+      <li><strong>Required:</strong> Fail open on <code>GetIssueLabels</code> error &mdash; skip educational flow</li>
+      <li><strong>Required:</strong> Use <code>github.DefaultHost</code> instead of hardcoded <code>github.com</code></li>
+      <li>Clarify: should assignment be blocked or just warned? Fix PR description accordingly</li>
+      <li>Gate on <code>!e.IsPR</code> to avoid unnecessary API calls on pull requests</li>
+      <li>Extract educational message logic into a dedicated function</li>
+      <li>Add configuration flag to enable/disable behavior per-org/repo</li>
+      <li>Reorder: check membership before labels to reduce API calls for members</li>
+      <li>Define <code>"good-first-issue"</code> as a named constant</li>
+      <li>Restructure test assertions to use struct fields instead of <code>tc.name</code></li>
+      <li>Add test cases for fallback paths and error conditions</li>
+    </ul>
+  </div>
+</div>
+
+<!-- COPY BUTTON -->
+<button class="btn primary" onclick="showComment()">View as GitHub Comment</button>
+
+<div class="gh-comment" id="ghOverlay" onclick="if(event.target===this)hideComment()">
+  <div class="gh-comment-inner">
+    <h3>GitHub Review Comment</h3>
+    <pre id="ghText"></pre>
+    <button class="btn primary" onclick="copyComment()">Copy to clipboard</button>
+    <button class="btn" onclick="hideComment()">Close</button>
+  </div>
+</div>
+
+<script>
+function toggle(el) {
+  el.parentElement.classList.toggle('collapsed');
+}
+
+const ghComment = `Thanks for working on this — the idea of guiding new contributors toward good-first-issue is valuable. I have several items that need addressing before this can merge, based on review from code quality, maintainability, and deployment risk perspectives.
+
+## Required Changes
+
+### 1. Remove unused \`GetRepo\` from the interface
+\`githubClient\` now requires \`GetRepo\`, but nothing in the production code calls it. This needlessly widens the interface and forces all implementations/mocks to satisfy it. Please remove.
+> assign.go:76
+
+### 2. Fix self-assignment guard
+\`IsMember(org, e.User.Login)\` checks who typed the command, not who is being assigned. \`/assign @org-member\` by a non-member fires the message incorrectly; \`/assign @non-member\` by a member skips it. The check should be scoped to self-assignment only — verify the commenter is actually in \`toAdd\`.
+> assign.go:167
+
+### 3. Fail open on \`GetIssueLabels\` error
+When label fetch fails, \`hasGoodFirstIssue\` defaults to \`false\` and the code proceeds to potentially post a false-positive educational comment. Should skip the educational flow entirely on error.
+> assign.go:154-156
+
+### 4. Use \`github.DefaultHost\` instead of hardcoded \`github.com\`
+The generated comment links use hardcoded \`github.com\`. Prow installations on GitHub Enterprise will get broken links. Also, the hardcoded default URL comparison at line 186 creates hidden coupling to the help plugin.
+> assign.go:180, 186, 190
+
+## Other Concerns
+
+- **PR description vs. code mismatch:** Description says "restrict self-assignment" but the code still calls \`h.add()\` — the user gets assigned and just sees a comment. Please clarify intent and update description accordingly.
+- **Triggers on PRs:** The \`userType == "assignee(s)"\` guard doesn't exclude PRs. \`/assign\` on a PR makes unnecessary API calls. Gate on \`!e.IsPR\`.
+- **API rate impact:** Each \`/assign\` now makes 1-4 additional GitHub API calls with no caching. At scale, this increases token consumption. Consider checking membership first (often cached) to skip label fetch for org members.
+- **No opt-out:** All Prow installations get this behavior upon upgrade with no configuration flag to disable it.
+- **Inlined logic:** The ~45-line educational message block is nested in \`handle()\`, breaking its generic symmetry. Consider extracting into a dedicated function.
+
+## Test Gaps
+
+- \`isMemberCalled\` assertions and label setup use \`tc.name\` string matching instead of struct fields — fragile
+- No test for \`CONTRIBUTING.md\` not found + \`HelpGuidelinesURL\` fallback
+- No test for \`/assign @other-user\` by a non-member
+- No test for \`GetIssueLabels\` error path
+- All tests pass \`nil\` for config — no coverage for \`HelpGuidelinesURL\` fallback code
+
+The feature concept is sound — these fixes should be straightforward.
+
+/hold`;
+
+function showComment() {
+  document.getElementById('ghText').textContent = ghComment;
+  document.getElementById('ghOverlay').classList.add('visible');
+}
+function hideComment() {
+  document.getElementById('ghOverlay').classList.remove('visible');
+}
+function copyComment() {
+  navigator.clipboard.writeText(ghComment).then(() => {
+    const btn = event.target;
+    btn.textContent = 'Copied!';
+    setTimeout(() => btn.textContent = 'Copy to clipboard', 1500);
+  });
+}
+</script>
+
+</body>
+</html>

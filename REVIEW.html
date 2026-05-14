@@ -1,0 +1,388 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #661 Review: Add support for git cherry-pick -x style commit messages</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --red: #f85149;
+    --orange: #d29922;
+    --green: #3fb950;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 {
+    font-size: 1.6rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 0.75rem;
+    margin-bottom: 0.5rem;
+  }
+  .meta {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+    margin-bottom: 2rem;
+  }
+  .meta a { color: var(--accent); text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  h2 {
+    font-size: 1.2rem;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    color: var(--accent);
+  }
+  .overview {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .issue {
+    background: var(--surface);
+    border-left: 3px solid var(--border);
+    border-radius: 0 6px 6px 0;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .issue.critical { border-left-color: var(--red); }
+  .issue.important { border-left-color: var(--orange); }
+  .issue.minor { border-left-color: var(--text-muted); }
+  .issue.suggestion { border-left-color: var(--green); }
+  .issue.resolved { border-left-color: var(--green); opacity: 0.6; }
+  .issue-title {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+  }
+  .badge {
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    padding: 0.15em 0.5em;
+    border-radius: 3px;
+    white-space: nowrap;
+  }
+  .badge-critical { background: var(--red); color: #fff; }
+  .badge-important { background: var(--orange); color: #000; }
+  .badge-minor { background: var(--border); color: var(--text); }
+  .badge-suggestion { background: var(--green); color: #000; }
+  .badge-resolved { background: var(--green); color: #000; }
+  .badge-partial { background: var(--purple); color: #000; }
+  .issue p, .overview p { margin-bottom: 0.5rem; }
+  .issue p:last-child, .overview p:last-child { margin-bottom: 0; }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    background: rgba(110,118,129,0.15);
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+    font-size: 0.88em;
+  }
+  .file-ref {
+    color: var(--cyan);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.85em;
+  }
+  .suggestion-box {
+    background: var(--surface);
+    border: 1px solid var(--green);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 1.5rem;
+  }
+  .suggestion-box h3 {
+    color: var(--green);
+    font-size: 1rem;
+    margin-bottom: 0.5rem;
+  }
+  ol, ul { padding-left: 1.5rem; }
+  li { margin-bottom: 0.3rem; }
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .toc ul { list-style: none; padding-left: 0; }
+  .toc li { margin-bottom: 0.25rem; }
+  .toc a { color: var(--accent); text-decoration: none; }
+  .toc a:hover { text-decoration: underline; }
+  .toc .severity { display: inline-block; width: 0.6em; height: 0.6em; border-radius: 50%; margin-right: 0.4em; vertical-align: middle; }
+  .sev-critical { background: var(--red); }
+  .sev-important { background: var(--orange); }
+  .sev-minor { background: var(--border); }
+  .sev-suggestion { background: var(--green); }
+  .sev-resolved { background: var(--green); }
+  .changelog {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1.5rem;
+  }
+  .changelog h3 {
+    font-size: 0.95rem;
+    color: var(--purple);
+    margin-bottom: 0.5rem;
+  }
+  .changelog .date {
+    color: var(--text-muted);
+    font-size: 0.85em;
+  }
+  .strikethrough { text-decoration: line-through; color: var(--text-muted); }
+</style>
+</head>
+<body>
+
+<h1>PR #661: Add support for git cherry-pick -x style commit messages</h1>
+<div class="meta">
+  Author: <a href="https://github.com/AaruniAggarwal">@AaruniAggarwal</a>
+  &middot; Branch: <code>cherrypick-pr500</code> &rarr; <code>main</code>
+  &middot; Files: <code>main.go</code>, <code>server.go</code>, <code>server_test.go</code>
+  &middot; +370 / &minus;12
+  &middot; Resolves <a href="https://github.com/kubernetes-sigs/prow/issues/500">#500</a>
+  &middot; Reviewer: <a href="https://github.com/stmcginnis">@stmcginnis</a>
+  <br>
+  Commits: 8 (latest: <code>9eb85310</code> &mdash; 2026-05-12)
+</div>
+
+<!-- ───────────── Revision history ───────────── -->
+
+<div class="changelog">
+  <h3>Review Revision History</h3>
+  <p><span class="date">2026-04-10</span> &mdash; Initial review against commits <code>68fc96ba..f7bdaac1</code> (3 commits). Implementation used <code>git filter-branch --msg-filter</code>.</p>
+  <p><span class="date">2026-04-12</span> &mdash; Updated review for commit <code>4a0d9fdc</code> ("Addressing review comments"). Author replaced <code>filter-branch</code> with <code>git rebase -i --exec</code>. SHA extraction now uses regex. Temp file handle fixed. Core design issues remain &mdash; see per-finding status badges.</p>
+  <p><span class="date">2026-04-28</span> &mdash; Updated review for commits <code>6b0d4358</code> ("Fixing indentation") and <code>ac830c0f</code> ("removing unnecessary if block"). Indentation and dead-code tautology resolved. @stmcginnis gave <code>/lgtm</code> on Apr 23 noting remaining issues as non-blocking. Core design issues (#2, #3, #4, #5) remain unaddressed.</p>
+  <p><span class="date">2026-05-12</span> &mdash; Branch rebased onto current main. Two new commits: <code>57e0a0d6</code> ("Adding unit testcases") and <code>9eb85310</code> ("Fixing golang-cli lint check"). Unit tests added for both <code>extractOriginalSHAs</code> and <code>appendCherryPickMessages</code>. Finding #4 partially addressed. CI running. Previous <code>/lgtm</code> removed by bot after new commits. Design issues (#2, #3, #5) still unaddressed.</p>
+</div>
+
+<!-- ───────────── Overview ───────────── -->
+
+<div class="overview">
+  <p>Adds a <code>--add-original-commit-id</code> flag (default <code>true</code>) to the cherrypicker plugin.
+  After <code>git am</code> applies a patch, the PR parses the patch file for original commit SHAs,
+  generates a shell script, and runs <code>git rebase -i --exec</code> to amend each commit message
+  with <code>(cherry picked from commit &lt;sha&gt;)</code>.</p>
+  <p><em>Previous revision used <code>git filter-branch --msg-filter</code>; that was replaced in
+  <code>4a0d9fdc</code> after @stmcginnis flagged it as deprecated.</em></p>
+</div>
+
+<!-- ───────────── TOC ───────────── -->
+
+<div class="toc">
+  <strong>Findings</strong>
+  <ul>
+    <li><span class="severity sev-resolved"></span><a href="#i1"><s>git filter-branch is deprecated</s> &mdash; replaced with rebase -i --exec (still heavyweight)</a></li>
+    <li><span class="severity sev-critical"></span><a href="#i2">Direct os/exec bypasses codebase git abstraction</a></li>
+    <li><span class="severity sev-critical"></span><a href="#i3">Shell injection risk in generated exec script</a></li>
+    <li><span class="severity sev-resolved"></span><a href="#i4"><s>No test coverage for new functions</s> &mdash; partially addressed</a></li>
+    <li><span class="severity sev-important"></span><a href="#i5">Default true is a silent behavior change for existing deployments</a></li>
+    <li><span class="severity sev-minor"></span><a href="#i6">Whitespace corruption (spaces vs tabs) &mdash; pre-existing, not introduced by PR</a></li>
+    <li><span class="severity sev-resolved"></span><a href="#i7"><s>Fragile patch parsing with no SHA validation</s> &mdash; resolved</a></li>
+    <li><span class="severity sev-minor"></span><a href="#i8">Failures silently swallowed</a></li>
+    <li><span class="severity sev-resolved"></span><a href="#i9"><s>File handle leak on temp file</s> &mdash; resolved</a></li>
+    <li><span class="severity sev-resolved"></span><a href="#i10"><s>Dead-code tautology in appendCherryPickMessages</s> &mdash; resolved</a></li>
+    <li><span class="severity sev-resolved"></span><a href="#i11"><s>Inconsistent indentation in new functions</s> &mdash; resolved</a></li>
+  </ul>
+</div>
+
+<!-- ═══════════════════════════════════ -->
+<h2>Critical</h2>
+<!-- ═══════════════════════════════════ -->
+
+<div class="issue resolved" id="i1">
+  <div class="issue-title">
+    <span class="badge badge-resolved">Resolved</span>
+    <span class="badge badge-partial">Partially</span>
+    git filter-branch replaced with rebase -i --exec
+  </div>
+  <p><span class="file-ref">server.go:795&ndash;833</span></p>
+  <p><strong>Previously:</strong> <code>git filter-branch --msg-filter</code> &mdash; deprecated by the Git project.</p>
+  <p><strong>Now:</strong> <code>git rebase -i --exec</code> with <code>GIT_SEQUENCE_EDITOR=true</code> to suppress
+  the interactive editor. This is no longer deprecated, but it's still a heavyweight post-am
+  history rewrite. An interactive rebase to amend commit messages is disproportionate when the
+  same result can be achieved by modifying the patch file before <code>r.Am()</code>.</p>
+  <p>The shell script approach also introduces new complexity: it uses <code>git rev-list --count</code>
+  to determine commit position, cuts fields from a comma-separated env var, and runs
+  <code>git commit --amend</code> per commit. All of this would be unnecessary with the patch-modification approach.</p>
+</div>
+
+<div class="issue critical" id="i2">
+  <div class="issue-title"><span class="badge badge-critical">Critical</span> Direct os/exec bypasses codebase git abstraction</div>
+  <p><span class="file-ref">server.go:25, 795&ndash;833</span></p>
+  <p>The codebase has a git execution layer in <code>pkg/git/v2/executor.go</code> that handles
+  logging, credential censoring, and consistent error handling. All existing git operations
+  go through the <code>Interactor</code> interface
+  (e.g., <code>r.Am()</code>, <code>r.CheckoutNewBranch()</code>).</p>
+  <p>This PR still adds raw <code>exec.Command("git", ...)</code> calls (now for both
+  <code>git rev-parse</code> and <code>git rebase -i</code>), bypassing all of that.
+  The patch-modification approach eliminates the need for any additional git commands entirely.</p>
+  <p><strong>Status after <code>9eb85310</code>:</strong> Unchanged. Still uses <code>os/exec</code> directly.
+  Tests also use <code>os/exec</code> directly rather than the codebase's <code>localgit</code> helpers.</p>
+</div>
+
+<div class="issue critical" id="i3">
+  <div class="issue-title"><span class="badge badge-critical">Critical</span> Shell injection risk in generated exec script</div>
+  <p><span class="file-ref">server.go:800&ndash;812</span></p>
+  <p><strong>Previously:</strong> SHAs interpolated into a <code>case</code> statement in a <code>--msg-filter</code> script.</p>
+  <p><strong>Now:</strong> SHAs are passed via the <code>ORIGINAL_SHAS</code> environment variable,
+  which is safer for the SHAs themselves. However, the script still has unsafe unquoted expansions:</p>
+  <ul>
+    <li><code>$ORIGINAL_SHA</code> is unquoted in the <code>if [ -n ... ]</code> test</li>
+    <li><code>$CURRENT_MSG</code> is unquoted in the <code>git commit --amend -m</code> argument &mdash;
+    a commit message containing shell metacharacters (backticks, <code>$()</code>, double quotes)
+    will be interpreted by the shell</li>
+    <li>The <code>baseSHA</code> variable (from <code>git rev-parse</code> output) is interpolated directly
+    into the script body via <code>fmt.Sprintf</code> without validation</li>
+  </ul>
+  <p>The SHA validation regex in <code>extractOriginalSHAs</code> mitigates the SHA vector
+  (the SHAs themselves are now guaranteed hex), but the commit message expansion and
+  baseSHA interpolation remain exploitable. With the patch-modification approach, there is
+  no shell script at all.</p>
+</div>
+
+<div class="issue resolved" id="i4">
+  <div class="issue-title">
+    <span class="badge badge-resolved">Resolved</span>
+    <span class="badge badge-partial">Partially</span>
+    Test coverage added
+  </div>
+  <p><span class="file-ref">server_test.go:1462&ndash;1695</span></p>
+  <p><strong>Previously:</strong> No tests for <code>extractOriginalSHAs</code> or <code>appendCherryPickMessages</code>.</p>
+  <p><strong>Now (commit <code>57e0a0d6</code>):</strong> ~230 lines of tests added:</p>
+  <ul>
+    <li><code>TestExtractOriginalSHAs</code> &mdash; table-driven, 4 cases: single commit, multiple commits,
+        invalid From lines filtered, empty patch error</li>
+    <li><code>TestAppendCherryPickMessages_Empty</code> &mdash; empty SHA list no-op</li>
+    <li><code>TestAppendCherryPickMessages_NoGitRepo</code> &mdash; error path</li>
+    <li><code>TestAppendCherryPickMessages_SingleCommit</code> &mdash; real git repo, verifies message annotation</li>
+    <li><code>TestAppendCherryPickMessages_MultiCommit</code> &mdash; two commits, verifies both messages and order</li>
+  </ul>
+  <p><strong>Remaining gaps:</strong></p>
+  <ul>
+    <li>No test for <code>addOriginalCommitID: false</code> path (handler-level no-op)</li>
+    <li>No test for commit messages containing shell metacharacters (would expose finding #3)</li>
+    <li>Tests use <code>os/exec</code> directly to set up git repos rather than the codebase's
+        <code>localgit</code> test helpers used by existing tests</li>
+    <li>Uses <code>require</code> from testify (new dependency) alongside existing <code>assert</code> usage &mdash;
+        minor style inconsistency</li>
+  </ul>
+</div>
+
+<!-- ═══════════════════════════════════ -->
+<h2>Important</h2>
+<!-- ═══════════════════════════════════ -->
+
+<div class="issue important" id="i5">
+  <div class="issue-title"><span class="badge badge-important">Important</span> Default true is a silent behavior change</div>
+  <p><span class="file-ref">main.go:76</span></p>
+  <p><code>--add-original-commit-id</code> defaults to <code>true</code>. Every existing deployment
+  will start modifying cherry-pick commit messages on upgrade without any opt-in.
+  New features should default to <code>false</code> to avoid surprising existing users.</p>
+  <p><strong>Status after <code>9eb85310</code>:</strong> Unchanged. Still defaults to <code>true</code>.</p>
+</div>
+
+<!-- ═══════════════════════════════════ -->
+<h2>Minor</h2>
+<!-- ═══════════════════════════════════ -->
+
+<div class="issue minor" id="i6">
+  <div class="issue-title"><span class="badge badge-minor">Minor</span> Whitespace corruption (pre-existing)</div>
+  <p><span class="file-ref">server.go:597</span></p>
+  <p>The <code>// Push the new branch</code> comment uses spaces for indentation instead of tabs.
+  This is a pre-existing issue in the file, not introduced by this PR &mdash; the line is not
+  part of the PR's changed lines. @stmcginnis flagged it (Apr 21) as "over indented" but it's
+  outside the PR's diff. Not the author's responsibility to fix.</p>
+</div>
+
+<div class="issue resolved" id="i7">
+  <div class="issue-title"><span class="badge badge-resolved">Resolved</span> SHA validation added to patch parsing</div>
+  <p><span class="file-ref">server.go:752</span></p>
+  <p><strong>Previously:</strong> Matched any line starting with <code>From </code> and took the second token with no validation.</p>
+  <p><strong>Now:</strong> Uses <code>regexp.MustCompile(`^From ([0-9a-f]{40}) `)</code> to match only valid
+  40-character hex SHAs. This addresses both the validation concern and the false-positive
+  risk from email-style <code>From </code> lines in commit messages.</p>
+</div>
+
+<div class="issue minor" id="i8">
+  <div class="issue-title"><span class="badge badge-minor">Minor</span> Failures silently swallowed</div>
+  <p><span class="file-ref">server.go:585&ndash;597</span></p>
+  <p>Both SHA extraction and commit rewriting failures are logged as <code>Warn</code> and ignored.
+  If a user enabled this feature and it silently fails, the cherry-pick PR will lack
+  the expected commit IDs with no visible indication. Consider adding a PR comment
+  noting the failure, or failing the operation outright.</p>
+  <p><strong>Status after <code>9eb85310</code>:</strong> Unchanged.</p>
+</div>
+
+<div class="issue resolved" id="i9">
+  <div class="issue-title"><span class="badge badge-resolved">Resolved</span> File handle leak fixed</div>
+  <p><span class="file-ref">server.go:816&ndash;822</span></p>
+  <p><strong>Previously:</strong> <code>os.CreateTemp</code> returned an open handle, passed path to external command without closing.</p>
+  <p><strong>Now:</strong> Uses <code>tmpfile.WriteString()</code> followed by explicit <code>tmpfile.Close()</code>
+  before passing the path to <code>git rebase</code>. Properly handles the error path too (closes before returning).</p>
+</div>
+
+<div class="issue resolved" id="i10">
+  <div class="issue-title"><span class="badge badge-resolved">Resolved</span> Dead-code tautology removed</div>
+  <p><span class="file-ref">server.go:780&ndash;783</span></p>
+  <p><strong>Previously:</strong> <code>appendCherryPickMessages</code> set <code>numCommits := len(originalSHAs)</code> and then
+  immediately checked <code>if len(originalSHAs) != numCommits</code> &mdash; a tautology that could never be true.</p>
+  <p><strong>Now:</strong> Removed in <code>ac830c0f</code> after @stmcginnis flagged it (Apr 23).</p>
+</div>
+
+<div class="issue resolved" id="i11">
+  <div class="issue-title"><span class="badge badge-resolved">Resolved</span> Indentation fixed in new functions</div>
+  <p><span class="file-ref">server.go:742&ndash;833</span></p>
+  <p><strong>Previously:</strong> <code>extractOriginalSHAs</code> used 8-space indentation,
+  <code>appendCherryPickMessages</code> used 4-space, neither matched file convention (tabs).</p>
+  <p><strong>Now:</strong> Fixed in <code>6b0d4358</code> after @stmcginnis flagged it (Apr 21).
+  New functions now use tabs matching the rest of the file.</p>
+</div>
+
+<!-- ═══════════════════════════════════ -->
+
+<div class="suggestion-box">
+  <h3>Suggested Alternative Approach (unchanged)</h3>
+  <p>Instead of post-processing commits with <code>rebase -i --exec</code>, modify the patch content
+  <em>before</em> calling <code>r.Am()</code>:</p>
+  <ol>
+    <li>Read the patch file into memory</li>
+    <li>For each commit section (delimited by <code>From &lt;sha&gt; ...</code> headers),
+        locate the commit message body and append
+        <code>(cherry picked from commit &lt;sha&gt;)</code> before the <code>---</code> diff separator
+        (using <code>diff --git</code> as the definitive delimiter to handle messages containing <code>---</code>)</li>
+    <li>Write the modified patch back to the same path</li>
+    <li>Let the existing <code>r.Am()</code> apply it &mdash; messages are already correct</li>
+  </ol>
+  <p>This eliminates: <code>os/exec</code> imports, <code>rebase -i</code>, shell script generation,
+  temp files, the injection risk, and the file handle leak. It's pure Go string manipulation
+  on a file already in memory, and is trivially unit-testable.</p>
+  <p><strong>The latest revision replaced <code>filter-branch</code> with <code>rebase -i --exec</code>,
+  which is a step in the right direction (no longer deprecated), but the fundamental design
+  concern remains:</strong> post-am history rewriting via shell scripts is unnecessarily complex
+  and fragile when pre-am patch modification achieves the same result with zero external commands.</p>
+</div>
+
+</body>
+</html>

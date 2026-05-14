@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PR #712 Review: feat(peribolos): clean up failed org invitations before re-inviting</title>
+<style>
+  :root {
+    --bg: #0d1117;
+    --surface: #161b22;
+    --border: #30363d;
+    --text: #e6edf3;
+    --text-muted: #8b949e;
+    --accent: #58a6ff;
+    --green: #3fb950;
+    --yellow: #d29922;
+    --red: #f85149;
+    --purple: #bc8cff;
+    --cyan: #39d2c0;
+  }
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.6;
+    padding: 2rem;
+    max-width: 960px;
+    margin: 0 auto;
+  }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; color: var(--accent); }
+  h2 {
+    font-size: 1.15rem;
+    margin-top: 2rem;
+    margin-bottom: 0.75rem;
+    padding-bottom: 0.35rem;
+    border-bottom: 1px solid var(--border);
+    color: var(--cyan);
+  }
+  h3 { font-size: 1rem; margin-top: 1.25rem; margin-bottom: 0.5rem; color: var(--purple); }
+  .meta {
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    margin-bottom: 1.5rem;
+  }
+  .meta span { margin-right: 1.25rem; }
+  .meta .label {
+    display: inline-block;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 12px;
+    padding: 0.1rem 0.55rem;
+    font-size: 0.75rem;
+    margin-right: 0.35rem;
+  }
+  p, li { margin-bottom: 0.5rem; }
+  ul, ol { padding-left: 1.5rem; }
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-bottom: 1rem;
+  }
+  .card-title {
+    font-weight: 600;
+    margin-bottom: 0.4rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .badge {
+    display: inline-block;
+    font-size: 0.7rem;
+    font-weight: 600;
+    padding: 0.15rem 0.5rem;
+    border-radius: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .badge-ok     { background: rgba(63,185,80,0.15); color: var(--green); }
+  .badge-note   { background: rgba(210,153,34,0.15); color: var(--yellow); }
+  .badge-risk   { background: rgba(248,81,73,0.15);  color: var(--red); }
+  .badge-info   { background: rgba(88,166,255,0.15); color: var(--accent); }
+  code {
+    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+    font-size: 0.85em;
+    background: rgba(110,118,129,0.15);
+    padding: 0.15em 0.35em;
+    border-radius: 4px;
+  }
+  .file-ref {
+    color: var(--accent);
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.85em;
+  }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 0.75rem 0;
+    font-size: 0.9rem;
+  }
+  th, td {
+    text-align: left;
+    padding: 0.5rem 0.75rem;
+    border: 1px solid var(--border);
+  }
+  th { background: var(--surface); color: var(--text-muted); font-weight: 600; }
+  .verdict {
+    background: rgba(63,185,80,0.08);
+    border: 1px solid rgba(63,185,80,0.3);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    margin-top: 1.5rem;
+  }
+  .verdict-title { color: var(--green); font-weight: 700; font-size: 1.05rem; margin-bottom: 0.4rem; }
+  .flow-diagram {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.25rem;
+    font-family: 'SFMono-Regular', Consolas, monospace;
+    font-size: 0.82rem;
+    line-height: 1.5;
+    overflow-x: auto;
+    white-space: pre;
+    color: var(--text-muted);
+    margin: 0.75rem 0;
+  }
+  .checklist { list-style: none; padding-left: 0.25rem; }
+  .checklist li { padding: 0.2rem 0; }
+  .checklist li::before { content: "☐ "; color: var(--text-muted); }
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  hr { border: none; border-top: 1px solid var(--border); margin: 1.5rem 0; }
+</style>
+</head>
+<body>
+
+<h1>PR #712 &mdash; feat(peribolos): clean up failed org invitations before re-inviting</h1>
+<div class="meta">
+  <span>Author: <strong>cblecker</strong> (Christoph Blecker)</span>
+  <span>+276 / &minus;28</span>
+  <br>
+  <span class="label">approved</span>
+  <span class="label">area/peribolos</span>
+  <span class="label">cncf-cla: yes</span>
+  <span class="label">size/L</span>
+</div>
+
+<!-- ─────────────────── SUMMARY ─────────────────── -->
+<h2>Summary</h2>
+<p>When a GitHub org invitation fails (e.g. 2FA not configured), the stale failed-invitation record blocks subsequent re-invites. This PR makes peribolos detect those records and delete them before issuing a fresh invite.</p>
+
+<table>
+  <tr><th>Component</th><th>Change</th></tr>
+  <tr>
+    <td><span class="file-ref">pkg/github/types.go</span></td>
+    <td>Adds <code>ID</code>, <code>FailedAt</code>, <code>FailedReason</code> to <code>OrgInvitation</code></td>
+  </tr>
+  <tr>
+    <td><span class="file-ref">pkg/github/client.go</span></td>
+    <td>New <code>ListFailedOrgInvitations</code> and <code>DeleteOrgInvitation</code> on <code>OrganizationClient</code></td>
+  </tr>
+  <tr>
+    <td><span class="file-ref">cmd/peribolos/main.go</span></td>
+    <td>New <code>orgFailedInvitations()</code> fetch; cleanup in the <code>adder</code> closure before re-invite</td>
+  </tr>
+  <tr>
+    <td><span class="file-ref">cmd/peribolos/main_test.go</span></td>
+    <td>11 new test cases across <code>TestOrgFailedInvitations</code> (6) and <code>TestConfigureOrgMembers</code> (5)</td>
+  </tr>
+</table>
+
+<!-- ─────────────────── CONTROL FLOW ─────────────────── -->
+<h2>Control Flow</h2>
+<div class="flow-diagram">configureOrg(org)
+  ├─ orgInvitations()          → invitees  (pending invites, as before)
+  ├─ <span style="color:var(--cyan)">orgFailedInvitations()</span>    → failedInvites map[login][]invitationID  <span style="color:var(--cyan)">← NEW</span>
+  └─ configureOrgMembers(…, invitees, <span style="color:var(--cyan)">failedInvites</span>)
+       └─ adder(user, super)
+            ├─ if invitees.Has(user): return (pending invite exists, skip)
+            ├─ <span style="color:var(--cyan)">for each failedInvites[user]:</span>       <span style="color:var(--cyan)">← NEW</span>
+            │    <span style="color:var(--cyan)">DeleteOrgInvitation (warn on error)</span>
+            └─ UpdateOrgMembership (re-invite)</div>
+
+<!-- ─────────────────── THINGS THAT LOOK GOOD ─────────────────── -->
+<h2>What Looks Good</h2>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Consistent API patterns</div>
+  <code>ListFailedOrgInvitations</code> is a near-copy of <code>ListOrgInvitations</code>: same pagination, same <code>acceptNone</code>, same <code>c.fake</code> guard. Easy to verify by diffing the two.
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Idempotent delete</div>
+  <code>DeleteOrgInvitation</code> accepts both <code>204</code> and <code>404</code> exit codes &mdash; if the invitation is already gone, no error. Correct semantics.
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Correct ordering in the adder</div>
+  Pending invitations are checked first and short-circuit with <code>return nil</code>. Failed-invite cleanup runs only when a re-invite is actually about to happen. The "pending takes precedence" test case (<span class="file-ref">main_test.go:801</span>) validates this.
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Soft-fail on delete</div>
+  <code>DeleteOrgInvitation</code> errors are logged as warnings, don't abort the sync, and don't prevent the re-invite. The "delete failure still re-invites" test case (<span class="file-ref">main_test.go:793</span>) covers this.
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Nil-safe map access</div>
+  When <code>orgFailedInvitations</code> returns <code>nil</code> (opts disabled), <code>range failedInvites[user]</code> in the adder is a no-op &mdash; no nil guard needed, idiomatic Go.
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Login normalization</div>
+  <code>github.NormLogin</code> is applied in <code>orgFailedInvitations</code> before inserting into the map. Test case "normalizes login case" (<span class="file-ref">main_test.go:583</span>) validates <code>MiXeD</code>&rarr;<code>mixed</code>.
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">OK</span> Gating logic</div>
+  <code>orgFailedInvitations</code> only runs when <code>fixOrgMembers &amp;&amp; !ignoreInvitees</code>. The comment at <span class="file-ref">main.go:929-930</span> explains why <code>fixTeamMembers</code> is not considered (teams don't have a delete-then-reinvite flow). Two test cases cover the skip conditions.
+</div>
+
+<!-- ─────────────────── ITEMS TO DISCUSS ─────────────────── -->
+<h2>Items to Discuss During Review</h2>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Note</span> <code>time.Time</code> and <code>omitempty</code></div>
+  <span class="file-ref">types.go:1201</span> &mdash; <code>FailedAt time.Time `json:"failed_at,omitempty"`</code>
+  <p style="margin-top:0.4rem">Go's <code>encoding/json</code> does <em>not</em> treat the zero <code>time.Time</code> as "empty" &mdash; only JSON null is omitted. So <code>omitempty</code> here is inert. Not a functional problem because peribolos only <em>reads</em> from GitHub (never serializes <code>OrgInvitation</code> back), but it might mislead future readers into thinking zero times will be suppressed.</p>
+  <p>Consider: use <code>*time.Time</code> if omitempty behavior is intended, or drop the <code>omitempty</code> tag.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Note</span> Whitespace-only reformatting</div>
+  <span class="file-ref">main.go:47-64</span>, <span class="file-ref">main_test.go:1866-1870</span>
+  <p style="margin-top:0.4rem">The <code>options</code> struct and <code>TestDumpOrgConfig</code> struct get alignment-only changes that add noise to the diff. Not wrong, but if the project prefers clean diffs, these could be a separate commit or omitted.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Note</span> <code>intSliceToString</code> uses lexicographic sort</div>
+  <span class="file-ref">main_test.go:849-855</span>
+  <p style="margin-top:0.4rem">Converts ints to strings then calls <code>sort.Strings</code>. Lexicographic order means <code>"10" &lt; "2"</code>. This is harmless for the small test values used, but <code>sort.Ints</code> on the original slices would be more robust. Very minor.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-info">Info</span> <code>OrgInvitation.ID</code> is now populated for pending invitations too</div>
+  <span class="file-ref">types.go:1198</span>
+  <p style="margin-top:0.4rem">Adding the <code>ID</code> field is backwards-compatible and purely additive. Existing code that calls <code>ListOrgInvitations</code> will now also receive the <code>ID</code>, which could be useful for future features (e.g. revoking specific pending invitations). No action needed, just context.</p>
+</div>
+
+<!-- ─────────────────── RISKS ─────────────────── -->
+<h2>Risks</h2>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">Low</span> Blast radius is minimal</div>
+  <p>Cleanup only fires for users who have failed invitations <em>and</em> are about to be re-invited. The worst case on delete failure is a logged warning with no behavioral change from the status quo.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">Low</span> API permissions are already available</div>
+  <p><code>DELETE /orgs/{org}/invitations/{id}</code> requires org admin scope, which peribolos already has for <code>UpdateOrgMembership</code>. No new token scopes needed.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-ok">Low</span> Rate limiting</div>
+  <p><code>ListFailedOrgInvitations</code> is called once per org. <code>DeleteOrgInvitation</code> fires once per failed invitation for users being re-invited &mdash; proportional to the problem size. No risk of runaway API calls.</p>
+</div>
+
+<!-- ─────────────────── TEST COVERAGE ─────────────────── -->
+<h2>Test Coverage Matrix</h2>
+<table>
+  <tr><th>Scenario</th><th>Test</th><th>File:Line</th></tr>
+  <tr><td>Skip when <code>fixOrgMembers</code> false</td><td>TestOrgFailedInvitations</td><td><span class="file-ref">main_test.go:557</span></td></tr>
+  <tr><td>Skip when <code>ignoreInvitees</code> set</td><td>TestOrgFailedInvitations</td><td><span class="file-ref">main_test.go:563</span></td></tr>
+  <tr><td>Returns failed invitations</td><td>TestOrgFailedInvitations</td><td><span class="file-ref">main_test.go:571</span></td></tr>
+  <tr><td>Multiple invitations for same user</td><td>TestOrgFailedInvitations</td><td><span class="file-ref">main_test.go:578</span></td></tr>
+  <tr><td>Login case normalization</td><td>TestOrgFailedInvitations</td><td><span class="file-ref">main_test.go:583</span></td></tr>
+  <tr><td>List API error</td><td>TestOrgFailedInvitations</td><td><span class="file-ref">main_test.go:590</span></td></tr>
+  <tr><td>Delete failed invite then re-invite (member)</td><td>TestConfigureOrgMembers</td><td><span class="file-ref">main_test.go:770</span></td></tr>
+  <tr><td>Delete all failed invites for same user</td><td>TestConfigureOrgMembers</td><td><span class="file-ref">main_test.go:778</span></td></tr>
+  <tr><td>Delete failed invite (admin role)</td><td>TestConfigureOrgMembers</td><td><span class="file-ref">main_test.go:786</span></td></tr>
+  <tr><td>Delete failure still re-invites</td><td>TestConfigureOrgMembers</td><td><span class="file-ref">main_test.go:793</span></td></tr>
+  <tr><td>Pending invite takes precedence</td><td>TestConfigureOrgMembers</td><td><span class="file-ref">main_test.go:801</span></td></tr>
+</table>
+
+<!-- ─────────────────── REVIEW CHECKLIST ─────────────────── -->
+<h2>Review Checklist</h2>
+<ul class="checklist">
+  <li>API methods follow existing patterns (<code>ListOrgInvitations</code> / <code>ListOrgMembers</code>)</li>
+  <li>Interface changes are consistent (<code>orgClient</code>, <code>OrganizationClient</code>)</li>
+  <li>Failed-invite cleanup is gated behind <code>fixOrgMembers &amp;&amp; !ignoreInvitees</code></li>
+  <li>Pending invitations take precedence over failed ones (no double-action)</li>
+  <li>Delete errors warn but do not abort sync or block re-invite</li>
+  <li>Login normalization applied before map insertion</li>
+  <li>Dry-run mode respected in <code>DeleteOrgInvitation</code> (<code>c.dry</code> guard)</li>
+  <li>Fake mode respected in <code>ListFailedOrgInvitations</code> (<code>c.fake</code> guard)</li>
+  <li><code>configureOrg</code> error propagation: list failure is fatal (appropriate)</li>
+  <li>No new token scopes required</li>
+  <li>Tests cover happy path, edge cases, and error paths</li>
+</ul>
+
+<!-- ─────────────────── MAINTAINER REVIEW ─────────────────── -->
+<h2 style="margin-top:2.5rem; border-bottom: 2px solid var(--cyan);">Multi-Perspective Maintainer Review</h2>
+<p style="color:var(--text-muted);margin-bottom:1.25rem;">Three independent reviewer agents analyzed this PR in parallel, then an advisor synthesized their findings.</p>
+
+<!-- ── Code Quality ── -->
+<h3>1/3 &mdash; Code Quality <span class="badge badge-ok" style="margin-left:0.5rem">APPROVE</span></h3>
+<div class="card">
+  <ul>
+    <li><strong>No critical issues.</strong> Implementation follows existing codebase patterns closely with good test coverage and sensible error handling.</li>
+    <li><code>ListFailedOrgInvitations</code> is a structural copy of <code>ListOrgInvitations</code> &mdash; consistent and easy to verify.</li>
+    <li><code>DeleteOrgInvitation</code> accepts 204 and 404 &mdash; idempotent by design.</li>
+    <li>Error handling (warn + continue on delete failure) is well-considered: primary goal (re-invite) is never blocked by cleanup failures.</li>
+    <li>"Pending invite takes precedence" test validates the key interaction between the existing skip and the new cleanup.</li>
+    <li>Implicit normalization contract between <code>failedInvites</code> map keys and <code>user</code> parameter works correctly but relies on both normalizations staying in sync.</li>
+  </ul>
+</div>
+
+<!-- ── Maintainability ── -->
+<h3>2/3 &mdash; Maintainability <span class="badge badge-ok" style="margin-left:0.5rem">APPROVE</span> <span class="badge badge-ok" style="margin-left:0.25rem">LOW BURDEN</span></h3>
+<div class="card">
+  <ul>
+    <li><strong>Maintenance burden: LOW.</strong> Follows established patterns (interface segregation, warn-and-continue, normalization, table-driven tests) with minimal new concepts.</li>
+    <li><code>failedInviteClient</code> interface mirrors <code>inviteClient</code> &mdash; narrow, testable, consistent.</li>
+    <li>Pre-fetching failed invitations once in <code>configureOrg</code> avoids per-user API calls, matching how <code>invitees</code> are handled.</li>
+    <li>Comment explaining <code>fixOrgMembers</code>-only guard is exactly the right kind of non-obvious documentation.</li>
+    <li>Clean revertability &mdash; purely additive change.</li>
+    <li>Tests cover behavior, not implementation details &mdash; won't break on unrelated changes.</li>
+    <li><em>Note:</em> <code>configureOrgMembers</code> now takes 6 parameters. Not a problem today, but a threshold signal for future changes.</li>
+  </ul>
+</div>
+
+<!-- ── Deployment Risk ── -->
+<h3>3/3 &mdash; Deployment Risk <span class="badge badge-ok" style="margin-left:0.5rem">LOW</span></h3>
+<div class="card">
+  <ul>
+    <li><strong>No breaking changes.</strong> No configuration schemas, CLI flags, defaults, or behavioral contracts changed.</li>
+    <li>Behavioral change is strictly positive: re-inviting a user with stale failed invitation previously could silently fail; now clears stale records first.</li>
+    <li>GHE compatibility preserved: <code>--ignore-invitees</code> skips the entire failed invitation flow.</li>
+    <li>Dry-run support: <code>DeleteOrgInvitation</code> respects <code>c.dry</code>, so <code>--confirm=false</code> runs won't delete anything.</li>
+    <li>Rate limit impact negligible: one extra paginated GET per org, plus DELETE calls only for users being re-invited.</li>
+    <li>Rollback is safe &mdash; removing this code returns to previous behavior.</li>
+    <li><code>OrganizationClient</code> interface gains two methods &mdash; downstream code implementing the interface outside Prow will need stubs.</li>
+  </ul>
+</div>
+
+<!-- ── Converging Concerns ── -->
+<h3>Converging Concerns <span style="color:var(--text-muted);font-size:0.85rem;font-weight:normal">(flagged by 2+ reviewers)</span></h3>
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Convergence</span> <code>failedInvites</code> double-use in tests</div>
+  <p>Flagged by <strong>Code Quality</strong> and <strong>Maintainability</strong>. The same <code>tc.failedInvites</code> map is passed both as a <code>fakeClient</code> field (used by <code>ListFailedOrgInvitations</code>) and as a direct argument to <code>configureOrgMembers</code>. Functionally correct but slightly confusing for future readers since <code>configureOrgMembers</code> does not call <code>ListFailedOrgInvitations</code> itself. Not worth blocking over.</p>
+</div>
+
+<!-- ── Advisor Suggestions ── -->
+<h3>Advisor Suggestions <span style="color:var(--text-muted);font-size:0.85rem;font-weight:normal">(non-blocking)</span></h3>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Suggestion</span> Per-invitation logging noise</div>
+  <p>Consider logging a single summary line (e.g., <code>"Found N failed invitations for org X"</code>) instead of one Info line per failed invitation. For orgs with many stale invitations this could be noisy, and the existing <code>orgInvitations</code> path does not log individual items.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Suggestion</span> GHE compatibility note in PR description</div>
+  <p>The <code>/failed_invitations</code> endpoint may not be available on all GitHub Enterprise Server versions. Operators not using <code>--ignore-invitees</code> on older GHE could see org sync abort. A one-line note in the PR description would help operators evaluate impact before upgrading.</p>
+</div>
+
+<div class="card">
+  <div class="card-title"><span class="badge badge-note">Suggestion</span> <code>time.Time</code> omitempty tag</div>
+  <p>The <code>omitempty</code> on <code>FailedAt time.Time</code> is inert with <code>encoding/json</code> since zero <code>time.Time</code> is not considered empty. Cosmetic only since peribolos only deserializes, but worth knowing if the struct is ever used for serialization.</p>
+</div>
+
+<!-- ── Deployment Notes ── -->
+<h3>Deployment Notes</h3>
+<div class="card">
+  <ul>
+    <li>The <code>OrganizationClient</code> interface gains <code>ListFailedOrgInvitations</code> and <code>DeleteOrgInvitation</code>. Any downstream code outside the Prow repo implementing this interface will need to add these methods.</li>
+    <li>GHE Server installations not using <code>--ignore-invitees</code> should verify support for the <code>/failed_invitations</code> endpoint before upgrading.</li>
+  </ul>
+</div>
+
+<!-- ─────────────────── VERDICT ─────────────────── -->
+<div class="verdict">
+  <div class="verdict-title">Recommendation: APPROVE WITH SUGGESTIONS</div>
+  <p>All three independent reviewers (code quality, maintainability, deployment risk) reached APPROVE with no critical or blocking issues. The change is well-scoped, follows established codebase patterns, has comprehensive test coverage, and carries low deployment risk. The suggestions above are minor polish items that do not warrant blocking the merge.</p>
+</div>
+
+<!-- ─────────────────── PR COMMENT ─────────────────── -->
+<h2>Draft PR Comment</h2>
+<div class="card" style="border-color: var(--accent); background: rgba(88,166,255,0.04);">
+  <p style="color:var(--text-muted);font-size:0.8rem;margin-bottom:0.5rem;">Ready to post via <code>gh pr comment</code> or <code>gh pr review</code></p>
+  <p>This PR adds cleanup of failed GitHub org invitations before re-inviting users in peribolos. Three independent reviews (code quality, maintainability, deployment risk) all came back clean with no blocking issues. The implementation follows established patterns closely, has solid test coverage including edge cases, and carries low deployment risk. LGTM &mdash; approving as-is. Minor suggestions: consider a summary log line instead of per-invitation logging for noisy orgs, and a note in the PR description about GHE Server compatibility for operators not using <code>--ignore-invitees</code>.</p>
+</div>
+
+<hr>
+<p style="color:var(--text-muted);font-size:0.8rem;margin-top:1rem;">
+  Generated for review of <a href="https://github.com/kubernetes-sigs/prow/pull/712">kubernetes-sigs/prow#712</a>
+</p>
+
+</body>
+</html>

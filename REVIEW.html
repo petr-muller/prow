@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Review: kubernetes-sigs/prow#720</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    color: #24292f;
+    background: #fff;
+    max-width: 820px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+  }
+  h1 { font-size: 1.5rem; border-bottom: 2px solid #d0d7de; padding-bottom: .4rem; }
+  h2 { font-size: 1.25rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: .3rem; }
+  h3 { font-size: 1rem; margin-top: 1.5rem; }
+  code, pre {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.875rem;
+  }
+  code { background: #f6f8fa; padding: .15em .35em; border-radius: 4px; }
+  pre {
+    background: #f6f8fa;
+    padding: 1rem;
+    border-radius: 6px;
+    overflow-x: auto;
+    line-height: 1.45;
+  }
+  .meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.25rem; margin-bottom: 1.5rem; }
+  .meta p { margin: .25rem 0; }
+  .meta a { color: #0969da; }
+  .verdict { padding: 1rem 1.25rem; border-radius: 6px; margin-bottom: 1.5rem; }
+  .verdict.needs-discussion { background: #fff8c5; border: 1px solid #d4a72c; }
+  .verdict .label { font-weight: 700; text-transform: uppercase; font-size: .85rem; letter-spacing: .03em; }
+  .severity { display: inline-block; font-size: .75rem; font-weight: 700; padding: .15em .5em; border-radius: 3px; text-transform: uppercase; vertical-align: middle; margin-right: .4em; }
+  .severity.should-fix { background: #fff8c5; color: #6a5300; }
+  .severity.nit { background: #ddf4ff; color: #0550ae; }
+  .severity.question { background: #f0f0f0; color: #57606a; }
+  ul { padding-left: 1.5rem; }
+  li { margin-bottom: .35rem; }
+  .finding { margin-bottom: 1.5rem; border-left: 3px solid #d0d7de; padding-left: 1rem; }
+  .finding.should-fix { border-left-color: #d4a72c; }
+  .finding.nit { border-left-color: #54aeff; }
+  .checked li { color: #57606a; }
+</style>
+</head>
+<body>
+
+<h1>Review: kubernetes-sigs/prow#720</h1>
+
+<div class="meta">
+  <p><strong>PR:</strong> <a href="https://github.com/kubernetes-sigs/prow/pull/720">kubernetes-sigs/prow#720</a></p>
+  <p><strong>Title:</strong> chore: upgrade golang-lru to v2</p>
+  <p><strong>Author:</strong> chimanjain</p>
+  <p><strong>Head SHA:</strong> <code>14e201e46b1604d805f6c21827939410602a49a4</code></p>
+  <p><strong>Base:</strong> main</p>
+  <p><strong>Reviewed:</strong> 2026-05-15T15:14:59Z</p>
+  <p><strong>Refresh:</strong> Updated from <code>4b0cb59</code> &mdash; author restored goldmark to v1.8.2. No code changes since; petr-muller /ok-to-test, stmcginnis /lgtm.</p>
+</div>
+
+<div class="verdict needs-discussion" style="background: #dafbe1; border-color: #2da44e;">
+  <p class="label" style="color: #1a7f37;">Approve</p>
+  <p>
+    The golang-lru v1 to v2 migration is correct and complete. The only
+    substantive concern (unrelated goldmark downgrade) has been addressed by the
+    author in a follow-up commit. Only a minor formatting nit remains. Ready to
+    merge once CI passes.
+  </p>
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Upgrades <code>github.com/hashicorp/golang-lru</code> from v1 (<code>v1.0.2</code>) to v2 (<code>v2.0.7</code>) in <code>go.mod</code>.</li>
+  <li>Updates the sole consumer (<code>pkg/cache/cache.go</code>) to use the v2 generics-based API with <code>[any, any]</code> type parameters.</li>
+  <li>Applies type parameter changes to <code>simplelru.LRU</code>, <code>simplelru.EvictCallback</code>, and <code>simplelru.NewLRU</code>.</li>
+  <li>Incidentally reformats two multi-line function signatures to use trailing commas.</li>
+  <li><s>Initially downgraded <code>goldmark</code> from v1.8.2 to v1.4.13 &mdash; fixed in follow-up commit <code>14e201e</code>.</s></li>
+</ul>
+
+<p><strong>Since previous review:</strong></p>
+<ul>
+  <li>Author pushed commit <code>14e201e</code> ("update github.com/yuin/goldmark") restoring goldmark to v1.8.2, resolving the only should-fix finding.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Nits</h3>
+
+<div class="finding nit">
+  <p><span class="severity nit">nit</span> <strong>Unrelated formatting changes in function signatures</strong></p>
+  <p><code>pkg/cache/cache.go:121-123</code>, <code>pkg/cache/cache.go:146-148</code></p>
+  <pre>func NewLRUCache(size int,
+-	callbacks Callbacks) (*LRUCache, error) {
++	callbacks Callbacks,
++) (*LRUCache, error) {</pre>
+  <p>
+    The multi-line function signatures are reformatted to add trailing commas and
+    move closing parens to their own line. This is valid Go style and arguably
+    better, but it's unrelated to the golang-lru upgrade and adds noise to the
+    diff. Not worth blocking on.
+  </p>
+</div>
+
+<h2>Resolved findings</h2>
+<div class="finding" style="border-left-color: #2da44e; opacity: 0.7;">
+  <p><span class="severity should-fix" style="background: #dafbe1; color: #1a7f37;">resolved</span> <strong>Unrelated goldmark downgrade from v1.8.2 to v1.4.13</strong></p>
+  <p>Author restored goldmark to v1.8.2 in commit <code>14e201e</code>.</p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked">
+  <li>Import path correctly changed from <code>golang-lru/simplelru</code> to <code>golang-lru/v2/simplelru</code>.</li>
+  <li>Generic type parameters <code>[any, any]</code> applied consistently to all three touchpoints (<code>LRU</code>, <code>EvictCallback</code>, <code>NewLRU</code>) &mdash; correct since the cache stores heterogeneous types via <code>any</code>.</li>
+  <li><code>golang-lru/v2 v2.0.7</code> is the latest available release. The library is mature (5.1k stars, 1,261 importers on pkg.go.dev), not archived or deprecated.</li>
+  <li>v1 is explicitly marked legacy by upstream (&ldquo;please upgrade to v2&rdquo;), so this migration is appropriate.</li>
+  <li>Old <code>golang-lru v1.0.2</code> entries remaining in <code>go.sum</code> are expected (transitive dependency checksums from the module graph).</li>
+  <li>Only one Go file in the repo imports golang-lru (<code>pkg/cache/cache.go</code>) &mdash; migration is complete.</li>
+  <li><code>pkg/cache/cache_test.go</code> exists for the modified package.</li>
+  <li>No behavioral changes &mdash; <code>any</code> type params preserve the existing untyped interface exactly.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li><s>Was the goldmark downgrade intentional?</s> &mdash; Resolved: author reverted it.</li>
+  <li><s>Were tests run against this change?</s> &mdash; Resolved: petr-muller issued <code>/ok-to-test</code>; CI should now be running.</li>
+</ul>
+
+</body>
+</html>

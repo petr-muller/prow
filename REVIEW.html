@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: kubernetes-sigs/prow#715</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 860px; margin: 2em auto; padding: 0 1em; color: #24292f; }
+  h1 { font-size: 1.4em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3em; }
+  h2 { font-size: 1.15em; margin-top: 1.8em; border-bottom: 1px solid #d0d7de; padding-bottom: 0.2em; }
+  h3 { font-size: 1em; margin-top: 1.2em; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.9em; background: #f6f8fa; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1em; overflow-x: auto; border-radius: 6px; font-size: 0.85em; line-height: 1.45; }
+  .header-block { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 0.8em 1.2em; margin-bottom: 1.5em; }
+  .header-block p { margin: 0.2em 0; }
+  .verdict { font-size: 1.1em; font-weight: 600; }
+  .severity-blocking { color: #cf222e; font-weight: 600; }
+  .severity-should-fix { color: #bf8700; font-weight: 600; }
+  .severity-nit { color: #57606a; font-weight: 600; }
+  .severity-question { color: #0969da; font-weight: 600; }
+  .severity-resolved { color: #1a7f37; font-weight: 600; text-decoration: line-through; }
+  ul { padding-left: 1.5em; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  .resolved { opacity: 0.65; }
+  .refresh-note { background: #ddf4ff; border: 1px solid #54aeff; border-radius: 6px; padding: 0.8em 1.2em; margin: 1.5em 0; }
+</style>
+</head>
+<body>
+
+<h1>Review: kubernetes-sigs/prow#715</h1>
+
+<div class="header-block">
+  <p><strong>PR:</strong> <a href="https://github.com/kubernetes-sigs/prow/pull/715">kubernetes-sigs/prow#715</a></p>
+  <p><strong>Title:</strong> buildlog: fail gracefully on large build logs</p>
+  <p><strong>Head SHA:</strong> <code>a67ffd4f8766b65bf045f825a04d8351efc42463</code></p>
+  <p><strong>Base:</strong> main</p>
+  <p><strong>Reviewed:</strong> 2026-05-14T11:02:10Z</p>
+</div>
+
+<h2>Verdict</h2>
+
+<p class="verdict">Approve with suggestions</p>
+
+<p>A clean, well-scoped fix for a real user-facing hang. All three review perspectives (code quality, maintainability, deployment risk) converge on low risk and correct implementation. Two converging concerns (Callback path inconsistency, missing CSS) are worth addressing but not blocking. The error-surfacing improvement is a net positive for both users and operators.</p>
+
+<div class="refresh-note">
+  <p><strong>Refresh (2026-05-14):</strong> Author force-pushed addressing review feedback. Two [should-fix] findings resolved (Size() error handling, missing CSS). Added a UI warning banner when highlighting is skipped. One [should-fix] (error message stutter) and three [nit]s remain open.</p>
+</div>
+
+<h2>What this PR does</h2>
+
+<ul>
+  <li>Adds a 10 MiB size threshold: artifacts larger than this skip regex-based syntax highlighting in <code>Body()</code>, preventing the browser from hanging on pathological regex matching. Lines still render, just without colored highlights.</li>
+  <li>Surfaces <code>ReadAll()</code> failures in the UI: previously, a failed artifact was silently dropped via <code>continue</code>; now it appends a <code>LogArtifactView</code> with an error message so the user sees what went wrong and which artifact failed.</li>
+  <li>Adds a nil-regex guard in <code>highlightLines()</code> to prevent a nil-pointer dereference when <code>highlightRegex</code> is nil, making the function safe for any caller.</li>
+  <li>Adds two new tests covering both behaviors (<code>TestBodyReadAllError</code>, <code>TestBodyLargeLogSkipsHighlight</code>) with an idiomatic <code>errArtifact</code> test helper.</li>
+</ul>
+
+<p><strong>Since previous review:</strong></p>
+<ul>
+  <li>Size() error path now disables highlighting conservatively and logs a <code>logrus.Warn</code>.</li>
+  <li>Added <code>.log-error</code> and <code>.log-warning</code> CSS rules in <code>buildlog.css</code>.</li>
+  <li>Added a <code>Warning</code> field to <code>LogArtifactView</code> and renders a yellow warning banner when highlighting is skipped ("log exceeds 10 MiB" or "unable to determine log size").</li>
+  <li>New test <code>TestBodySizeErrorDisablesHighlight</code> and extended assertions in <code>TestBodyLargeLogSkipsHighlight</code>.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Resolved</h3>
+
+<div class="resolved">
+<h3><span class="severity-resolved">[Should fix] Size() error silently allows highlighting</span></h3>
+<p><code>lens.go:240-243</code></p>
+<p>Size() error now logs a <code>logrus.Warn</code> and disables highlighting conservatively. New test <code>TestBodySizeErrorDisablesHighlight</code> covers this path.</p>
+
+<h3><span class="severity-resolved">[Should fix] Missing CSS for .log-error</span></h3>
+<p><code>buildlog.css:139-147</code></p>
+<p>Added <code>.log-error</code> (red) and <code>.log-warning</code> (yellow) CSS rules.</p>
+</div>
+
+<h3>Open</h3>
+
+<h3><span class="severity-should-fix">[Should fix]</span> Error message stutter</h3>
+<p><code>lens.go:230</code> combined with <code>lens.go:493</code></p>
+<pre>// lens.go:230
+av.Error = fmt.Sprintf("Failed to read log: %v", err)
+
+// lens.go:493 (logLinesAll)
+return nil, fmt.Errorf("failed to read log %q: %w", artifact.JobPath(), err)</pre>
+<p>The user sees <code>"Failed to read log: failed to read log "build-log.txt": file size over specified limit"</code> &mdash; "failed to read log" appears twice. Either change the outer message to just <code>"Error: %v"</code>, or unwrap the inner message.</p>
+
+<h3><span class="severity-nit">[Nit]</span> Callback path does not apply size guard</h3>
+<p><code>lens.go:452, 469</code></p>
+<pre>logLines := highlightLines(skipLines, skipRequest.StartLine, &amp;request.Artifact, conf.highlightRegex, conf.highlightLengthMax)
+// ...
+logLines := highlightLines(lines, request.StartLine, &amp;request.Artifact, conf.highlightRegex, conf.highlightLengthMax)</pre>
+<p>The <code>loadLines</code> function (Callback path for expanding collapsed line groups) always passes <code>conf.highlightRegex</code> directly. For a large artifact, expanding hidden lines would still trigger regex matching. Practical risk is lower since callbacks operate on chunks, but it creates an inconsistency: initial render has no highlights, but expanding a section does. Fine as a follow-up.</p>
+
+<h3><span class="severity-nit">[Nit]</span> Test could directly verify highlighting is skipped</h3>
+<p><code>lens_test.go:1186</code></p>
+<p>The test now asserts warning presence (good), but still doesn't check that <code>"match-highlighted"</code> is absent from the output. Asserting no highlighted spans would directly test the intended behavior.</p>
+
+<h3><span class="severity-nit">[Nit]</span> No log line when size threshold triggers</h3>
+<p><code>lens.go:244-246</code></p>
+<p>The Size() error path now logs a warning (resolved), but the normal <code>sz &gt; highlightSizeThreshold</code> path still has no server-side log. A <code>logrus.Info</code> with artifact name and size would help operators.</p>
+
+<h2>Things I checked and was fine with</h2>
+
+<ul>
+  <li><strong>XSS safety:</strong> <code>html/template</code> is used, so <code>{{.Error}}</code> and <code>{{.Warning}}</code> are auto-escaped. No injection risk.</li>
+  <li><strong>Zero-value backwards compatibility:</strong> <code>Error</code> and <code>Warning</code> default to <code>""</code>, so <code>{{if .Error}}</code> / <code>{{if .Warning}}</code> are naturally false for all existing successful artifacts.</li>
+  <li><strong>No config/API/deployment impact:</strong> <code>LogArtifactView</code> is an internal template struct, not serialized or user-facing config. No schema changes.</li>
+  <li><strong>Test coverage:</strong> All new code paths tested. <code>errArtifact</code> helper extended with <code>sizeErr</code> field.</li>
+  <li><strong>Constant placement:</strong> <code>highlightSizeThreshold</code> is grouped with the other lens constants, well-named, and commented with its unit.</li>
+  <li><strong>Existing tests pass:</strong> All tests in the package pass, including the existing <code>TestBody</code> table-driven tests.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+
+<ul>
+  <li>The Callback path (<code>loadLines</code>) still uses <code>conf.highlightRegex</code> directly &mdash; is that intentional for this PR, with a follow-up planned?</li>
+  <li>The warning message hardcodes "10 MiB" &mdash; would it be better to derive from the constant?</li>
+</ul>
+
+</body>
+</html>

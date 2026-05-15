@@ -1,0 +1,135 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Triage: kubernetes-sigs/prow#194</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif; line-height: 1.6; max-width: 860px; margin: 2rem auto; padding: 0 1rem; color: #1a1a1a; background: #fff; }
+  h1 { font-size: 1.4rem; border-bottom: 2px solid #d0d7de; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #d0d7de; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.2rem; }
+  code { font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace; font-size: 0.88em; background: #f0f3f6; padding: 0.15em 0.35em; border-radius: 3px; }
+  pre { background: #f6f8fa; padding: 1rem; overflow-x: auto; border-radius: 6px; font-size: 0.85em; line-height: 1.45; }
+  pre code { background: none; padding: 0; }
+  .header-meta { background: #f6f8fa; border: 1px solid #d0d7de; border-radius: 6px; padding: 1rem 1.2rem; margin-bottom: 1.5rem; }
+  .header-meta dt { font-weight: 600; display: inline; }
+  .header-meta dd { display: inline; margin: 0 1.5rem 0 0.3rem; }
+  .verdict-box { background: #dafbe1; border-left: 4px solid #1a7f37; padding: 0.8rem 1rem; margin: 1rem 0; border-radius: 0 6px 6px 0; }
+  .verdict-box.needs-info { background: #fff8c5; border-left-color: #9a6700; }
+  .verdict-box.wontfix { background: #ffebe9; border-left-color: #cf222e; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.3rem; }
+  a { color: #0969da; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+</style>
+</head>
+<body>
+
+<h1>Triage: kubernetes-sigs/prow#194</h1>
+
+<div class="header-meta">
+  <dl>
+    <dt>Issue:</dt><dd><a href="https://github.com/kubernetes-sigs/prow/issues/194">kubernetes-sigs/prow#194</a></dd>
+    <dt>Title:</dt><dd>Allow <code>ok-to-test</code> label to approve GitHub workflow runs for new contributors</dd><br>
+    <dt>State:</dt><dd>closed</dd>
+    <dt>Labels:</dt><dd>kind/feature, help wanted, sig/contributor-experience, area/plugins</dd><br>
+    <dt>Triaged at:</dt><dd>2026-05-15T10:12:49Z</dd>
+    <dt>Main SHA:</dt><dd><code>3e578e4f0ad16bb4435dcbf4c52434d9ec34667b</code></dd><br>
+    <dt>Verdict:</dt><dd><strong>accepted</strong></dd>
+  </dl>
+</div>
+
+<h2>Verdict</h2>
+
+<div class="verdict-box">
+  <strong>Accepted.</strong> The issue is partially implemented. PR #612 added workflow approval on <code>/ok-to-test</code> comment only. Workflow approval does not persist when new commits are pushed to trusted fork PRs. The issue should be reopened.
+</div>
+
+<p>PR <a href="https://github.com/kubernetes-sigs/prow/pull/612">#612</a> merged a one-shot approval mechanism that fires exclusively on the <code>/ok-to-test</code> comment. The trigger plugin's PR event handlers (synchronize, label-added, reopen) start Prow presubmit jobs for trusted PRs but never call <code>approveGitHubActionsWorkflowRuns()</code>. This leaves GitHub Actions workflow runs unapproved when new commits are pushed to fork PRs that already carry the <code>ok-to-test</code> label. Two maintainers (@sbueringer, @stevehipwell) confirmed the gap on 2026-05-13/15 and asked to reopen.</p>
+
+<h2>What the issue reports</h2>
+
+<ul>
+  <li>Fork PRs from new contributors require manual approval for GitHub Actions workflow runs, even after a maintainer marks the PR as trusted via <code>/ok-to-test</code>.</li>
+  <li>The original request (from kubernetes/test-infra#25210) asked Prow to call GitHub's <a href="https://docs.github.com/en/rest/reference/actions#approve-a-workflow-run-for-a-fork-pull-request">workflow run approval API</a> when <code>ok-to-test</code> is applied.</li>
+  <li>PR #612 implemented approval on the <code>/ok-to-test</code> comment, but the approval does not persist across new commits pushed to the PR.</li>
+  <li>Multiple communities (Kubernetes, Volcano, Kubeflow) rely on workarounds (separate GitHub Actions to auto-approve) because the built-in support is incomplete.</li>
+  <li>@sbueringer confirmed on 2026-05-13 that he still had to approve actions manually after new commits were pushed on ok-to-test'd PRs.</li>
+</ul>
+
+<h2>Analysis</h2>
+
+<h3>Probable cause</h3>
+
+<p><code>approveGitHubActionsWorkflowRuns()</code> is called from exactly one place: the <code>/ok-to-test</code> comment handler in <code>generic-comment.go:146-154</code>. The PR event handlers that fire on new commits (<code>PullRequestActionSynchronize</code>) and label additions (<code>PullRequestActionLabeled</code>) call <code>buildAllIfTrusted()</code> or <code>buildAllButDrafts()</code> to start Prow jobs, but never invoke workflow approval.</p>
+
+<p>When a new commit is pushed to a fork PR with the <code>ok-to-test</code> label, GitHub creates new workflow runs in <code>action_required</code> status. Prow starts its own presubmit jobs (trust check passes), but the GitHub Actions runs remain blocked.</p>
+
+<h3>Related code</h3>
+
+<p><strong>The only call site</strong> &mdash; <code>pkg/plugins/trigger/generic-comment.go:146-154</code>:</p>
+<pre><code>if isOkToTest && trigger.TriggerGitHubWorkflows {
+    headSHA, err := refGetter.HeadSHA()
+    if err != nil {
+        c.Logger.Warnf("headSHA unavailable, cannot approve pending workflows: %v", err)
+    } else {
+        approveGitHubActionsWorkflowRuns(c, org, repo, pr.Head.Ref, headSHA)
+    }
+}</code></pre>
+
+<p><strong>Synchronize handler (missing approval)</strong> &mdash; <code>pkg/plugins/trigger/pull-request.go:122-127</code>:</p>
+<pre><code>case github.PullRequestActionSynchronize:
+    var errs []error
+    if err := abortAllJobs(c, &pr.PullRequest); err != nil {
+        errs = append(errs, fmt.Errorf("failed to abort jobs: %w", err))
+    }
+    return utilerrors.NewAggregate(append(errs, buildAllIfTrusted(c, trigger, pr, baseSHA, presubmits)))</code></pre>
+
+<p><strong>Label handler (missing approval)</strong> &mdash; <code>pkg/plugins/trigger/pull-request.go:139-151</code>:</p>
+<pre><code>if pr.Label.Name == labels.OkToTest {
+    botUserChecker, err := c.GitHubClient.BotUserChecker()
+    ...
+    return buildAllButDrafts(c, &pr.PullRequest, pr.GUID, baseSHA, presubmits)
+}</code></pre>
+
+<p><strong>Natural injection point</strong> &mdash; <code>pkg/plugins/trigger/pull-request.go:227-249</code>, <code>buildAllIfTrusted()</code>: already receives the <code>trigger</code> config (to check <code>TriggerGitHubWorkflows</code>) and determines trust. Adding a call to <code>approveGitHubActionsWorkflowRuns()</code> here covers synchronize, reopen, edit, and ready-for-review events.</p>
+
+<p><strong>Approval helper</strong> &mdash; <code>pkg/plugins/trigger/generic-comment.go:301-337</code>: lists pending runs via <code>GetPendingApprovalActionRuns()</code> and approves each in a goroutine. Handles 404 (already approved) and 403 (permission denied) gracefully.</p>
+
+<p><strong>Config flag</strong> &mdash; <code>pkg/plugins/config.go:545-546</code>: <code>TriggerGitHubWorkflows bool</code> (<code>trigger_github_workflows</code> in JSON). Feature is opt-in.</p>
+
+<h3>Related issues / PRs</h3>
+
+<ul>
+  <li><a href="https://github.com/kubernetes-sigs/prow/pull/612">kubernetes-sigs/prow#612</a> &mdash; Initial implementation. Merged 2026-02-06. Only wired approval to the <code>/ok-to-test</code> comment path.</li>
+  <li><a href="https://github.com/kubernetes/test-infra/issues/25210">kubernetes/test-infra#25210</a> &mdash; Original feature request before repo migration.</li>
+</ul>
+
+<h2>What I checked</h2>
+
+<ul>
+  <li>Push event handler (<code>pkg/plugins/trigger/push.go</code>) &mdash; not relevant; handles postsubmit jobs on branch pushes, not PR synchronize events.</li>
+  <li><code>TriggerGitHubWorkflows</code> config flag &mdash; correctly gates the feature; the fix must respect it.</li>
+  <li><code>approveGitHubActionsWorkflowRuns()</code> error handling &mdash; handles 404 and 403 gracefully; safe to call from multiple code paths without risk of duplicate approval errors.</li>
+  <li>Slack thread referenced by @petr-muller (2026-05-13) &mdash; confirms GitHub requires individual per-run approval and PR #612 only did one-off approval on the initial comment.</li>
+</ul>
+
+<h2>Recommended next steps</h2>
+
+<ul>
+  <li>Reopen issue #194 with a comment clarifying the remaining gap: workflow approval must fire on synchronize and label events, not only on the <code>/ok-to-test</code> comment.</li>
+  <li>Wire <code>approveGitHubActionsWorkflowRuns()</code> into <code>buildAllIfTrusted()</code> (covers synchronize, reopen, edit, ready-for-review) and the <code>ok-to-test</code> label handler in <code>pull-request.go</code>.</li>
+  <li>Decide whether to assign @AaruniAggarwal (PR #612 author) or open for other contributors. Effort level 2 (moderate).</li>
+  <li>Investigate timing: <code>GetPendingApprovalActionRuns()</code> may return empty if called before GitHub has created the workflow runs after a push.</li>
+</ul>
+
+<h2>Open questions</h2>
+
+<ul>
+  <li>Should there be a retry/delay mechanism for workflow approval after push events, given that GitHub may not create workflow runs immediately?</li>
+  <li>Does <code>GetPendingApprovalActionRuns()</code> need to handle <code>pull_request_target</code> events differently from <code>pull_request</code> events for the push case?</li>
+  <li>Should the issue be reopened or should a new, more specific follow-up issue be filed?</li>
+</ul>
+
+</body>
+</html>

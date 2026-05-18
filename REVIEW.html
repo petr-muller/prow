@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: kubernetes-sigs/prow#714</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+    background: #0d1117; color: #e6edf3; line-height: 1.65;
+    padding: 2.5rem 1.5rem; max-width: 860px; margin: 0 auto;
+  }
+  a { color: #58a6ff; text-decoration: none; }
+  a:hover { text-decoration: underline; }
+  code {
+    font-family: 'SF Mono', 'Fira Code', 'Cascadia Code', Consolas, monospace;
+    background: #1c2028; padding: 0.15em 0.4em; border-radius: 4px;
+    font-size: 0.85em; color: #39c5cf;
+  }
+  h1 { font-size: 1.35rem; margin-bottom: 0.15rem; }
+  h2 { font-size: 1.05rem; margin: 1.75rem 0 0.6rem; padding-bottom: 0.3rem; border-bottom: 1px solid #30363d; }
+  h3 { font-size: 0.92rem; margin: 1rem 0 0.4rem; }
+  p { margin: 0.4rem 0; }
+  ul { margin: 0.3rem 0 0.3rem 1.3rem; }
+  li { margin-bottom: 0.25rem; }
+
+  .meta { color: #8b949e; font-size: 0.82rem; margin-bottom: 1.5rem; padding-bottom: 1rem; border-bottom: 1px solid #30363d; }
+  .meta strong { color: #e6edf3; }
+
+  .verdict-box {
+    padding: 1rem 1.25rem; border-radius: 8px; margin-bottom: 1.5rem;
+    border: 1px solid #3fb95033; background: #3fb95010;
+  }
+  .verdict-box .label { font-weight: 700; font-size: 1rem; color: #3fb950; }
+  .verdict-box p { color: #8b949e; font-size: 0.88rem; margin-top: 0.4rem; }
+
+  .finding {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+    padding: 0.9rem 1.1rem; margin-bottom: 0.65rem;
+  }
+  .finding-head { display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.35rem; }
+  .sev {
+    font-size: 0.65rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    padding: 0.15em 0.55em; border-radius: 4px;
+  }
+  .sev-should-fix { background: #d29922; color: #000; }
+  .sev-nit { background: #30363d; color: #8b949e; }
+  .sev-question { background: #1f6feb33; color: #58a6ff; }
+  .finding-title { font-weight: 600; font-size: 0.9rem; }
+  .finding .loc { display: block; margin: 0.2rem 0; }
+  .finding .desc { color: #8b949e; font-size: 0.85rem; }
+
+  .checked-list li { color: #8b949e; font-size: 0.85rem; }
+
+  footer { margin-top: 2rem; padding-top: 1rem; border-top: 1px solid #30363d; color: #484f58; font-size: 0.72rem; }
+</style>
+</head>
+<body>
+
+<!-- ── Header ── -->
+<h1>kubernetes-sigs/prow#714</h1>
+<div class="meta">
+  <strong>spyglass: validate bucket in ResolveSymlink to prevent SSRF</strong><br>
+  <a href="https://github.com/kubernetes-sigs/prow/pull/714">github.com/kubernetes-sigs/prow/pull/714</a>
+  &middot; author: danscofield (first-time contributor)
+  &middot; base: <code>main</code>
+  &middot; +4 / &minus;0 &middot; 1 file<br>
+  head: <code>11bcd0f3212c5554dee5383ac9a7ff9d7bd43a58</code><br>
+  reviewed: 2026-05-18T00:32:34Z
+</div>
+
+<!-- ── Verdict ── -->
+<div class="verdict-box">
+  <span class="label">Approve with suggestions</span>
+  <p>
+    The fix is correct: it adds <code>ValidateStorageBucket</code> at exactly the right point in
+    <code>ResolveSymlink</code> &mdash; after alias resolution, before <code>opener.Reader()</code>.
+    It uses the same validation function already enforced in <code>StorageArtifactFetcher</code>,
+    and is gated by the existing <code>SkipStoragePathValidation</code> opt-in flag, so default
+    installations see zero behavioral change. Two follow-ups are needed (test coverage and a
+    minor accessor inconsistency) but neither blocks merge of a security fix with no deployment risk.
+  </p>
+</div>
+
+<!-- ── What this PR does ── -->
+<h2>What this PR does</h2>
+<ul>
+  <li>Closes a confused-deputy / SSRF in Deck's Spyglass: <code>ResolveSymlink</code> was the only
+      code path that called <code>opener.Reader()</code> on a user-controlled storage key without
+      first checking the bucket against the allowlist.</li>
+  <li>Inserts a 4-line guard that extracts the bucket from the key (post-alias-resolution) and
+      calls <code>sg.cfg().ValidateStorageBucket(bucket)</code>; returns a descriptive error on
+      mismatch.</li>
+  <li>Only affects deployments that have opted into storage path validation
+      (<code>SkipStoragePathValidation: false</code>). Default behaviour is unchanged.</li>
+  <li>Originally reported as <code>kubernetes/test-infra#27333</code>; the earlier fix
+      (<code>test-infra#27249</code>) missed this code path.</li>
+</ul>
+
+<!-- ── Findings ── -->
+<h2>Findings</h2>
+
+<!-- should-fix: test coverage -->
+<div class="finding">
+  <div class="finding-head">
+    <span class="sev sev-should-fix">Should fix</span>
+    <span class="finding-title">No test exercises the new validation</span>
+  </div>
+  <span class="loc"><code>pkg/spyglass/spyglass_test.go:1504-1513</code></span>
+  <p class="desc">
+    <code>TestResolveSymlink</code> builds its config without setting
+    <code>SkipStoragePathValidation</code> or <code>AllKnownStorageBuckets</code>. Since
+    <code>SkipStoragePathValidation</code> defaults to <code>nil</code>,
+    <code>shouldValidateStorageBuckets()</code> returns <code>false</code> and the new check is
+    a no-op in every existing test case. The security fix has zero regression protection.
+    Add at least: (1) a case with validation enabled + disallowed bucket &rarr; expect error,
+    (2) a case with validation enabled + allowed bucket &rarr; expect success.
+  </p>
+</div>
+
+<!-- nit: cfg vs config -->
+<div class="finding">
+  <div class="finding-head">
+    <span class="sev sev-nit">Nit</span>
+    <span class="finding-title"><code>sg.cfg()</code> vs <code>sg.config()</code> inconsistency</span>
+  </div>
+  <span class="loc"><code>pkg/spyglass/spyglass.go:195</code></span>
+  <p class="desc">
+    The new line uses <code>sg.cfg()</code>, which is promoted from the embedded
+    <code>*StorageArtifactFetcher</code> (its own <code>cfg</code> field, line 45 of the fetcher).
+    Every other method on <code>Spyglass</code> in this file uses <code>sg.config()</code> (the
+    direct field at line 61). Both are initialised from the same <code>cfg</code> parameter in
+    <code>New()</code>, so they return the same value &mdash; but a future reader of
+    <code>spyglass.go</code> would reasonably wonder whether they differ. Change to
+    <code>sg.config()</code>.
+  </p>
+</div>
+
+<!-- question: HTTP status -->
+<div class="finding">
+  <div class="finding-head">
+    <span class="sev sev-question">Question</span>
+    <span class="finding-title">Rejected requests surface as HTTP 500, not 400</span>
+  </div>
+  <span class="loc"><code>cmd/deck/main.go</code> (renderSpyglass &rarr; httpStatusForError)</span>
+  <p class="desc">
+    The error from <code>ResolveSymlink</code> is wrapped by <code>renderSpyglass</code> in a
+    plain <code>fmt.Errorf</code>. <code>httpStatusForError</code> looks for an
+    <code>httpError</code> wrapper and falls back to 500 when it doesn't find one. The existing
+    <code>validateStoragePath</code> in the same file wraps bucket-validation errors in
+    <code>httpError{statusCode: http.StatusBadRequest}</code>, so those return 400. Should the
+    author address this here, or is it acceptable as a follow-up?
+  </p>
+</div>
+
+<!-- ── Checked ── -->
+<h2>Things I checked and was fine with</h2>
+<ul class="checked-list">
+  <li>Placement: validation is after <code>BucketAliases</code> resolution (line 191-192) and
+      before <code>opener.Reader()</code> (line 198). No I/O for disallowed buckets.</li>
+  <li>Bucket extraction via <code>strings.Split(key, "/")[0]</code> mirrors the alias extraction
+      on line 190 and is correct for the <code>bucket/path...</code> key format here.</li>
+  <li>Double alias resolution (explicit on line 192, then inside <code>ValidateStorageBucket</code>
+      at config.go:1334) is idempotent and harmless &mdash; matches the pattern in
+      <code>StorageArtifactFetcher.parseStorageURL</code>.</li>
+  <li>Error wrapping uses <code>%w</code>, message is actionable and includes the bucket name.</li>
+  <li>No deployment risk for default installations: validation is gated by
+      <code>SkipStoragePathValidation</code>, which defaults to nil (validation off).</li>
+  <li><code>ResolveSymlink</code> was the only unguarded path to <code>opener.Reader()</code> in
+      the spyglass package; <code>StorageArtifactFetcher</code> already validates at line 82.</li>
+  <li>Change is safely rollbackable, no config migration needed.</li>
+</ul>
+
+<!-- ── Open questions ── -->
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Could you add a test case to <code>TestResolveSymlink</code> that enables bucket validation
+      (set <code>SkipStoragePathValidation</code> to <code>ptr(false)</code>, populate
+      <code>AllKnownStorageBuckets</code>) and verifies a disallowed bucket is rejected? The
+      existing tests run with validation off, so the new guard is never exercised.</li>
+  <li>Line 195 uses <code>sg.cfg()</code> (from the embedded fetcher) while the rest of this file
+      uses <code>sg.config()</code>. Both return the same config, but for consistency could you
+      switch to <code>sg.config()</code>?</li>
+  <li>The error surfaces as HTTP 500 because <code>renderSpyglass</code> doesn't wrap it as an
+      <code>httpError</code>. The parallel check in <code>validateStoragePath</code> returns 400.
+      Is this something you'd want to address here, or as a follow-up?</li>
+</ul>
+
+<footer>
+  kubernetes-sigs/prow#714 &middot; head 11bcd0f3 &middot; reviewed 2026-05-18T00:32:34Z &middot; base main
+</footer>
+
+</body>
+</html>

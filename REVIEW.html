@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: kubernetes-sigs/prow#722</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; color: #24292e; max-width: 860px; margin: 40px auto; padding: 0 20px; }
+  h1 { font-size: 1.4em; border-bottom: 2px solid #e1e4e8; padding-bottom: 8px; }
+  h2 { font-size: 1.1em; margin-top: 2em; border-bottom: 1px solid #e1e4e8; padding-bottom: 4px; }
+  h3 { font-size: 1em; margin-top: 1.4em; margin-bottom: 0.2em; }
+  code, pre { font-family: "SFMono-Regular", Consolas, monospace; font-size: 0.88em; background: #f6f8fa; border-radius: 4px; }
+  code { padding: 2px 5px; }
+  pre { padding: 12px 16px; overflow-x: auto; border: 1px solid #e1e4e8; }
+  .meta { background: #f6f8fa; border: 1px solid #e1e4e8; border-radius: 6px; padding: 12px 16px; font-size: 0.9em; margin-bottom: 1.5em; }
+  .meta a { color: #0366d6; text-decoration: none; }
+  .meta a:hover { text-decoration: underline; }
+  .verdict-box { border-left: 4px solid #28a745; background: #f0fff4; padding: 10px 16px; border-radius: 0 4px 4px 0; margin: 1em 0; }
+  .badge { display: inline-block; padding: 2px 8px; border-radius: 12px; font-size: 0.8em; font-weight: 600; margin-right: 6px; }
+  .blocking { background: #ffeef0; color: #b31d28; border: 1px solid #f97583; }
+  .should-fix { background: #fff8c5; color: #735c0f; border: 1px solid #f9c513; }
+  .nit { background: #f1f8ff; color: #0366d6; border: 1px solid #79b8ff; }
+  .question { background: #f3f0ff; color: #6f42c1; border: 1px solid #b392f0; }
+  .ok { background: #f0fff4; color: #176f2c; border: 1px solid #34d058; }
+  ul { padding-left: 1.4em; }
+  li { margin: 0.3em 0; }
+  .finding { margin: 1em 0 1.5em 0; padding: 10px 14px; border: 1px solid #e1e4e8; border-radius: 6px; }
+  .finding p { margin: 0.4em 0 0 0; }
+</style>
+</head>
+<body>
+
+<div class="meta">
+  <strong>PR:</strong> <a href="https://github.com/kubernetes-sigs/prow/pull/722">kubernetes-sigs/prow#722</a><br>
+  <strong>Title:</strong> chore: upgrade github.com/golang-jwt/jwt to v5<br>
+  <strong>Author:</strong> chimanjain (Chiman Jain)<br>
+  <strong>Head SHA:</strong> <code>d1e585e80caa4e55ac8eebe11ca81dee87cfe61d</code><br>
+  <strong>Base:</strong> main<br>
+  <strong>Reviewed at:</strong> 2026-05-18T15:57:18Z
+</div>
+
+<h1>Review: kubernetes-sigs/prow#722</h1>
+
+<h2>Verdict</h2>
+<div class="verdict-box">
+  <strong>APPROVE</strong> — This is a clean, minimal, correct library upgrade. The API surface used in Prow is unchanged between v4 and v5, the migration is complete with no stale imports, and all CI checks pass. Confirm the image build test (pending at review time) lands green before merging.
+</div>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Upgrades <code>github.com/golang-jwt/jwt</code> from <strong>v4 → v5</strong> (module path change: <code>jwt/v4</code> → <code>jwt/v5</code>).</li>
+  <li>Updates import paths in three files: <code>pkg/github/app_auth_roundtripper.go</code>, <code>pkg/flagutil/github.go</code>, <code>pkg/clonerefs/run.go</code>.</li>
+  <li>Reclassifies <code>aws-sdk-go</code> v1 from direct to indirect in <code>go.mod</code> — a side effect of <code>go mod tidy</code>, and correct since no Prow source directly imports it.</li>
+  <li>Keeps <code>jwt/v4</code> as an <code>// indirect</code> dependency because something deeper in the transitive graph still requires it (expected; the two module paths coexist harmlessly).</li>
+</ul>
+
+<h2>Findings</h2>
+
+<div class="finding">
+  <span class="badge question">question</span> <strong>Image build test was pending at review time</strong><br>
+  <code>CI</code>
+  <p><code>pull-prow-image-build-test</code> was in <em>pending</em> state when this review was written. Confirm it lands green before approving merge — the other checks (unit tests, integration, lint) all pass.</p>
+</div>
+
+<p><em>No blocking issues. No should-fix issues. No nits.</em></p>
+
+<h2>Things I checked and was fine with</h2>
+<ul>
+  <li>All three jwt import sites updated; grep confirms zero remaining <code>jwt/v4</code> imports across all Go files.</li>
+  <li>API surface used by Prow — <code>ParseRSAPrivateKeyFromPEM</code>, <code>NewWithClaims</code>, <code>SigningMethodRS256</code>, <code>RegisteredClaims</code>, <code>NewNumericDate</code> — is unchanged between v4 and v5.</li>
+  <li>Code only <em>signs</em> tokens, never parses them. The larger v4→v5 breaking changes (Claims interface restructuring, <code>Valid() error</code> removal, <code>Audience</code> type change to <code>ClaimStrings</code>) do not touch any call site here.</li>
+  <li><code>aws-sdk-go</code> v1 has no direct imports in Prow source; reclassification to indirect is accurate.</li>
+  <li><code>jwt/v4</code> remaining as an indirect dep is expected and harmless — separate module path, no version conflict.</li>
+  <li>Unit tests, integration tests, and lint all pass.</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Is the image build test (<code>pull-prow-image-build-test</code>) green now? Everything else looks good to go.</li>
+</ul>
+
+</body>
+</html>

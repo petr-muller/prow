@@ -1,7 +1,19 @@
+---
+issue: kubernetes-sigs/prow#572
+state: closed
+labels: area/hook,area/plugins,kind/feature,lifecycle/rotten
+triaged_at: 2026-05-18T15:30:00Z
+main_sha: 8db280f94
+verdict: legitimate
+refresh_log:
+  - at: 2026-04-23T00:00:00Z
+    summary: Initial triage completed; issue was open with lifecycle/rotten
+---
+
 # Triage for Issue #572
 
 **Issue:** [#572 - Suggest similar commands when users type non-existent commands](https://github.com/kubernetes-sigs/prow/issues/572)
-**Status:** In Progress
+**Status:** CLOSED (not-planned) — auto-closed 2026-05-18
 **Created:** 2026-04-21
 **Assessment:** LEGITIMATE
 **Effort Level:** 3 - Large (requires expertise)
@@ -188,11 +200,21 @@ The plugin `pkg/plugins/releasenote/releasenote.go` and its interaction with `la
 
 The proposed comment is documented above in "Proposed Issue Augmentation" for future reference.
 
+## Since Previous Triage (2026-04-23 → 2026-05-18)
+
+- **2026-05-18:** `k8s-triage-robot` closed the issue as "not-planned" via `/close not-planned` after the 30-day lifecycle/rotten inactivity timer expired.
+- **2026-05-18:** `k8s-ci-robot` confirmed closure.
+- No human comments, no new cross-references, no linked PRs.
+
+The augmentation comment (which would have applied `/lifecycle frozen`) was never posted, so the bot's auto-close proceeded as expected given the lifecycle/rotten label that had been on the issue since 2026-04-18.
+
 ## Next Steps
 
-- Triage document preserved in branch [572-triage](https://github.com/petr-muller/prow/blob/572-triage/ISSUE-TRIAGE.md)
-- Comment can be posted manually later if desired
-- Issue remains in current state (lifecycle/rotten)
+The triage analysis remains valid — this is a legitimate Level 3 feature request. The closure was bot-driven due to inactivity, not a maintainer decision. Options:
+
+1. **Reopen and apply labels:** Reopen the issue with `/reopen`, post the prepared augmentation comment (applying `/lifecycle frozen` and `/priority important-longterm`) to prevent further auto-close. Suitable if the feature is worth keeping alive for an experienced contributor.
+2. **Accept the closure:** Leave closed as "not-planned" if the implementation effort doesn't justify the benefit in the current contributor pool. The triage document captures the architectural analysis for future reference.
+3. **Split into Phase 1:** Open a new, narrower issue for the shared fuzzy matching utility (Approach 4, Level 2 effort), which could attract a help-wanted contributor without requiring architectural expertise.
 
 ---
 

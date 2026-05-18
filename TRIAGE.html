@@ -59,6 +59,7 @@
         }
         .status-legitimate { background: #dcffe4; color: #0e6f36; }
         .status-level-3 { background: #fff8c5; color: #735c0f; }
+        .status-closed { background: #ffeef0; color: #86181d; }
         .code-ref {
             font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
             background: #f6f8fa;
@@ -151,8 +152,9 @@
 
         <div class="meta">
             <strong>Issue:</strong> <a href="https://github.com/kubernetes-sigs/prow/issues/572">#572 - Suggest similar commands when users type non-existent commands</a><br>
-            <strong>Status:</strong> In Progress<span class="status-badge status-legitimate">LEGITIMATE</span><br>
-            <strong>Created:</strong> 2026-04-21<br>
+            <strong>Status:</strong> <span class="status-badge status-closed">CLOSED not-planned</span> auto-closed 2026-05-18<br>
+            <strong>Assessment:</strong> <span class="status-badge status-legitimate">LEGITIMATE</span><br>
+            <strong>Created:</strong> 2026-04-21 · <strong>Last refresh:</strong> 2026-05-18<br>
             <strong>Effort Level:</strong> <span class="status-badge status-level-3">Level 3 - Large (requires expertise)</span><br>
             <strong>Triage Branch:</strong> <a href="https://github.com/petr-muller/prow/blob/572-triage/ISSUE-TRIAGE.md">572-triage</a>
         </div>
@@ -400,12 +402,21 @@
             <p>The proposed comment is documented above in "Proposed Issue Augmentation" section for future reference.</p>
         </div>
 
+        <h2>Since Previous Triage (2026-04-23 → 2026-05-18)</h2>
+        <div class="meta" style="border-left: 4px solid #d73a49;">
+            <p><strong>2026-05-18:</strong> <code>k8s-triage-robot</code> closed the issue as "not-planned" via <code>/close not-planned</code> after the 30-day lifecycle/rotten inactivity timer expired.</p>
+            <p><strong>2026-05-18:</strong> <code>k8s-ci-robot</code> confirmed closure.</p>
+            <p>No human comments, no new cross-references, no linked PRs.</p>
+            <p>The augmentation comment (which would have applied <code>/lifecycle frozen</code>) was never posted, so the bot's auto-close proceeded as expected given the lifecycle/rotten label applied on 2026-04-18.</p>
+        </div>
+
         <h2>Next Steps</h2>
-        <ul>
-            <li>Triage document preserved in branch <a href="https://github.com/petr-muller/prow/blob/572-triage/ISSUE-TRIAGE.md">572-triage</a></li>
-            <li>Comment can be posted manually later if desired</li>
-            <li>Issue remains in current state (lifecycle/rotten)</li>
-        </ul>
+        <p>The triage analysis remains valid — this is a legitimate Level 3 feature request. The closure was bot-driven due to inactivity, not a maintainer decision.</p>
+        <ol>
+            <li><strong>Reopen and apply labels:</strong> Reopen with <code>/reopen</code>, post the prepared augmentation comment (applying <code>/lifecycle frozen</code> and <code>/priority important-longterm</code>). Suitable if the feature is worth keeping alive for an experienced contributor.</li>
+            <li><strong>Accept the closure:</strong> Leave closed as "not-planned" if the implementation effort doesn't justify the benefit in the current contributor pool. The triage document captures the architectural analysis for future reference.</li>
+            <li><strong>Split into Phase 1:</strong> Open a new, narrower issue for the shared fuzzy matching utility (Approach 4, Level 2 effort), which could attract a help-wanted contributor without requiring architectural expertise.</li>
+        </ol>
 
         <hr style="margin: 40px 0; border: none; border-top: 1px solid #e1e4e8;">
         <p style="color: #586069; font-size: 14px; text-align: center;">

@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Triage for Issue #572</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
+            line-height: 1.6;
+            color: #24292e;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background: #f6f8fa;
+        }
+        .container {
+            background: white;
+            padding: 40px;
+            border-radius: 6px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.12);
+        }
+        h1 {
+            color: #0366d6;
+            border-bottom: 3px solid #0366d6;
+            padding-bottom: 10px;
+            margin-top: 0;
+        }
+        h2 {
+            color: #24292e;
+            border-bottom: 1px solid #e1e4e8;
+            padding-bottom: 8px;
+            margin-top: 30px;
+        }
+        h3 {
+            color: #0366d6;
+            margin-top: 20px;
+        }
+        h4 {
+            color: #586069;
+            margin-top: 15px;
+        }
+        .meta {
+            background: #f6f8fa;
+            padding: 15px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .meta strong {
+            color: #0366d6;
+        }
+        .status-badge {
+            display: inline-block;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            font-weight: 600;
+            margin-left: 10px;
+        }
+        .status-legitimate { background: #dcffe4; color: #0e6f36; }
+        .status-level-3 { background: #fff8c5; color: #735c0f; }
+        .code-ref {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            background: #f6f8fa;
+            padding: 2px 6px;
+            border-radius: 3px;
+            font-size: 85%;
+            color: #d73a49;
+        }
+        pre {
+            background: #f6f8fa;
+            padding: 16px;
+            border-radius: 6px;
+            overflow-x: auto;
+            border: 1px solid #e1e4e8;
+        }
+        code {
+            font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
+            font-size: 85%;
+        }
+        ul, ol {
+            padding-left: 30px;
+        }
+        li {
+            margin: 5px 0;
+        }
+        .approach {
+            background: #f6f8fa;
+            padding: 20px;
+            margin: 15px 0;
+            border-radius: 6px;
+            border-left: 4px solid #0366d6;
+        }
+        .pros {
+            color: #0e6f36;
+        }
+        .cons {
+            color: #d73a49;
+        }
+        .recommendation {
+            background: #e6f3ff;
+            padding: 20px;
+            border-radius: 6px;
+            border-left: 4px solid #0366d6;
+            margin: 20px 0;
+        }
+        .comment-box {
+            background: #fffbdd;
+            padding: 20px;
+            border-radius: 6px;
+            border: 1px solid #e1c470;
+            margin: 20px 0;
+        }
+        .factor-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin: 15px 0;
+        }
+        .factor-table th {
+            background: #f6f8fa;
+            padding: 10px;
+            text-align: left;
+            border: 1px solid #e1e4e8;
+        }
+        .factor-table td {
+            padding: 10px;
+            border: 1px solid #e1e4e8;
+        }
+        a {
+            color: #0366d6;
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        .toc {
+            background: #f6f8fa;
+            padding: 20px;
+            border-radius: 6px;
+            margin: 20px 0;
+        }
+        .toc a {
+            display: block;
+            padding: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Triage for Issue #572</h1>
+
+        <div class="meta">
+            <strong>Issue:</strong> <a href="https://github.com/kubernetes-sigs/prow/issues/572">#572 - Suggest similar commands when users type non-existent commands</a><br>
+            <strong>Status:</strong> In Progress<span class="status-badge status-legitimate">LEGITIMATE</span><br>
+            <strong>Created:</strong> 2026-04-21<br>
+            <strong>Effort Level:</strong> <span class="status-badge status-level-3">Level 3 - Large (requires expertise)</span><br>
+            <strong>Triage Branch:</strong> <a href="https://github.com/petr-muller/prow/blob/572-triage/ISSUE-TRIAGE.md">572-triage</a>
+        </div>
+
+        <div class="toc">
+            <h3>Table of Contents</h3>
+            <a href="#initial">Initial Validation</a>
+            <a href="#research">Code Research</a>
+            <a href="#effort">Effort Assessment</a>
+            <a href="#augmentation">Proposed Issue Augmentation</a>
+            <a href="#briefing">Briefing Completed</a>
+        </div>
+
+        <h2 id="initial">Initial Validation</h2>
+
+        <div class="recommendation">
+            <strong>Assessment:</strong> LEGITIMATE<br>
+            <strong>Category:</strong> Feature Request
+        </div>
+
+        <h3>Repository Scope Check</h3>
+        <ul>
+            <li><strong>Components mentioned:</strong> hook, plugins (specifically label and releasenote plugins)</li>
+            <li><strong>Exists in this repo:</strong> Yes</li>
+            <li><strong>Relevant code paths:</strong> prow/cmd/hook/, prow/plugins/</li>
+        </ul>
+
+        <h3>Analysis</h3>
+        <p>This is a well-articulated feature request to improve Prow's user experience by suggesting similar commands when users make typos. The issue demonstrates a real UX problem: new contributors who type <code>/label release-note-none</code> (incorrect) receive a confusing error message listing available labels, when they should have typed <code>/release-note-none</code> (correct command).</p>
+
+        <p>The issue has already been triaged by maintainer @petr-muller who:</p>
+        <ul>
+            <li>Applied appropriate labels (area/hook, area/plugins, kind/feature)</li>
+            <li>Acknowledged the value of the feature</li>
+            <li>Explained architectural challenges: hook dispatches to plugins without parsing commands, and plugins don't know about each other's commands</li>
+            <li>Suggested a significant restructuring would be needed for proper implementation</li>
+            <li>Decided to keep it open to gather interest and ideas</li>
+        </ul>
+
+        <h2 id="research">Code Research</h2>
+
+        <h3>Primary Components</h3>
+        <ul>
+            <li><span class="code-ref">pkg/hook/server.go</span> - Receives GitHub webhooks and dispatches to plugins</li>
+            <li><span class="code-ref">pkg/hook/events.go:357-378</span> - Launches plugin handlers in parallel goroutines</li>
+            <li><span class="code-ref">pkg/plugins/plugins.go</span> - Global registries for handlers and help providers</li>
+            <li><span class="code-ref">pkg/pluginhelp/pluginhelp.go</span> - Command and PluginHelp struct definitions</li>
+            <li><span class="code-ref">pkg/plugins/label/label.go</span> - Example plugin handling <code>/label</code> commands</li>
+            <li><span class="code-ref">pkg/plugins/releasenote/releasenote.go</span> - Handles <code>/release-note-none</code> commands</li>
+        </ul>
+
+        <h3>Architecture Overview</h3>
+        <p>Prow's hook component follows a simple dispatcher-handler pattern:</p>
+        <ol>
+            <li>Hook receives GitHub webhook events (comments, issues, PRs, etc.)</li>
+            <li>Hook deserializes JSON into typed event structs (GenericCommentEvent, etc.)</li>
+            <li>Hook determines which plugins are enabled for the org/repo</li>
+            <li>Hook spawns <strong>parallel goroutines</strong>, one per plugin, passing the full event</li>
+            <li>Each plugin independently parses the comment body using its own regex patterns</li>
+            <li>Plugins execute their logic and respond to GitHub</li>
+        </ol>
+
+        <h3>Critical Architectural Constraints</h3>
+        <ul>
+            <li>Hook does NOT parse commands - it only routes events</li>
+            <li>Hook does NOT know about plugin commands during dispatch</li>
+            <li>Plugins are completely independent - they don't know about each other</li>
+            <li>Each plugin defines its own regex patterns for command matching</li>
+        </ul>
+
+        <h3>Root Cause Analysis</h3>
+        <p><strong>Why the requested feature doesn't exist:</strong></p>
+        <p>The current architecture was designed for <strong>plugin independence and simplicity</strong>:</p>
+        <ul>
+            <li>Hook acts as a dumb dispatcher - minimal logic, just routing</li>
+            <li>Each plugin is self-contained - easier to develop and test</li>
+            <li>No shared command parsing - plugins have full control over their syntax</li>
+            <li>No cross-plugin coordination - simpler, no deadlocks or ordering issues</li>
+        </ul>
+
+        <h3>Proposed Solutions</h3>
+
+        <div class="approach">
+            <h4>Approach 1: Plugin-Level Suggestions (Partial Solution)</h4>
+            <p><strong>Description:</strong> Each plugin suggests similar commands from its own command set when it detects an error.</p>
+            <p class="pros"><strong>Pros:</strong></p>
+            <ul class="pros">
+                <li>Minimal architectural changes</li>
+                <li>Can be implemented incrementally, one plugin at a time</li>
+                <li>Still provides value for common typos within a plugin's domain</li>
+            </ul>
+            <p class="cons"><strong>Cons:</strong></p>
+            <ul class="cons">
+                <li>Doesn't solve cross-plugin confusion</li>
+                <li>Requires modifying every plugin individually</li>
+                <li>Limited scope of suggestions</li>
+            </ul>
+            <p><strong>Complexity:</strong> Low-Medium</p>
+        </div>
+
+        <div class="approach">
+            <h4>Approach 2: Centralized Command Registry with Hook-Level Suggestions</h4>
+            <p><strong>Description:</strong> Build a centralized command registry that hook can access during dispatch. When all plugins finish and none took action, hook analyzes the comment for potential commands and suggests similar ones.</p>
+            <p class="pros"><strong>Pros:</strong></p>
+            <ul class="pros">
+                <li>Provides cross-plugin suggestions</li>
+                <li>Centralized logic - easier to maintain</li>
+                <li>Comprehensive solution to the problem</li>
+            </ul>
+            <p class="cons"><strong>Cons:</strong></p>
+            <ul class="cons">
+                <li>Requires significant architectural refactoring</li>
+                <li>Hook becomes more complex</li>
+                <li>Need coordination mechanism for "did any plugin handle this?"</li>
+            </ul>
+            <p><strong>Complexity:</strong> High</p>
+        </div>
+
+        <div class="approach">
+            <h4>Approach 4: Minimal Hybrid - Shared Fuzzy Matching Utility</h4>
+            <p><strong>Description:</strong> Provide a shared string distance utility package that plugins can optionally use to enhance their error messages.</p>
+            <p class="pros"><strong>Pros:</strong></p>
+            <ul class="pros">
+                <li>Minimal changes - no architectural refactoring</li>
+                <li>Opt-in: plugins can adopt at their own pace</li>
+                <li>Reusable utility benefits all plugins</li>
+            </ul>
+            <p class="cons"><strong>Cons:</strong></p>
+            <ul class="cons">
+                <li>Doesn't solve cross-plugin confusion</li>
+                <li>Inconsistent adoption</li>
+            </ul>
+            <p><strong>Complexity:</strong> Low</p>
+        </div>
+
+        <div class="recommendation">
+            <h4>Recommended Approach</h4>
+            <p><strong>Approach 2 (Centralized Command Registry) with Approach 4 (Shared Utility) as a first step</strong></p>
+            <p><strong>Incremental path:</strong></p>
+            <ol>
+                <li><strong>Phase 1:</strong> Implement Approach 4 (shared utility) to provide quick wins for intra-plugin suggestions</li>
+                <li><strong>Phase 2:</strong> Implement Approach 2 (command registry) for cross-plugin suggestions</li>
+            </ol>
+            <p>This allows delivering value incrementally while working toward the full solution.</p>
+        </div>
+
+        <h2 id="effort">Effort Assessment</h2>
+
+        <div class="recommendation">
+            <p><strong>Effort Level: 3 - Large (requires expertise)</strong></p>
+            <p><em>Note: An incremental partial solution (Approach 4: Shared Utility) would be Level 2.</em></p>
+        </div>
+
+        <h3>Factor Analysis</h3>
+        <table class="factor-table">
+            <thead>
+                <tr>
+                    <th>Factor</th>
+                    <th>Assessment</th>
+                    <th>Level Indication</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><strong>Scope of Changes</strong></td>
+                    <td>Moderate-Large: ~5-10 files, 200-400 LOC</td>
+                    <td>2-3</td>
+                </tr>
+                <tr>
+                    <td><strong>Complexity</strong></td>
+                    <td>Moderate-High: Command registry design, coordination</td>
+                    <td>2-3</td>
+                </tr>
+                <tr>
+                    <td><strong>Required Expertise</strong></td>
+                    <td>Moderate-Deep: Hook/plugin architecture understanding</td>
+                    <td>2-3</td>
+                </tr>
+                <tr>
+                    <td><strong>Clarity and Certainty</strong></td>
+                    <td>Well-defined with some implementation uncertainty</td>
+                    <td>2-3</td>
+                </tr>
+                <tr>
+                    <td><strong>Testing Requirements</strong></td>
+                    <td>Moderate: Unit and integration tests needed</td>
+                    <td>2-3</td>
+                </tr>
+                <tr>
+                    <td><strong>Backwards Compatibility</strong></td>
+                    <td>Fully compatible: Additive only</td>
+                    <td>1-2</td>
+                </tr>
+                <tr>
+                    <td><strong>Architectural Alignment</strong></td>
+                    <td>Good fit with new patterns required</td>
+                    <td>2-3</td>
+                </tr>
+                <tr>
+                    <td><strong>External Dependencies</strong></td>
+                    <td>None (minor library consideration)</td>
+                    <td>1-3</td>
+                </tr>
+            </tbody>
+        </table>
+
+        <h3>Recommended Labels</h3>
+        <ul>
+            <li>✓ <code>kind/feature</code> - Already applied, appropriate</li>
+            <li>✓ <code>area/hook</code> - Already applied, appropriate</li>
+            <li>✓ <code>area/plugins</code> - Already applied, appropriate</li>
+            <li>✗ <code>good-first-issue</code> - Not appropriate (requires architectural expertise)</li>
+            <li>? <code>help-wanted</code> - Could be applied if scope reduced to Approach 4 only</li>
+            <li>✓ <code>lifecycle/frozen</code> - Remove lifecycle/rotten, prevent auto-close</li>
+            <li>✓ <code>priority/important-longterm</code> - Improves contributor UX but not urgent</li>
+        </ul>
+
+        <h2 id="augmentation">Proposed Issue Augmentation</h2>
+
+        <h3>Title Change</h3>
+        <p><strong>No change needed:</strong> Current title "Suggest similar commands when users type non-existent commands" is clear and specific</p>
+
+        <h3>Proposed GitHub Comment</h3>
+        <div class="comment-box">
+            <h4>Architectural Context</h4>
+            <p>@petr-muller's assessment is correct - this requires rethinking the hook/plugin interface. Currently, hook operates as a pure dispatcher in <code>pkg/hook/events.go:357-378</code>: it receives comment events and launches all enabled plugins in parallel goroutines without parsing the comment body. Each plugin independently parses commands using its own regex patterns (e.g., <code>pkg/plugins/label/label.go:39-46</code> defines regex for <code>/label</code>, <code>/area</code>, etc.). Critically, the <code>PluginHelp</code> structure with command information (<code>pkg/pluginhelp/pluginhelp.go:22-36</code>) is only used for the <code>/plugin-help</code> HTTP endpoint, not during event dispatch.</p>
+
+            <h4>Incremental Implementation Path</h4>
+            <p>Rather than a full architectural refactoring, this could be tackled incrementally:</p>
+            <p><strong>Phase 1 (Moderate complexity):</strong> Create a shared fuzzy matching utility in <code>pkg/plugins/suggestion/</code> with Levenshtein distance calculation. Individual plugins could then enhance their error messages to suggest similar commands from their own command sets (e.g., <code>/aera</code> → "Did you mean <code>/area</code>?"). This solves many common typos without touching hook's architecture.</p>
+            <p><strong>Phase 2 (Requires expertise):</strong> Build a centralized command registry alongside existing HelpProviders. After all plugins finish processing, hook could check if any plugin took action (using the existing Agent.TookAction mechanism), and if not, extract potential commands from the comment and suggest similar ones using the registry. This enables cross-plugin suggestions like the <code>/label release-note-none</code> → <code>/release-note-none</code> example.</p>
+            <p>The plugin <code>pkg/plugins/releasenote/releasenote.go</code> and its interaction with <code>label</code> plugin demonstrates the cross-plugin confusion this would address.</p>
+            <p><code>/lifecycle frozen</code><br>
+            <code>/priority important-longterm</code></p>
+        </div>
+
+        <h2 id="briefing">Briefing Completed</h2>
+        <p><strong>Briefed maintainer on:</strong> 2026-04-23</p>
+        <p><strong>Key questions asked:</strong> No questions during briefing - maintainer followed full walkthrough</p>
+        <p><strong>Maintainer decision:</strong> Proceeding to wrapup phase</p>
+
+        <h2>Comment Not Posted</h2>
+        <div class="meta">
+            <p><strong>Decision:</strong> Maintainer chose not to post augmentation comment on 2026-04-23</p>
+            <p>The proposed comment is documented above in "Proposed Issue Augmentation" section for future reference.</p>
+        </div>
+
+        <h2>Next Steps</h2>
+        <ul>
+            <li>Triage document preserved in branch <a href="https://github.com/petr-muller/prow/blob/572-triage/ISSUE-TRIAGE.md">572-triage</a></li>
+            <li>Comment can be posted manually later if desired</li>
+            <li>Issue remains in current state (lifecycle/rotten)</li>
+        </ul>
+
+        <hr style="margin: 40px 0; border: none; border-top: 1px solid #e1e4e8;">
+        <p style="color: #586069; font-size: 14px; text-align: center;">
+            Generated by <a href="https://github.com/petr-muller/prow/blob/claude-maintenance-helpers/.claude/skills/maintenance-issue-triage/SKILL.md">Claude triage helper</a> •
+            Full triage: <a href="https://github.com/petr-muller/prow/blob/572-triage/ISSUE-TRIAGE.md">ISSUE-TRIAGE.md</a>
+        </p>
+    </div>
+</body>
+</html>

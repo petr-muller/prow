@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Review: kubernetes-sigs/prow#723</title>
+<style>
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+    line-height: 1.6;
+    max-width: 860px;
+    margin: 2rem auto;
+    padding: 0 1.5rem;
+    color: #1a1a1a;
+    background: #fff;
+  }
+  h1 { font-size: 1.4rem; border-bottom: 2px solid #333; padding-bottom: 0.4rem; }
+  h2 { font-size: 1.15rem; margin-top: 2rem; border-bottom: 1px solid #ddd; padding-bottom: 0.3rem; }
+  h3 { font-size: 1rem; margin-top: 1.4rem; }
+  code {
+    font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+    font-size: 0.88em;
+    background: #f4f4f4;
+    padding: 0.15em 0.35em;
+    border-radius: 3px;
+  }
+  pre {
+    background: #f6f8fa;
+    border: 1px solid #e1e4e8;
+    border-radius: 4px;
+    padding: 0.8rem 1rem;
+    overflow-x: auto;
+    font-size: 0.85em;
+    line-height: 1.5;
+  }
+  pre code { background: none; padding: 0; }
+  .header-block {
+    background: #f0f4f8;
+    border: 1px solid #d0d7de;
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    margin-bottom: 1.5rem;
+  }
+  .header-block p { margin: 0.2rem 0; }
+  .header-block a { color: #0969da; }
+  .verdict-block {
+    background: #dafbe1;
+    border-left: 4px solid #2da44e;
+    padding: 0.8rem 1rem;
+    margin: 1rem 0;
+    border-radius: 0 4px 4px 0;
+  }
+  .finding {
+    margin: 1rem 0;
+    padding: 0.6rem 0.8rem;
+    border-radius: 4px;
+  }
+  .finding-should-fix { background: #fff8c5; border-left: 3px solid #d4a72c; }
+  .finding-nit { background: #f6f8fa; border-left: 3px solid #8b949e; }
+  .finding-title { font-weight: 600; margin-bottom: 0.3rem; }
+  .finding-location { color: #57606a; font-size: 0.9em; margin-bottom: 0.4rem; }
+  .checked-list { columns: 2; column-gap: 2rem; }
+  .checked-list li { break-inside: avoid; margin-bottom: 0.3rem; }
+  ul { padding-left: 1.4rem; }
+  li { margin-bottom: 0.4rem; }
+</style>
+</head>
+<body>
+
+<h1>Review: kubernetes-sigs/prow#723</h1>
+
+<div class="header-block">
+  <p><strong>PR:</strong> <a href="https://github.com/kubernetes-sigs/prow/pull/723">kubernetes-sigs/prow#723</a></p>
+  <p><strong>Title:</strong> fix(clonerefs): fall back to full clone when sparse checkout fails</p>
+  <p><strong>Head SHA:</strong> <code>644f75be0c9cd7f6b685f16523e2f1a3cc32f093</code></p>
+  <p><strong>Base:</strong> main</p>
+  <p><strong>Reviewed:</strong> 2026-05-18T18:13:21Z</p>
+</div>
+
+<h2>Verdict</h2>
+
+<div class="verdict-block">
+  <strong>Approve</strong> &mdash; good to merge as-is or with the two suggested improvements below.
+</div>
+<p>
+  Clean, well-tested change that adds a generic fallback from sparse checkout to full clone when the sparse clone fails.
+  The <code>runClone</code> extraction is the right structural move, the retry orchestration in <code>Run()</code> is straightforward,
+  and the tests cover both the fallback and happy paths using real git repos. No critical issues, no deployment risk,
+  no configuration or API surface changes. Two "should-fix" items are worth the author's consideration but neither is blocking.
+</p>
+
+<h2>What this PR does</h2>
+<ul>
+  <li>Extracts the inner clone logic from <code>Run()</code> into a new <code>runClone()</code> function that returns a <code>Record</code>.</li>
+  <li>When a clone fails and sparse checkout was enabled, wipes the clone directory and retries with a full clone (no sparse checkout, no blobless filter).</li>
+  <li>Merges the command history from both the failed sparse attempt and the successful full clone into a single <code>Record</code> for debugging visibility.</li>
+  <li>Adds two integration tests: one that forces a sparse checkout failure via filesystem sabotage and verifies the fallback succeeds, and one that confirms the happy path still works.</li>
+</ul>
+
+<h2>Findings</h2>
+
+<h3>Should fix</h3>
+
+<div class="finding finding-should-fix">
+  <div class="finding-title">record.Refs reflects fallback refs, not original request</div>
+  <div class="finding-location"><code>pkg/pod-utils/clone/clone.go:75-88</code></div>
+  <p>
+    After fallback, <code>record = runClone(fullRefs, ...)</code> overwrites <code>record.Refs</code> with <code>fullRefs</code>,
+    which has <code>SparseCheckoutFiles: nil</code>. Any downstream consumer inspecting
+    <code>Record.Refs.SparseCheckoutFiles</code> will not know sparse checkout was originally requested.
+    The PR description explicitly calls out debugging visibility as a goal, so the record should reflect the original request.
+  </p>
+  <p>Fix: add <code>record.Refs = refs</code> after the fallback <code>runClone</code> call.</p>
+  <pre><code>record = runClone(fullRefs, dir, gitUserName, gitUserEmail, cookiePath, env, user, token)
+record.Commands = append(failedCommands, record.Commands...)
+// add: record.Refs = refs</code></pre>
+</div>
+
+<div class="finding finding-should-fix">
+  <div class="finding-title">os.RemoveAll failure proceeds into doomed retry</div>
+  <div class="finding-location"><code>pkg/pod-utils/clone/clone.go:81-83</code></div>
+  <p>
+    If <code>os.RemoveAll(cloneDir)</code> fails (e.g. permission denied), the code logs a warning but proceeds
+    to <code>runClone</code> into a dirty directory. The second attempt will almost certainly fail with a confusing,
+    unrelated error that obscures the real problem. Consider returning the original failed record when cleanup fails.
+  </p>
+  <pre><code>if err := os.RemoveAll(cloneDir); err != nil {
+    logrus.WithError(err).Warn("Failed to clean up clone directory for fallback")
+}</code></pre>
+</div>
+
+<h3>Nits</h3>
+
+<div class="finding finding-nit">
+  <div class="finding-title">Missing comment explaining why fallback exists</div>
+  <div class="finding-location"><code>pkg/pod-utils/clone/clone.go:77</code></div>
+  <p>
+    The code is clear about <em>what</em> it does but not <em>why</em>. A one-line comment noting the submodule/gitlink
+    edge case would save future maintainers from needing to find this PR.
+  </p>
+</div>
+
+<div class="finding finding-nit">
+  <div class="finding-title">Fallback test could assert record.Failed more directly</div>
+  <div class="finding-location"><code>pkg/pod-utils/clone/clone_test.go:999</code></div>
+  <p>
+    The test checks <code>record.Failed</code> via an <code>if</code> branch but doesn't have a standalone assertion
+    that makes the success contract immediately scannable. Minor readability improvement.
+  </p>
+</div>
+
+<h2>Things I checked and was fine with</h2>
+<ul class="checked-list">
+  <li><code>runClone</code> extraction is clean; <code>startTime</code> renamed to <code>cmdStart</code> to avoid shadowing</li>
+  <li><code>fullRefs := refs</code> is a safe struct copy; nil-ing the slice correctly flips <code>isSparseCheckoutSet</code></li>
+  <li><code>append(failedCommands, record.Commands...)</code> is safe &mdash; separate slice reference</li>
+  <li>Fallback only triggers when sparse checkout is set AND clone failed &mdash; no impact on normal clones</li>
+  <li>Tests use real git repos and assert on behavioral outcomes, not brittle implementation details</li>
+  <li>No configuration, API, CLI flag, or ProwJob spec changes &mdash; purely internal</li>
+  <li>No breaking changes, safe to roll back, zero upgrade friction for operators</li>
+  <li>Deployment risk is LOW: only observable change is previously-failing sparse jobs now succeed</li>
+</ul>
+
+<h2>Open questions for the author</h2>
+<ul>
+  <li>Should <code>record.Refs</code> after a successful fallback reflect the original request (with <code>SparseCheckoutFiles</code>) or what was actually executed (without)? The PR description emphasizes debugging visibility, which argues for the original request.</li>
+  <li>Is warn-and-continue the right behavior when <code>os.RemoveAll</code> fails, or should the fallback be skipped entirely in that case?</li>
+</ul>
+
+</body>
+</html>

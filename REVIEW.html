@@ -46,13 +46,15 @@
   <tr><td>Title</td><td>generic-autobumper: add GitHub App authentication support</td></tr>
   <tr><td>Head SHA</td><td><code>1a9722a01615a1a2f0c219c4fb7815f782d22ac8</code></td></tr>
   <tr><td>Base</td><td><code>main</code></td></tr>
-  <tr><td>Reviewed</td><td>2026-05-15T15:04:14Z</td></tr>
+  <tr><td>Reviewed</td><td>2026-05-18T11:35:20Z</td></tr>
+  <tr><td>PR State</td><td><strong style="color:#8250df">MERGED</strong></td></tr>
 </table>
 </div>
 
 <div class="verdict-box">
-  <strong>Verdict: Needs Discussion</strong>
+  <strong>Verdict: Needs Discussion</strong> &nbsp;<span style="background:#8250df;color:#fff;padding:0.15em 0.5em;border-radius:3px;font-size:0.8rem">MERGED</span>
   <p>The approach is sound and follows existing Prow patterns well. The main concern is a behavioral difference in how <code>--skip-pullrequest</code> works between the two modes, and a partial struct copy that will silently drop fields. Neither is a showstopper, but both warrant author clarification before approving.</p>
+  <p style="margin-top:0.5rem;color:#636c76;font-size:0.9rem"><strong>Post-merge note:</strong> PR was merged on 2026-05-18 with approval from @droslean. No code changes since initial review. None of the findings below were addressed before merge — they are post-merge observations for awareness.</p>
 </div>
 
 <h2>What this PR does</h2>
@@ -63,6 +65,7 @@
   <li>Wires <code>flagutil.GitHubOptions</code> into the CLI via <code>goflag.CommandLine</code> bridge for standard Prow GitHub auth flags.</li>
   <li>Legacy <code>processGitHub</code> is completely untouched; new code lives in a separate <code>processGitHubAppAuth</code> function.</li>
 </ul>
+<p style="margin-top:0.75rem;font-size:0.9rem;color:#636c76"><strong>Since previous review (2026-05-15):</strong> No code changes. @droslean approved 2026-05-18T10:25:42Z. PR merged at the same SHA.</p>
 
 <h2>Findings</h2>
 

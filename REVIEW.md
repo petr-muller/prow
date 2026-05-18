@@ -3,8 +3,13 @@ pr: kubernetes-sigs/prow#716
 title: "generic-autobumper: add GitHub App authentication support"
 head_sha: 1a9722a01615a1a2f0c219c4fb7815f782d22ac8
 base: main
-reviewed_at: 2026-05-15T15:04:14Z
+reviewed_at: 2026-05-18T11:35:20Z
 verdict: needs-discussion
+pr_state: merged
+refresh_log:
+  - old_sha: 1a9722a01615a1a2f0c219c4fb7815f782d22ac8
+    new_sha: 1a9722a01615a1a2f0c219c4fb7815f782d22ac8
+    note: "No code changes. PR merged 2026-05-18. Approved by @droslean without addressing findings."
 ---
 
 ## Summary
@@ -12,6 +17,8 @@ verdict: needs-discussion
 Adds `--pr-source-mode=branch` to generic-autobumper. When combined with `--github-app-id` and `--github-app-private-key-path`, pushes branches directly to the upstream repo (no fork) and creates same-repo PRs using `OrgAwareClient`. Legacy PAT/fork flow is default and untouched.
 
 New files: `orgaware.go` (OrgAwareClient wrapper). Modified: `bumper.go` (new `processGitHubAppAuth`, validation changes, auto-detection), `main.go` (flag wiring), `bumper_test.go` (tests for new logic).
+
+Since previous review: PR merged on 2026-05-18 with no code changes. @droslean approved (no review body). None of the findings below were addressed before merge — they are post-merge observations for awareness.
 
 ## Findings
 

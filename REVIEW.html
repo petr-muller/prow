@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Review: kubernetes-sigs/prow#727</title>
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; line-height: 1.6; margin: 0; padding: 2rem; background: #f8f9fa; color: #212529; }
+  .container { max-width: 860px; margin: 0 auto; }
+  h1 { font-size: 1.5rem; margin-bottom: 0.25rem; }
+  h2 { font-size: 1.15rem; border-bottom: 1px solid #dee2e6; padding-bottom: 0.3rem; margin-top: 2rem; }
+  h3 { font-size: 1rem; margin: 1rem 0 0.25rem; }
+  code, pre { font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace; font-size: 0.875rem; background: #f1f3f5; padding: 0.1em 0.3em; border-radius: 3px; }
+  pre { padding: 0.75rem 1rem; overflow-x: auto; }
+  .header-block { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 1.25rem 1.5rem; margin-bottom: 1.5rem; }
+  .header-block a { color: #0969da; text-decoration: none; }
+  .header-block a:hover { text-decoration: underline; }
+  .meta { font-size: 0.85rem; color: #6c757d; margin-top: 0.5rem; }
+  .verdict-block { background: #d1e7dd; border: 1px solid #a3cfbb; border-radius: 6px; padding: 1rem 1.5rem; margin-bottom: 1.5rem; }
+  .verdict-block .verdict-label { font-weight: 700; font-size: 1.05rem; color: #0a3622; }
+  .verdict-block p { margin: 0.4rem 0 0; color: #0a3622; }
+  ul { padding-left: 1.5rem; }
+  li { margin-bottom: 0.3rem; }
+  .finding { background: #fff; border: 1px solid #dee2e6; border-radius: 6px; padding: 0.9rem 1.2rem; margin-bottom: 0.75rem; }
+  .finding h3 { margin-top: 0; }
+  .empty-findings { color: #6c757d; font-style: italic; }
+</style>
+</head>
+<body>
+<div class="container">
+
+  <div class="header-block">
+    <h1><a href="https://github.com/kubernetes-sigs/prow/pull/727">kubernetes-sigs/prow#727</a></h1>
+    <div>chore(deps): bump go.opentelemetry.io/otel/sdk from 1.40.0 to 1.43.0</div>
+    <div class="meta">
+      Head: <code>e35fb0653f91ad07f04724b6ff04faafd879426b</code> &nbsp;|&nbsp;
+      Base: <code>main</code> &nbsp;|&nbsp;
+      Reviewed: <code>2026-05-19T20:50:02Z</code>
+    </div>
+  </div>
+
+  <div class="verdict-block">
+    <div class="verdict-label">Verdict: Approve</div>
+    <p>Routine Dependabot dependency bump with no code changes. All updated packages are indirect dependencies — prow has no direct OTel API usage. The new version resolves a pre-existing inconsistency (sdk was at 1.40.0 while core packages were at 1.41.0) and brings in several upstream bug fixes including a race condition fix in metrics and a security improvement in OTLP HTTP exporters.</p>
+  </div>
+
+  <h2>What this PR does</h2>
+  <ul>
+    <li>Bumps <code>go.opentelemetry.io/otel/sdk</code> and <code>otel/sdk/metric</code> from 1.40.0 → 1.43.0</li>
+    <li>Bumps <code>go.opentelemetry.io/otel</code>, <code>otel/metric</code>, and <code>otel/trace</code> from 1.41.0 → 1.43.0</li>
+    <li>Aligns all five OTel packages to the same version (previously split across 1.40.0 and 1.41.0)</li>
+    <li>Updates corresponding <code>go.sum</code> SHA hashes (10 entries replaced)</li>
+    <li>The <code>v1.43.0</code> tag was cut 2026-04-03T08:30:48Z in the upstream repo</li>
+  </ul>
+
+  <h2>Findings</h2>
+  <p class="empty-findings">No findings — nothing to block, fix, or question.</p>
+
+  <h2>Things I checked and was fine with</h2>
+  <ul>
+    <li>All five OTel packages now consistently at 1.43.0 — the pre-existing 1.40.0/1.41.0 split is resolved</li>
+    <li><code>go.sum</code> has correct hash replacements: both <code>h1:</code> and <code>go.mod</code> hashes for all five packages</li>
+    <li>All packages are marked <code>// indirect</code> in <code>go.mod</code>; prow has no direct OTel API calls (confirmed by grep across <code>*.go</code>)</li>
+    <li>No usage of newly deprecated <code>attribute.INVALID</code> (replaced upstream by <code>attribute.EMPTY</code>) found in the codebase</li>
+    <li>Notable upstream fixes in 1.43.0: race condition in <code>sdk/metric</code> lastvalue aggregation; 4 MiB HTTP response body cap in OTLP HTTP exporters (mitigates memory abuse from malicious server); missing <code>GetBody</code> in <code>otlploghttp</code> for HTTP2 GOAWAY recovery</li>
+    <li>The <code>TraceIdRatioBased</code> description string changed (upstream calls it a breaking behavioral change for spec compliance) — no impact since prow has no direct OTel usage</li>
+    <li>Dependabot compatibility score badge present; no signs of upstream API breakage relevant to this consumer</li>
+  </ul>
+
+  <h2>Open questions for the author</h2>
+  <p class="empty-findings">None.</p>
+
+</div>
+</body>
+</html>

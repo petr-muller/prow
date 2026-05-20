@@ -3,261 +3,179 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Triage: Issue #527 — Docs: Running Prow outside GKE</title>
+<title>Triage: kubernetes-sigs/prow#527</title>
 <style>
-  :root {
-    --bg: #0d1117;
-    --surface: #161b22;
-    --border: #30363d;
-    --text: #e6edf3;
-    --text-muted: #8b949e;
-    --accent: #58a6ff;
-    --green: #3fb950;
-    --yellow: #d29922;
-    --red: #f85149;
-    --purple: #bc8cff;
-    --orange: #f0883e;
-  }
-  * { margin: 0; padding: 0; box-sizing: border-box; }
-  body {
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    background: var(--bg);
-    color: var(--text);
-    line-height: 1.6;
-    padding: 2rem;
-    max-width: 960px;
-    margin: 0 auto;
-  }
-  h1 { font-size: 1.6rem; margin-bottom: 0.5rem; }
-  h2 {
-    font-size: 1.2rem;
-    color: var(--accent);
-    margin: 2rem 0 0.75rem;
-    padding-bottom: 0.4rem;
-    border-bottom: 1px solid var(--border);
-  }
-  h3 { font-size: 1rem; color: var(--purple); margin: 1.2rem 0 0.5rem; }
-
-  .meta { color: var(--text-muted); font-size: 0.85rem; margin-bottom: 1.5rem; }
-  .meta a { color: var(--accent); text-decoration: none; }
-  .meta a:hover { text-decoration: underline; }
-
-  .badge {
-    display: inline-block;
-    padding: 0.15rem 0.55rem;
-    border-radius: 1rem;
-    font-size: 0.75rem;
-    font-weight: 600;
-    vertical-align: middle;
-  }
-  .badge-green  { background: rgba(63,185,80,0.15); color: var(--green); border: 1px solid rgba(63,185,80,0.3); }
-  .badge-yellow { background: rgba(210,153,34,0.15); color: var(--yellow); border: 1px solid rgba(210,153,34,0.3); }
-  .badge-blue   { background: rgba(88,166,255,0.15); color: var(--accent); border: 1px solid rgba(88,166,255,0.3); }
-  .badge-purple { background: rgba(188,140,255,0.15); color: var(--purple); border: 1px solid rgba(188,140,255,0.3); }
-  .badge-orange { background: rgba(240,136,62,0.15); color: var(--orange); border: 1px solid rgba(240,136,62,0.3); }
-
-  .card {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1rem 1.25rem;
-    margin: 0.75rem 0;
-  }
-
-  table {
-    width: 100%;
-    border-collapse: collapse;
-    margin: 0.75rem 0;
-    font-size: 0.9rem;
-  }
-  th, td {
-    text-align: left;
-    padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid var(--border);
-  }
-  th { color: var(--text-muted); font-weight: 600; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.03em; }
-
-  code {
-    background: rgba(110,118,129,0.15);
-    padding: 0.15rem 0.4rem;
-    border-radius: 4px;
-    font-size: 0.85em;
-    font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  }
-
-  .comment-box {
-    background: var(--surface);
-    border: 1px solid var(--border);
-    border-radius: 6px;
-    padding: 1.25rem;
-    margin: 1rem 0;
-    font-size: 0.9rem;
-    white-space: pre-wrap;
-    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Helvetica, Arial, sans-serif;
-    line-height: 1.7;
-    position: relative;
-  }
-  .comment-box .copy-btn {
-    position: absolute;
-    top: 0.5rem;
-    right: 0.5rem;
-    background: var(--border);
-    color: var(--text);
-    border: none;
-    border-radius: 4px;
-    padding: 0.3rem 0.7rem;
-    cursor: pointer;
-    font-size: 0.75rem;
-  }
-  .comment-box .copy-btn:hover { background: var(--accent); color: var(--bg); }
-
-  .key-value { display: flex; gap: 0.5rem; margin: 0.3rem 0; }
-  .key-value .k { color: var(--text-muted); min-width: 140px; flex-shrink: 0; }
-
-  .timeline {
-    border-left: 2px solid var(--border);
-    margin: 1rem 0 1rem 0.5rem;
-    padding-left: 1.25rem;
-  }
-  .timeline .event {
-    position: relative;
-    margin-bottom: 1rem;
-  }
-  .timeline .event::before {
-    content: '';
-    position: absolute;
-    left: -1.55rem;
-    top: 0.45rem;
-    width: 10px;
-    height: 10px;
-    border-radius: 50%;
-    background: var(--accent);
-    border: 2px solid var(--bg);
-  }
-  .timeline .event.done::before { background: var(--green); }
-  .timeline .date { color: var(--text-muted); font-size: 0.8rem; }
-
-  ul { padding-left: 1.25rem; margin: 0.5rem 0; }
-  li { margin: 0.3rem 0; }
-
-  .section-grid {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 0.75rem;
-  }
-  @media (max-width: 640px) { .section-grid { grid-template-columns: 1fr; } }
-
-  .proposed-title {
-    background: rgba(63,185,80,0.08);
-    border: 1px solid rgba(63,185,80,0.25);
-    border-radius: 6px;
-    padding: 0.75rem 1rem;
-    margin: 0.5rem 0;
-  }
-  .proposed-title .old { color: var(--text-muted); text-decoration: line-through; }
-  .proposed-title .new { color: var(--green); font-weight: 600; }
-  .proposed-title .arrow { color: var(--text-muted); margin: 0.25rem 0; }
+:root {
+  --bg: #0d1117; --surface: #161b22; --border: #30363d;
+  --text: #e6edf3; --muted: #8b949e; --accent: #58a6ff;
+  --green: #3fb950; --yellow: #d29922; --orange: #f0883e; --purple: #bc8cff;
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: var(--bg); color: var(--text); line-height: 1.6;
+  padding: 2rem 1.5rem;
+}
+.wrap { max-width: 900px; margin: 0 auto; }
+h1 { font-size: 1.45rem; margin-bottom: 0.2rem; }
+h2 { font-size: 1.05rem; color: var(--accent); border-bottom: 1px solid var(--border); padding-bottom: 0.3rem; margin: 2rem 0 0.8rem; }
+h3 { font-size: 0.92rem; color: var(--purple); margin: 1rem 0 0.35rem; }
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+p { margin: 0.45rem 0; }
+ul, ol { padding-left: 1.35rem; margin: 0.45rem 0; }
+li { margin: 0.28rem 0; }
+code {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.82em; background: rgba(110,118,129,.15);
+  padding: 0.1rem 0.35rem; border-radius: 3px;
+}
+pre {
+  font-family: "SFMono-Regular", Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 0.81rem; background: rgba(110,118,129,.08);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 0.8rem 1rem; overflow-x: auto; margin: 0.55rem 0;
+  white-space: pre; line-height: 1.5;
+}
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 0.9rem 1.15rem; margin: 0.55rem 0; }
+.badge {
+  display: inline-block; font-size: 0.71rem; font-weight: 600;
+  padding: 0.1rem 0.5rem; border-radius: 1rem; vertical-align: middle;
+}
+.b-green  { background: rgba(63,185,80,.14);  color: var(--green);  border: 1px solid rgba(63,185,80,.28); }
+.b-yellow { background: rgba(210,153,34,.14); color: var(--yellow); border: 1px solid rgba(210,153,34,.28); }
+.b-orange { background: rgba(240,136,62,.14); color: var(--orange); border: 1px solid rgba(240,136,62,.28); }
+.b-blue   { background: rgba(88,166,255,.14); color: var(--accent); border: 1px solid rgba(88,166,255,.28); }
+.meta-grid { display: grid; grid-template-columns: 130px 1fr; gap: 0.22rem 0.7rem; font-size: 0.87rem; }
+.meta-grid .k { color: var(--muted); }
+table { width: 100%; border-collapse: collapse; font-size: 0.87rem; margin: 0.55rem 0; }
+th, td { text-align: left; padding: 0.42rem 0.7rem; border-bottom: 1px solid var(--border); }
+th { color: var(--muted); font-weight: 600; font-size: 0.76rem; text-transform: uppercase; letter-spacing: .04em; }
+.comment-wrap { position: relative; margin: 0.7rem 0; }
+.comment-box {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 6px;
+  padding: 0.95rem 1.05rem; font-size: 0.865rem;
+  white-space: pre-wrap; word-break: break-word; line-height: 1.7;
+}
+.copy-btn {
+  position: absolute; top: 0.5rem; right: 0.5rem;
+  background: var(--border); color: var(--text); border: none;
+  border-radius: 4px; padding: 0.22rem 0.6rem; font-size: 0.71rem; cursor: pointer;
+}
+.copy-btn:hover { background: var(--accent); color: var(--bg); }
+.verdict-box {
+  background: rgba(88,166,255,.07); border: 1px solid rgba(88,166,255,.22);
+  border-radius: 6px; padding: 0.8rem 1.05rem;
+}
+.retitle-card {
+  background: rgba(63,185,80,.07); border: 1px solid rgba(63,185,80,.22);
+  border-radius: 6px; padding: 0.7rem 0.95rem; font-size: 0.87rem;
+}
+.retitle-card .old { color: var(--muted); text-decoration: line-through; }
+.retitle-card .new { color: var(--green); font-weight: 600; margin-top: 0.28rem; }
 </style>
 </head>
 <body>
+<div class="wrap">
 
-<h1>Triage: Issue #527</h1>
-<div class="meta">
-  <a href="https://github.com/kubernetes-sigs/prow/issues/527">kubernetes-sigs/prow#527</a>
-  &nbsp;&middot;&nbsp; Reported by <strong>@tsj-30</strong> on 2025-10-13
-  &nbsp;&middot;&nbsp; Triaged 2026-04-22
-  &nbsp;&middot;&nbsp; <span class="badge badge-green">LEGITIMATE</span>
-  <span class="badge badge-yellow">Largely Addressed</span>
-  <span class="badge badge-blue">Level 1</span>
-</div>
-
-<h2>At a Glance</h2>
-<div class="card">
-  <div class="key-value"><span class="k">Issue</span><span>Docs: Add subsection for running Prow outside GKE (e.g., local/Kind)</span></div>
-  <div class="key-value"><span class="k">Assessment</span><span><span class="badge badge-green">LEGITIMATE</span> &mdash; but the core ask has already been addressed</span></div>
-  <div class="key-value"><span class="k">Effort (remaining)</span><span><span class="badge badge-blue">Level 1 &mdash; Easy / good-first-issue</span></span></div>
-  <div class="key-value"><span class="k">Remaining work</span><span>Add cross-reference from <code>getting-started-deploy.md</code> to <code>local-dev.md</code></span></div>
-  <div class="key-value"><span class="k">Labels (existing)</span><span><code>area/documentation</code> <code>lifecycle/stale</code></span></div>
-  <div class="key-value"><span class="k">Labels (proposed)</span><span><code>kind/cleanup</code> <code>good-first-issue</code></span></div>
-</div>
-
-<h2>Timeline: What Happened</h2>
-<div class="timeline">
-  <div class="event done">
-    <div class="date">2025-10-13</div>
-    <div>Issue filed by @tsj-30 &mdash; requesting local/Kind setup docs</div>
-  </div>
-  <div class="event done">
-    <div class="date">2025-10-14</div>
-    <div>@BenTheElder responds: webhooks need public internet, local Kind has limits; points to existing tools and issue #283</div>
-  </div>
-  <div class="event done">
-    <div class="date">2025-10-14</div>
-    <div>@BenTheElder suggests a general "Prow development guide", cc's @petr-muller</div>
-  </div>
-  <div class="event done">
-    <div class="date">2025-11-13</div>
-    <div>Issue #283 resolved &mdash; starter config moved from test-infra to this repo</div>
-  </div>
-  <div class="event done">
-    <div class="date">2026-01-19</div>
-    <div>@petr-muller outlines vision: contribution-path-oriented docs, avoid overwhelming readers, minimize remote setup</div>
-  </div>
-  <div class="event done">
-    <div class="date">2026-03-26</div>
-    <div><strong><code>local-dev.md</code></strong> and <strong><code>local-dev-tilt.md</code></strong> added &mdash; comprehensive Kind-based local dev environment</div>
-  </div>
-  <div class="event">
-    <div class="date">2026-04-19</div>
-    <div><code>lifecycle/stale</code> applied by triage bot</div>
+<h1>Triage: <a href="https://github.com/kubernetes-sigs/prow/issues/527">kubernetes-sigs/prow#527</a></h1>
+<div class="card" style="margin-top:.7rem">
+  <div class="meta-grid">
+    <span class="k">Title</span><span>Docs: Add subsection for running Prow outside GKE (e.g., local/Kind)</span>
+    <span class="k">State</span><span><span class="badge b-green">open</span></span>
+    <span class="k">Labels</span><span><code>lifecycle/rotten</code> <code>area/documentation</code></span>
+    <span class="k">Verdict</span><span><span class="badge b-blue">accepted</span></span>
+    <span class="k">Triaged at</span><span>2026-05-19T23:30:17Z</span>
+    <span class="k">Main SHA</span><span><code>a52d6ea9</code></span>
   </div>
 </div>
 
-<h2>What's Been Addressed</h2>
+<h2>Verdict</h2>
+<div class="verdict-box">
+  <strong>accepted</strong> — actionable remaining work, Level 1 effort (good-first-issue).
+  <p style="margin-top:.45rem;color:var(--muted)">The original request (local/Kind setup docs) was fully addressed in March 2026 by <code>local-dev.md</code> and <code>local-dev-tilt.md</code>. One concrete gap remains: <code>getting-started-deploy.md</code> does not cross-reference these guides, leaving developers who arrive via the deploy guide with no signal that a local path exists. The fix is a trivial PR — a paragraph added to one file.</p>
+</div>
+
+<h2>What the issue reports</h2>
+<ul>
+  <li>The <a href="https://kubernetes-sigs.github.io/prow/docs/getting-started-deploy/">Deploying Prow</a> guide assumes GKE throughout; config examples and environment setup are Google-specific.</li>
+  <li>No documentation for running Prow on Kind at time of filing, making local plugin testing and UI development unnecessarily hard for contributors without cloud access.</li>
+  <li>New contributors wanting to hack on hook plugins or test config changes need to stand up real cloud infrastructure or navigate undocumented workarounds.</li>
+  <li>Requested: a subsection under "Deploying Prow" covering minimal Kind setup, common pitfalls, and a note that it's for exploration/learning, not production.</li>
+</ul>
+
+<h2>Analysis</h2>
+
+<h3>What changed since the issue was filed</h3>
 <div class="card">
   <ul>
-    <li><strong><code>local-dev.md</code></strong> &mdash; Full Prow stack on Kind with in-cluster fakes (GitHub, GCS, Gerrit, Pub/Sub). Covers <code>make dev</code>, component profiles, single-component rebuilds, fake webhooks via <code>phony</code>, hook plugin dev workflow.</li>
-    <li><strong><code>local-dev-tilt.md</code></strong> &mdash; Automatic rebuild-on-save layer using Tilt.</li>
-    <li><strong>Issue #283</strong> &mdash; Starter config moved from test-infra (closed).</li>
-    <li><strong><code>getting-started-develop.md</code></strong> &mdash; Already cross-references <code>local-dev.md</code>.</li>
+    <li><strong>2025-11-13</strong>: Issue <a href="https://github.com/kubernetes-sigs/prow/issues/283">#283</a> closed — starter manifests moved from kubernetes/test-infra into this repo. @BenTheElder had flagged this as the main actionable item.</li>
+    <li><strong>2026-01-19</strong>: @petr-muller outlined a broader vision — contribution-path-oriented docs, minimize remote setup, guide readers by common paths (hook plugin, tide change, frontend, ProwJob controllers).</li>
+    <li><strong>2026-03-26</strong>: <code>local-dev.md</code> added (commit <code>1797489fe</code>) — complete guide: Kind cluster, <code>make dev</code>, core/full profiles, in-cluster fakes for GitHub/GCS/Gerrit/Pub/Sub, single-component rebuilds via <code>hack/dev-env.sh -rebuild=hook</code>, fake webhooks via <code>hack/phony.sh</code>, hook plugin dev loop.</li>
+    <li><strong>2026-03-26</strong>: <code>local-dev-tilt.md</code> added (commit <code>c1e6738396</code>) — Tilt-based automatic rebuild-on-save on top of the Kind environment.</li>
   </ul>
 </div>
 
-<h2>What Remains</h2>
-<div class="section-grid">
-  <div class="card">
-    <h3>Immediate (this issue)</h3>
-    <p><code>getting-started-deploy.md</code> is still GKE-focused and does <strong>not</strong> cross-reference <code>local-dev.md</code>. A developer arriving from a search engine has no signal that a simpler local path exists.</p>
-    <p style="margin-top:0.5rem"><strong>Fix:</strong> Add a brief note near the top pointing to the local dev guide. ~5 lines of markdown, 1 file.</p>
-  </div>
-  <div class="card">
-    <h3>Broader vision (separate issue)</h3>
-    <p>Contribution-path-specific dev guides for Tide, Deck, ProwJob controllers, Gerrit. Level 2-3 effort requiring domain expertise. Should be tracked independently.</p>
-  </div>
-</div>
+<h3>Remaining gap: deploy guide has no cross-reference</h3>
+<p><code>site/content/en/docs/getting-started-deploy.md</code> opens with <em>"focused on Google Kubernetes Engine but should work on any kubernetes distro"</em> and never mentions <code>local-dev.md</code>. Meanwhile <code>getting-started-develop.md:64-66</code> does cross-reference it, providing an exact pattern to follow.</p>
+<p>Sidebar weights: <code>local-dev.md</code>=75, <code>local-dev-tilt.md</code>=76, deploy guide=80. The local guide is already positioned before the deploy guide in the nav; the problem is discoverability for people arriving via direct links or search.</p>
 
-<h3>Contribution Path Coverage</h3>
+<h3>Related code</h3>
+<p><code>site/content/en/docs/getting-started-deploy.md:1-3</code> — the gap:</p>
+<pre>title: "Deploying Prow"
+The guide below is focused on Google Kubernetes Engine but should work on
+any kubernetes distro with no/minimal changes.
+[no mention of local-dev.md anywhere in the file]</pre>
+<p><code>site/content/en/docs/getting-started-develop.md:64-66</code> — working pattern to copy:</p>
+<pre>For local development without a cloud account, the Local Development
+Environment guide explains how to run a full Prow stack in a local kind
+cluster using in-cluster fakes...</pre>
+
+<h3>Contribution path coverage</h3>
 <table>
   <thead><tr><th>Path</th><th>Status</th><th>Location</th></tr></thead>
   <tbody>
-    <tr><td>Hook plugins</td><td><span class="badge badge-green">Covered</span></td><td><code>local-dev.md</code> + <code>getting-started-develop.md</code></td></tr>
-    <tr><td>Tide changes</td><td><span class="badge badge-orange">Not covered</span></td><td>User docs only, no dev workflow</td></tr>
-    <tr><td>Deck / frontend</td><td><span class="badge badge-yellow">Partial</span></td><td><code>deck/_index.md</code> has <code>runlocal</code></td></tr>
-    <tr><td>ProwJob controllers</td><td><span class="badge badge-orange">Not covered</span></td><td>Component docs only</td></tr>
-    <tr><td>Gerrit integration</td><td><span class="badge badge-orange">Not covered</span></td><td>Full profile deploys it, no dev guide</td></tr>
+    <tr><td>Hook plugins</td><td><span class="badge b-green">Covered</span></td><td><code>local-dev.md:170-181</code> + <code>getting-started-develop.md</code></td></tr>
+    <tr><td>Tide changes</td><td><span class="badge b-orange">Not covered</span></td><td>User docs exist, no dev workflow</td></tr>
+    <tr><td>Deck / frontend</td><td><span class="badge b-yellow">Partial</span></td><td><code>deck/_index.md</code> has <code>runlocal</code>, no full dev workflow</td></tr>
+    <tr><td>ProwJob controllers</td><td><span class="badge b-orange">Not covered</span></td><td>Component docs only</td></tr>
+    <tr><td>Gerrit integration</td><td><span class="badge b-orange">Not covered</span></td><td>Full profile deploys it, no dev guide</td></tr>
   </tbody>
 </table>
 
-<h2>Proposed Title Change</h2>
-<div class="proposed-title">
+<h3>Related issues</h3>
+<ul>
+  <li><a href="https://github.com/kubernetes-sigs/prow/issues/283">#283</a> — Move starter config from test-infra. <strong>Closed 2025-11-13.</strong></li>
+</ul>
+
+<h2>What I checked</h2>
+<ul>
+  <li><code>git log -- site/content/en/docs/local-dev.md</code> — confirmed added 2026-03-26</li>
+  <li><code>git log -- site/content/en/docs/local-dev-tilt.md</code> — confirmed added 2026-03-26</li>
+  <li>Full content of <code>getting-started-deploy.md</code> — confirmed no mention of local-dev anywhere</li>
+  <li>Full content of <code>getting-started-develop.md</code> — confirmed cross-reference at lines 64-66</li>
+  <li>Hugo frontmatter weights for all affected pages</li>
+  <li>Issue #283 state — confirmed closed</li>
+  <li><code>hack/</code> scripts: <code>dev-env.sh</code> and <code>phony.sh</code> documented in <code>local-dev.md</code>; <code>tilt-apply-config.sh</code> and <code>tilt-build.sh</code> not documented</li>
+  <li>Full issue comment thread (10 comments through 2026-04-23)</li>
+</ul>
+
+<h2>Recommended next steps</h2>
+<ol>
+  <li>Post the augmentation comment below.</li>
+  <li>Contributor adds ~5 lines near the top of <code>site/content/en/docs/getting-started-deploy.md</code> pointing to <code>/docs/local-dev/</code> as the path for local exploration. Pattern: <code>getting-started-develop.md:64-66</code>.</li>
+  <li>Optionally open a separate issue for contribution-path dev guides (Tide, Deck, ProwJob controllers) — Level 2-3, each needs domain expertise.</li>
+</ol>
+
+<h2>Proposed title change</h2>
+<div class="retitle-card">
   <div class="old">Docs: Add subsection for running Prow outside GKE (e.g., local/Kind)</div>
-  <div class="arrow">&darr;</div>
   <div class="new">Docs: Add cross-reference from deploy guide to local development guide</div>
 </div>
 
-<h2>Proposed Comment</h2>
-<p style="color: var(--text-muted); font-size: 0.85rem; margin-bottom: 0.5rem;">Copy this and post it to the issue. The prow-bot will process the slash commands.</p>
-<div class="comment-box" id="comment-text"><button class="copy-btn" onclick="copyComment()">Copy</button>/retitle Docs: Add cross-reference from deploy guide to local development guide
+<h2>Proposed comment</h2>
+<div class="comment-wrap">
+  <div class="comment-box" id="comment-text"><button class="copy-btn" onclick="copyComment()">Copy</button>/retitle Docs: Add cross-reference from deploy guide to local development guide
 /remove-lifecycle stale
 
 The core request in this issue — documentation for running Prow locally on Kind — has been addressed. Since this issue was filed, two new guides were added (March 2026):
@@ -279,21 +197,25 @@ This comment was made by experimental [Claude triage helper](https://github.com/
 
 Full triage: https://github.com/petr-muller/prow/blob/issue-triage-527/ISSUE-TRIAGE.md
 &lt;/details&gt;</div>
-
-<h2>Full Triage Document</h2>
-<div class="card">
-  <a href="https://github.com/petr-muller/prow/blob/issue-triage-527/ISSUE-TRIAGE.md" style="color: var(--accent); text-decoration: none;">
-    petr-muller/prow@issue-triage-527 / ISSUE-TRIAGE.md
-  </a>
 </div>
 
+<h2>Open questions</h2>
+<ul>
+  <li>Should the cross-reference in <code>getting-started-deploy.md</code> use a Hugo/Docsy callout admonition shortcode, or plain prose matching the pattern in <code>getting-started-develop.md:64-66</code>?</li>
+  <li>Is the broader "Prow development guide" vision (@BenTheElder 2025-10-14, @petr-muller 2026-01-19) worth a dedicated tracking issue, or left for organic future work?</li>
+</ul>
+
+</div>
 <script>
 function copyComment() {
   const el = document.getElementById('comment-text');
-  // Get text content, skipping the button
-  let text = el.textContent.replace(/^Copy/, '').trim();
-  // Restore HTML entities
-  text = text.replace(/</g, '<').replace(/>/g, '>').replace(/&/g, '&');
+  let text = '';
+  for (const node of el.childNodes) {
+    if (node.nodeType === Node.TEXT_NODE) text += node.textContent;
+    else if (node.tagName !== 'BUTTON') text += node.textContent;
+  }
+  text = text.trim()
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&');
   navigator.clipboard.writeText(text).then(() => {
     const btn = el.querySelector('.copy-btn');
     btn.textContent = 'Copied!';
@@ -301,6 +223,5 @@ function copyComment() {
   });
 }
 </script>
-
 </body>
 </html>

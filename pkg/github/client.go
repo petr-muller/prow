@@ -2409,7 +2409,41 @@ func (c *client) UpdatePullRequest(org, repo string, number int, title, body *st
 	return err
 }
 
+// maxPullRequestFileCount is the maximum number of changed files the
+// "list pull request files" endpoint returns across all pages. When a pull
+// request changes more files than this, GitHub silently truncates the
+// listing: pagination terminates normally with no indication that the
+// result is incomplete.
+//
+// https://docs.github.com/en/rest/pulls/pulls#list-pull-requests-files
+const maxPullRequestFileCount = 3000
+
+// PullRequestChangesTruncatedError is returned by GetPullRequestChanges,
+// together with the truncated list of changes, when the pull request changes
+// more files than GitHub is willing to return. Callers that do not handle
+// this error specifically will fail instead of silently operating on an
+// incomplete file list.
+type PullRequestChangesTruncatedError struct {
+	Org, Repo          string
+	Number             int
+	Returned, Expected int
+}
+
+func (PullRequestChangesTruncatedError) Is(err error) bool {
+	_, ok := err.(PullRequestChangesTruncatedError)
+	return ok
+}
+
+func (e PullRequestChangesTruncatedError) Error() string {
+	return fmt.Sprintf("%s/%s#%d changes %d files, but GitHub only returned %d of them: the file list is incomplete", e.Org, e.Repo, e.Number, e.Expected, e.Returned)
+}
+
 // GetPullRequestChanges gets a list of files modified in a pull request.
+//
+// GitHub returns at most maxPullRequestFileCount files, silently truncating
+// the listing for pull requests that change more. When that happens, the
+// (incomplete) list is returned together with a
+// PullRequestChangesTruncatedError.
 //
 // See https://developer.github.com/v3/pulls/#list-pull-requests-files
 func (c *client) GetPullRequestChanges(org, repo string, number int) ([]PullRequestChange, error) {
@@ -2434,6 +2468,20 @@ func (c *client) GetPullRequestChanges(org, repo string, number int) ([]PullRequ
 	)
 	if err != nil {
 		return nil, err
+	}
+	if len(changes) >= maxPullRequestFileCount {
+		// The listing is at GitHub's cap, so it may be truncated. Unlike the
+		// listing, the changed-file count on the pull request object is
+		// accurate regardless of size; fetch it to find out. The PR can change
+		// between the two calls, so this is best-effort, but a stale result
+		// only lasts until the next event on the PR.
+		pr, err := c.GetPullRequest(org, repo, number)
+		if err != nil {
+			return nil, fmt.Errorf("failed to determine whether the file list of %s/%s#%d is complete: %w", org, repo, number, err)
+		}
+		if len(changes) < pr.ChangedFiles {
+			return changes, PullRequestChangesTruncatedError{Org: org, Repo: repo, Number: number, Returned: len(changes), Expected: pr.ChangedFiles}
+		}
 	}
 	return changes, nil
 }
@@ -2674,6 +2722,13 @@ func (c *client) ListTags(org, repo string) ([]GitHubTag, error) {
 }
 
 // GetSingleCommit returns a single commit.
+//
+// The Files field must not be used to obtain a complete list of files changed
+// by the commit: this method does not follow pagination, so GitHub fills the
+// field with at most the first ~300 files, with no indication that the list
+// is incomplete. Even with pagination the endpoint silently caps at 3000
+// files; GitHub points to the Git Trees API for anything larger.
+// https://docs.github.com/en/rest/commits/commits#get-a-commit
 //
 // See https://developer.github.com/v3/repos/#get
 func (c *client) GetSingleCommit(org, repo, SHA string) (RepositoryCommit, error) {

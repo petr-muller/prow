@@ -17,6 +17,7 @@ limitations under the License.
 package approve
 
 import (
+	"errors"
 	"fmt"
 	"net/url"
 	"regexp"
@@ -59,8 +60,6 @@ var (
 type githubClient interface {
 	GetPullRequest(org, repo string, number int) (*github.PullRequest, error)
 	GetPullRequestChanges(org, repo string, number int) ([]github.PullRequestChange, error)
-	ListPullRequestCommits(org, repo string, number int) ([]github.RepositoryCommit, error)
-	GetSingleCommit(org, repo, SHA string) (github.RepositoryCommit, error)
 	GetIssueLabels(org, repo string, number int) ([]github.Label, error)
 	ListIssueComments(org, repo string, number int) ([]github.IssueComment, error)
 	ListReviews(org, repo string, number int) ([]github.Review, error)
@@ -83,11 +82,10 @@ type state struct {
 	branch string
 	number int
 
-	body         string
-	author       string
-	assignees    []github.User
-	htmlURL      string
-	changedFiles int
+	body      string
+	author    string
+	assignees []github.User
+	htmlURL   string
 }
 
 func init() {
@@ -134,6 +132,8 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 
 	pluginHelp := &pluginhelp.PluginHelp{
 		Description: `The approve plugin implements a pull request approval process that manages the '` + labels.Approved + `' label and an approval notification comment. Approval is achieved when the set of users that have approved the PR is capable of approving every file changed by the PR. A user is able to approve a file if their username or an alias they belong to is listed in the 'approvers' section of an OWNERS file in the directory of the file or higher in the directory tree.
+<br>
+<br>For pull requests that change more files than the GitHub API returns (3000), the changed files cannot be matched against OWNERS, and approval from an approver in the repository's top-level OWNERS file is required instead.
 <br>
 <br>Per-repo configuration may be used to require that PRs link to an associated issue before approval is granted. It may also be used to specify that the PR authors implicitly approve their own PRs.
 <br>For more information see <a href="https://docs.prow.k8s.io/docs/components/plugins/approve/approvers/">here</a>.`,
@@ -201,15 +201,14 @@ func handleGenericComment(log *logrus.Entry, ghc githubClient, oc ownersClient, 
 		githubConfig,
 		opts,
 		&state{
-			org:          ce.Repo.Owner.Login,
-			repo:         ce.Repo.Name,
-			branch:       pr.Base.Ref,
-			number:       ce.Number,
-			body:         ce.IssueBody,
-			author:       ce.IssueAuthor.Login,
-			assignees:    ce.Assignees,
-			htmlURL:      ce.IssueHTMLURL,
-			changedFiles: pr.ChangedFiles,
+			org:       ce.Repo.Owner.Login,
+			repo:      ce.Repo.Name,
+			branch:    pr.Base.Ref,
+			number:    ce.Number,
+			body:      ce.IssueBody,
+			author:    ce.IssueAuthor.Login,
+			assignees: ce.Assignees,
+			htmlURL:   ce.IssueHTMLURL,
 		},
 	)
 }
@@ -275,15 +274,14 @@ func handleReview(log *logrus.Entry, ghc githubClient, oc ownersClient, githubCo
 		githubConfig,
 		opts,
 		&state{
-			org:          re.Repo.Owner.Login,
-			repo:         re.Repo.Name,
-			branch:       re.PullRequest.Base.Ref,
-			number:       re.PullRequest.Number,
-			body:         re.PullRequest.Body,
-			author:       re.PullRequest.User.Login,
-			assignees:    re.PullRequest.Assignees,
-			htmlURL:      re.PullRequest.HTMLURL,
-			changedFiles: re.PullRequest.ChangedFiles,
+			org:       re.Repo.Owner.Login,
+			repo:      re.Repo.Name,
+			branch:    re.PullRequest.Base.Ref,
+			number:    re.PullRequest.Number,
+			body:      re.PullRequest.Body,
+			author:    re.PullRequest.User.Login,
+			assignees: re.PullRequest.Assignees,
+			htmlURL:   re.PullRequest.HTMLURL,
 		},
 	)
 }
@@ -334,15 +332,14 @@ func handlePullRequest(log *logrus.Entry, ghc githubClient, oc ownersClient, git
 		githubConfig,
 		config.ApproveFor(pre.Repo.Owner.Login, pre.Repo.Name),
 		&state{
-			org:          pre.Repo.Owner.Login,
-			repo:         pre.Repo.Name,
-			branch:       pre.PullRequest.Base.Ref,
-			number:       pre.Number,
-			body:         pre.PullRequest.Body,
-			author:       pre.PullRequest.User.Login,
-			assignees:    pre.PullRequest.Assignees,
-			htmlURL:      pre.PullRequest.HTMLURL,
-			changedFiles: pre.PullRequest.ChangedFiles,
+			org:       pre.Repo.Owner.Login,
+			repo:      pre.Repo.Name,
+			branch:    pre.PullRequest.Base.Ref,
+			number:    pre.Number,
+			body:      pre.PullRequest.Body,
+			author:    pre.PullRequest.User.Login,
+			assignees: pre.PullRequest.Assignees,
+			htmlURL:   pre.PullRequest.HTMLURL,
 		},
 	)
 }
@@ -363,96 +360,6 @@ func findAssociatedIssue(body, org string) (int, error) {
 		return 0, err
 	}
 	return v, nil
-}
-
-const maxCommitsForFallback = 10
-
-type truncationReason int
-
-const (
-	notTruncated       truncationReason = iota
-	tooManyCommits                      // PR has more commits than maxCommitsForFallback
-	commitsInsufficient                 // individual commits also have truncated file lists
-)
-
-// getFilenames returns the list of changed filenames for a PR. It first tries the
-// pull request files endpoint; if that returns fewer files than expectedFiles
-// (indicating GitHub's 3000-file API cap was hit), it falls back to fetching
-// individual commits and unioning their file lists. Returns (filenames, reason,
-// numCommits, error). When reason != notTruncated, filenames is nil and the caller
-// should not proceed with normal approval logic.
-func getFilenames(log *logrus.Entry, ghc githubClient, org, repo string, number, expectedFiles int) ([]string, truncationReason, int, error) {
-	changes, err := ghc.GetPullRequestChanges(org, repo, number)
-	if err != nil {
-		return nil, notTruncated, 0, err
-	}
-	filenames := make([]string, 0, len(changes))
-	for _, change := range changes {
-		filenames = append(filenames, change.Filename)
-	}
-	if expectedFiles <= 0 || len(filenames) >= expectedFiles {
-		return filenames, notTruncated, 0, nil
-	}
-	log.Infof("PR files endpoint returned %d of %d files, attempting commits-based fallback.", len(filenames), expectedFiles)
-
-	commits, err := ghc.ListPullRequestCommits(org, repo, number)
-	if err != nil {
-		return nil, notTruncated, 0, err
-	}
-	if len(commits) > maxCommitsForFallback {
-		log.Warningf("PR has %d commits (limit: %d), cannot use commits-based fallback.", len(commits), maxCommitsForFallback)
-		return nil, tooManyCommits, len(commits), nil
-	}
-
-	seen := make(map[string]struct{}, expectedFiles)
-	for _, f := range filenames {
-		seen[f] = struct{}{}
-	}
-	for _, c := range commits {
-		commit, err := ghc.GetSingleCommit(org, repo, c.SHA)
-		if err != nil {
-			return nil, notTruncated, len(commits), err
-		}
-		for _, f := range commit.Files {
-			seen[f.Filename] = struct{}{}
-		}
-	}
-
-	if len(seen) < expectedFiles {
-		log.Warningf("Commits-based fallback recovered %d of %d files, still incomplete.", len(seen), expectedFiles)
-		return nil, commitsInsufficient, len(commits), nil
-	}
-
-	result := make([]string, 0, len(seen))
-	for f := range seen {
-		result = append(result, f)
-	}
-	return result, notTruncated, len(commits), nil
-}
-
-func truncationWarningMessage(changedFiles, numCommits int, reason truncationReason) string {
-	var detail string
-	switch reason {
-	case tooManyCommits:
-		detail = fmt.Sprintf(
-			"This pull request has %d changed files and %d commits. The GitHub API only "+
-				"returns up to 3000 files via the pull request files endpoint. The approve "+
-				"plugin can resolve all files via individual commits when there are %d or fewer "+
-				"commits. Since this PR exceeds both limits, automated approval cannot be safely "+
-				"calculated.",
-			changedFiles, numCommits, maxCommitsForFallback)
-	case commitsInsufficient:
-		detail = fmt.Sprintf(
-			"This pull request has %d changed files and %d commits. The GitHub API only "+
-				"returns up to 3000 files via the pull request files endpoint. The approve "+
-				"plugin attempted to resolve all files via individual commits, but the commits "+
-				"also have truncated file lists. Automated approval cannot be safely calculated.",
-			changedFiles, numCommits)
-	}
-	return fmt.Sprintf("[%s] This PR is **NOT APPROVED**\n\n"+
-		"%s A repository administrator must manually apply the `approved` label "+
-		"after verifying all OWNERS requirements are satisfied.",
-		approvers.ApprovalNotificationName, detail)
 }
 
 // handle is the workhorse the will actually make updates to the PR.
@@ -481,9 +388,20 @@ func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConf
 	}
 
 	start := time.Now()
-	filenames, truncReason, numCommits, err := getFilenames(log, ghc, pr.org, pr.repo, pr.number, pr.changedFiles)
-	if err != nil {
+	changes, err := ghc.GetPullRequestChanges(pr.org, pr.repo, pr.number)
+	var truncation *approvers.FileListTruncation
+	if truncErr := (github.PullRequestChangesTruncatedError{}); errors.As(err, &truncErr) {
+		// The PR changes more files than GitHub returns, so the changed files
+		// cannot be matched against OWNERS. Instead of path-based approval,
+		// approval from a root approver will be required.
+		log.Warningf("File list of %s/%s#%d is truncated (GitHub returned %d of %d files), requiring root approval.", pr.org, pr.repo, pr.number, truncErr.Returned, truncErr.Expected)
+		truncation = &approvers.FileListTruncation{KnownFiles: truncErr.Returned, TotalFiles: truncErr.Expected}
+	} else if err != nil {
 		return fetchErr("PR file changes", err)
+	}
+	var filenames []string
+	for _, change := range changes {
+		filenames = append(filenames, change.Filename)
 	}
 	issueLabels, err := ghc.GetIssueLabels(pr.org, pr.repo, pr.number)
 	if err != nil {
@@ -514,48 +432,12 @@ func handle(log *logrus.Entry, ghc githubClient, repo approvers.Repo, githubConf
 	}
 	log.WithField("duration", time.Since(start).String()).Debug("Completed github functions in handle")
 
-	if truncReason != notTruncated {
-		log.Warningf("File list truncated for %s/%s#%d (%d files, %d commits, reason: %d), handling truncation.", pr.org, pr.repo, pr.number, pr.changedFiles, numCommits, truncReason)
-
-		msg := truncationWarningMessage(pr.changedFiles, numCommits, truncReason)
-		commentsFromIssueComments := commentsFromIssueComments(issueComments)
-		notifications := filterComments(commentsFromIssueComments, notificationMatcher(botUserChecker))
-		latestNotification := getLast(notifications)
-		if latestNotification == nil || !strings.Contains(latestNotification.Body, msg) {
-			for _, notif := range notifications {
-				if err := ghc.DeleteComment(pr.org, pr.repo, notif.ID); err != nil {
-					log.WithError(err).Errorf("Failed to delete comment from %s/%s#%d, ID: %d.", pr.org, pr.repo, pr.number, notif.ID)
-				}
-			}
-			if err := ghc.CreateComment(pr.org, pr.repo, pr.number, msg); err != nil {
-				log.WithError(err).Errorf("Failed to create truncation warning comment on %s/%s#%d.", pr.org, pr.repo, pr.number)
-			}
-		}
-
-		if hasApprovedLabel {
-			humanApproved, err := ghc.WasLabelAddedByHuman(pr.org, pr.repo, pr.number, labels.Approved)
-			if err != nil {
-				log.WithError(err).Errorf("Failed to check if %s label was added by human, preserving existing label state.", labels.Approved)
-				return nil
-			}
-			if !humanApproved {
-				if err := ghc.RemoveLabel(pr.org, pr.repo, pr.number, labels.Approved); err != nil {
-					log.WithError(err).Errorf("Failed to remove %q label from %s/%s#%d.", labels.Approved, pr.org, pr.repo, pr.number)
-				}
-			}
-		}
-		return nil
-	}
-
 	start = time.Now()
-	approversHandler := approvers.NewApprovers(
-		approvers.NewOwners(
-			log,
-			filenames,
-			repo,
-			int64(pr.number),
-		),
-	)
+	owners := approvers.NewOwners(log, filenames, repo, int64(pr.number))
+	if truncation != nil {
+		owners = approvers.NewTruncatedOwners(log, repo, int64(pr.number), *truncation)
+	}
+	approversHandler := approvers.NewApprovers(owners)
 	approversHandler.AssociatedIssue, err = findAssociatedIssue(pr.body, pr.org)
 	if err != nil {
 		log.WithError(err).Errorf("Failed to find associated issue from PR body: %v", err)

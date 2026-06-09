@@ -50,6 +50,15 @@ type Repo interface {
 	Filenames() ownersconfig.Filenames
 }
 
+// FileListTruncation describes a pull request whose changed-file listing
+// could not be fully retrieved from GitHub.
+type FileListTruncation struct {
+	// KnownFiles is the number of changed files GitHub returned.
+	KnownFiles int
+	// TotalFiles is the number of files the pull request actually changes.
+	TotalFiles int
+}
+
 // Owners provides functionality related to owners of a specific code change.
 type Owners struct {
 	// filenamesUnfiltered contains all files in a given PR, including those
@@ -62,12 +71,38 @@ type Owners struct {
 	repo      Repo
 	seed      int64
 
+	// fileListTruncation is non-nil when the complete set of changed files is
+	// unknown and approval is computed against the repository root instead.
+	// See NewTruncatedOwners.
+	fileListTruncation *FileListTruncation
+
 	log *logrus.Entry
 }
 
 // NewOwners consturcts a new Owners instance. filenames is the slice of files changed.
 func NewOwners(log *logrus.Entry, filenames []string, r Repo, s int64) Owners {
 	return Owners{filenamesUnfiltered: filenames, filenames: filenames, repo: r, seed: s, log: log}
+}
+
+// NewTruncatedOwners constructs an Owners for a pull request whose changed-file
+// listing was truncated by GitHub, so the complete set of changed files is
+// unknown and path-based approval cannot be computed. The change is instead
+// attributed to the repository root: approval is required from a root approver,
+// who is trusted for the whole repository including the files hidden by the
+// truncation. OWNERS configuration in subdirectories (such as no_parent_owners)
+// is deliberately not honored — it cannot be matched against files we do not
+// know about.
+func NewTruncatedOwners(log *logrus.Entry, r Repo, s int64, truncation FileListTruncation) Owners {
+	// The synthetic filename attributes the change to the root OWNERS file. Its
+	// name never surfaces anywhere: messages and approval computations only use
+	// the directory of the OWNERS file governing it, which is the repo root.
+	o := NewOwners(log, []string{r.Filenames().Owners}, r, s)
+	o.fileListTruncation = &truncation
+	return o
+}
+
+func (o Owners) fileListTruncated() bool {
+	return o.fileListTruncation != nil
 }
 
 // GetApprovers returns a map from ownersFiles -> people that are approvers in them
@@ -208,6 +243,13 @@ func (o Owners) GetSuggestedApprovers(reverseMap map[string]sets.Set[string], po
 
 // GetOwnersSet returns a set containing all the Owners files necessary to get the PR approved
 func (o Owners) GetOwnersSet() sets.Set[string] {
+	if o.fileListTruncated() {
+		// The synthetic root file must never be purged by the
+		// IsAutoApproveUnownedSubfolders handling below: approval from a root
+		// approver is required precisely because the actual files are unknown.
+		return sets.New[string](o.repo.FindApproverOwnersForFile(o.filenames[0]))
+	}
+
 	owners := sets.New[string]()
 
 	var newFilenames []string
@@ -563,6 +605,12 @@ func (ap Approvers) IsApproved() bool {
 	return ap.RequirementsMet() || ap.ManuallyApproved()
 }
 
+// FileListTruncation returns information about the truncation of the pull
+// request's changed-file listing, or nil when the listing is complete.
+func (ap Approvers) FileListTruncation() *FileListTruncation {
+	return ap.owners.fileListTruncation
+}
+
 // ListApprovals returns the list of approvals
 func (ap Approvers) ListApprovals() []Approval {
 	approvals := []Approval{}
@@ -672,6 +720,10 @@ func GetMessage(ap Approvers, linkURL *url.URL, commandHelpLink, prProcessLink, 
 	linkURL.Path = org + "/" + repo
 	message, err := GenerateTemplate(`{{if (and (not .ap.RequirementsMet) (call .ap.ManuallyApproved )) }}
 Approval requirements bypassed by manually added approval.
+
+{{end -}}
+{{if .ap.FileListTruncation -}}
+This pull request changes {{.ap.FileListTruncation.TotalFiles}} files, but only {{.ap.FileListTruncation.KnownFiles}} of them could be retrieved from the GitHub API, so the changed files cannot be matched against OWNERS. **Approval from a root approver** (an approver in the top-level OWNERS file) **is required instead.**
 
 {{end -}}
 This pull-request has been approved by:{{range $index, $approval := .ap.ListApprovals}}{{if $index}}, {{else}} {{end}}{{$approval}}{{end}}

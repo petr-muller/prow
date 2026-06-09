@@ -493,30 +493,73 @@ func TestGetFailedActionRunsByHeadBranch(t *testing.T) {
 }
 
 func TestGetPullRequestChanges(t *testing.T) {
-	ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodGet {
-			t.Errorf("Bad method: %s", r.Method)
-		}
-		if r.URL.Path != "/repos/k8s/kuber/pulls/12/files" {
-			t.Errorf("Bad request path: %s", r.URL.Path)
-		}
-		changes := []PullRequestChange{
-			{Filename: "foo.txt"},
-		}
-		b, err := json.Marshal(&changes)
-		if err != nil {
-			t.Fatalf("Didn't expect error: %v", err)
-		}
-		fmt.Fprint(w, string(b))
-	}))
-	defer ts.Close()
-	c := getClient(ts.URL)
-	cs, err := c.GetPullRequestChanges("k8s", "kuber", 12)
-	if err != nil {
-		t.Errorf("Didn't expect error: %v", err)
+	listingAtCap := make([]PullRequestChange, maxPullRequestFileCount)
+	for i := range listingAtCap {
+		listingAtCap[i] = PullRequestChange{Filename: fmt.Sprintf("file-%04d.txt", i)}
 	}
-	if len(cs) != 1 || cs[0].Filename != "foo.txt" {
-		t.Errorf("Wrong result: %#v", cs)
+	testCases := []struct {
+		name            string
+		changes         []PullRequestChange
+		prChangedFiles  int
+		expectPRFetch   bool
+		expectTruncated bool
+	}{
+		{
+			name:    "listing below the cap is returned without verification",
+			changes: []PullRequestChange{{Filename: "foo.txt"}},
+		},
+		{
+			name:           "listing at the cap but complete",
+			changes:        listingAtCap,
+			prChangedFiles: maxPullRequestFileCount,
+			expectPRFetch:  true,
+		},
+		{
+			name:            "truncated listing is returned with a typed error",
+			changes:         listingAtCap,
+			prChangedFiles:  maxPullRequestFileCount + 2000,
+			expectPRFetch:   true,
+			expectTruncated: true,
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			var prFetched bool
+			ts := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != http.MethodGet {
+					t.Errorf("Bad method: %s", r.Method)
+				}
+				switch r.URL.Path {
+				case "/repos/k8s/kuber/pulls/12/files":
+					b, err := json.Marshal(tc.changes)
+					if err != nil {
+						t.Fatalf("Didn't expect error: %v", err)
+					}
+					fmt.Fprint(w, string(b))
+				case "/repos/k8s/kuber/pulls/12":
+					prFetched = true
+					fmt.Fprintf(w, `{"number": 12, "changed_files": %d}`, tc.prChangedFiles)
+				default:
+					t.Errorf("Bad request path: %s", r.URL.Path)
+				}
+			}))
+			defer ts.Close()
+			c := getClient(ts.URL)
+			cs, err := c.GetPullRequestChanges("k8s", "kuber", 12)
+			if tc.expectTruncated {
+				if !errors.Is(err, PullRequestChangesTruncatedError{}) {
+					t.Errorf("Expected PullRequestChangesTruncatedError, got: %v", err)
+				}
+			} else if err != nil {
+				t.Errorf("Didn't expect error: %v", err)
+			}
+			if prFetched != tc.expectPRFetch {
+				t.Errorf("PR object fetched: %t, expected: %t", prFetched, tc.expectPRFetch)
+			}
+			if len(cs) != len(tc.changes) {
+				t.Errorf("Expected %d changes, got %d", len(tc.changes), len(cs))
+			}
+		})
 	}
 }
 

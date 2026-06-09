@@ -1405,175 +1405,137 @@ func (fro fakeRepoOwners) RequiredReviewers(path string) sets.Set[string] {
 	return sets.New[string]()
 }
 
-func TestHandleTruncatedFileListCommitsFallback(t *testing.T) {
-	files := []string{"a/a.go"}
-	fghc := newFakeGitHubClient(false, false, files, nil, nil)
-	fghc.CommitMap = map[string][]github.RepositoryCommit{
-		"org/repo#1": {{SHA: "abc123"}, {SHA: "def456"}},
-	}
-	fghc.Commits = map[string]github.RepositoryCommit{
-		"abc123": {SHA: "abc123", Files: []github.CommitFile{{Filename: "a/a.go"}}},
-		"def456": {SHA: "def456", Files: []github.CommitFile{{Filename: "a/a.go"}, {Filename: "b/b.go"}, {Filename: "c/c.go"}}},
-	}
-
+// TestHandleTruncatedFileList tests the approval behavior for PRs whose
+// changed-file listing is truncated by GitHub: path-based approval cannot be
+// computed, so approval from a root approver is required instead.
+func TestHandleTruncatedFileList(t *testing.T) {
 	fr := fakeRepo{
 		approvers: map[string]layeredsets.String{
+			"":  layeredsets.NewString("rootbert"),
 			"a": layeredsets.NewString("alice"),
-			"b": layeredsets.NewString("bob"),
-			"c": layeredsets.NewString("cjwagner"),
 		},
 		leafApprovers: map[string]sets.Set[string]{
+			"":  sets.New[string]("rootbert"),
 			"a": sets.New[string]("alice"),
-			"b": sets.New[string]("bob"),
-			"c": sets.New[string]("cjwagner"),
 		},
 		approverOwners: map[string]string{
 			"a/a.go": "a",
-			"b/b.go": "b",
-			"c/c.go": "c",
+			// The synthetic root-level file approval is computed against when
+			// the file listing is truncated. Owned by the root OWNERS.
+			"OWNERS": "",
 		},
 	}
 
-	rsa := false
-	err := handle(
-		logrus.WithField("plugin", "approve"),
-		fghc,
-		fr,
-		config.GitHubOptions{LinkURL: &url.URL{Scheme: "https", Host: "github.com"}},
-		&plugins.Approve{
-			Repos:               []string{"org/repo"},
-			RequireSelfApproval: &rsa,
-			CommandHelpLink:     "https://go.k8s.io/bot-commands",
-			PrProcessLink:       "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process",
-		},
-		&state{
-			org:          "org",
-			repo:         "repo",
-			branch:       "master",
-			number:       prNumber,
-			author:       "cjwagner",
-			changedFiles: 3,
-		},
-	)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	if len(fghc.IssueCommentsAdded) == 0 {
-		t.Fatal("Expected a notification comment to be created")
-	}
-	if strings.Contains(fghc.IssueCommentsAdded[0], "cannot be safely calculated") {
-		t.Error("Got truncation warning but expected normal approval flow after successful fallback")
-	}
-}
+	tests := []struct {
+		name          string
+		hasLabel      bool
+		humanApproved bool
+		comments      []github.IssueComment
 
-func TestHandleTruncatedFileListTooManyCommits(t *testing.T) {
-	files := []string{"a/a.go"}
-	fghc := newFakeGitHubClient(true, false, files, nil, nil)
-	commits := make([]github.RepositoryCommit, 15)
-	for i := range commits {
-		commits[i] = github.RepositoryCommit{SHA: fmt.Sprintf("sha%d", i)}
-	}
-	fghc.CommitMap = map[string][]github.RepositoryCommit{
-		"org/repo#1": commits,
+		expectLabelAdded   bool
+		expectLabelRemoved bool
+		commentContains    []string
+	}{
+		{
+			name:             "root approver approves the PR",
+			comments:         []github.IssueComment{newTestComment("rootbert", "/approve")},
+			expectLabelAdded: true,
+			commentContains:  []string{"This PR is **APPROVED**", "5000 files", "root approver"},
+		},
+		{
+			name:            "directory approver is not sufficient, root approver is suggested",
+			comments:        []github.IssueComment{newTestComment("alice", "/approve")},
+			commentContains: []string{"This PR is **NOT APPROVED**", "5000 files", "root approver", "rootbert"},
+		},
+		{
+			name:               "bot-applied approved label is removed",
+			hasLabel:           true,
+			expectLabelRemoved: true,
+			commentContains:    []string{"This PR is **NOT APPROVED**", "root approver"},
+		},
+		{
+			name:            "human-applied approved label is preserved",
+			hasLabel:        true,
+			humanApproved:   true,
+			commentContains: []string{"bypassed by manually added approval"},
+		},
 	}
 
-	fr := fakeRepo{
-		approvers:      map[string]layeredsets.String{"a": layeredsets.NewString("alice")},
-		leafApprovers:  map[string]sets.Set[string]{"a": sets.New[string]("alice")},
-		approverOwners: map[string]string{"a/a.go": "a"},
-	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fghc := newFakeGitHubClient(test.hasLabel, test.humanApproved, []string{"a/a.go"}, test.comments, nil)
+			// More changed files than the listing contains: the fake client
+			// reports the listing as truncated, like GitHub would.
+			fghc.PullRequests[prNumber].ChangedFiles = 5000
 
-	err := handle(
-		logrus.WithField("plugin", "approve"),
-		fghc,
-		fr,
-		config.GitHubOptions{LinkURL: &url.URL{Scheme: "https", Host: "github.com"}},
-		&plugins.Approve{
-			Repos:           []string{"org/repo"},
-			CommandHelpLink: "https://go.k8s.io/bot-commands",
-			PrProcessLink:   "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process",
-		},
-		&state{
-			org:          "org",
-			repo:         "repo",
-			branch:       "master",
-			number:       prNumber,
-			author:       "cjwagner",
-			changedFiles: 5000,
-		},
-	)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	foundWarning := false
-	for _, comment := range fghc.IssueCommentsAdded {
-		if strings.Contains(comment, "exceeds both limits") {
-			foundWarning = true
-			break
-		}
-	}
-	if !foundWarning {
-		t.Error("Expected 'exceeds both limits' warning but didn't find it")
-	}
-	foundRemoval := false
-	for _, label := range fghc.IssueLabelsRemoved {
-		if strings.Contains(label, labels.Approved) {
-			foundRemoval = true
-			break
-		}
-	}
-	if !foundRemoval {
-		t.Error("Expected stale approved label to be removed")
-	}
-}
+			rsa := true
+			runHandle := func() error {
+				return handle(
+					logrus.WithField("plugin", "approve"),
+					fghc,
+					fr,
+					config.GitHubOptions{LinkURL: &url.URL{Scheme: "https", Host: "github.com"}},
+					&plugins.Approve{
+						Repos:               []string{"org/repo"},
+						RequireSelfApproval: &rsa,
+						CommandHelpLink:     "https://go.k8s.io/bot-commands",
+						PrProcessLink:       "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process",
+					},
+					&state{
+						org:    "org",
+						repo:   "repo",
+						branch: "master",
+						number: prNumber,
+						author: "cjwagner",
+					},
+				)
+			}
+			if err := runHandle(); err != nil {
+				t.Fatalf("Unexpected error handling event: %v", err)
+			}
 
-func TestHandleTruncatedFileListStillIncomplete(t *testing.T) {
-	files := []string{"a/a.go"}
-	fghc := newFakeGitHubClient(false, false, files, nil, nil)
-	fghc.CommitMap = map[string][]github.RepositoryCommit{
-		"org/repo#1": {{SHA: "abc123"}},
-	}
-	fghc.Commits = map[string]github.RepositoryCommit{
-		"abc123": {SHA: "abc123", Files: []github.CommitFile{{Filename: "a/a.go"}}},
-	}
+			if len(fghc.IssueCommentsAdded) != 1 {
+				t.Fatalf("Expected exactly 1 notification to be added, got %d: %v", len(fghc.IssueCommentsAdded), fghc.IssueCommentsAdded)
+			}
+			for _, want := range test.commentContains {
+				if !strings.Contains(fghc.IssueCommentsAdded[0], want) {
+					t.Errorf("Notification does not contain %q:\n%s", want, fghc.IssueCommentsAdded[0])
+				}
+			}
 
-	fr := fakeRepo{
-		approvers:      map[string]layeredsets.String{"a": layeredsets.NewString("alice")},
-		leafApprovers:  map[string]sets.Set[string]{"a": sets.New[string]("alice")},
-		approverOwners: map[string]string{"a/a.go": "a"},
-	}
+			approvedLabel := fmt.Sprintf("org/repo#%v:approved", prNumber)
+			if !test.hasLabel {
+				labelAdded := false
+				for _, l := range fghc.IssueLabelsAdded {
+					if l == approvedLabel {
+						labelAdded = true
+					}
+				}
+				if labelAdded != test.expectLabelAdded {
+					t.Errorf("Approved label added: %t, expected: %t", labelAdded, test.expectLabelAdded)
+				}
+			}
+			labelRemoved := false
+			for _, l := range fghc.IssueLabelsRemoved {
+				if l == approvedLabel {
+					labelRemoved = true
+				}
+			}
+			if labelRemoved != test.expectLabelRemoved {
+				t.Errorf("Approved label removed: %t, expected: %t", labelRemoved, test.expectLabelRemoved)
+			}
 
-	err := handle(
-		logrus.WithField("plugin", "approve"),
-		fghc,
-		fr,
-		config.GitHubOptions{LinkURL: &url.URL{Scheme: "https", Host: "github.com"}},
-		&plugins.Approve{
-			Repos:           []string{"org/repo"},
-			CommandHelpLink: "https://go.k8s.io/bot-commands",
-			PrProcessLink:   "https://git.k8s.io/community/contributors/guide/owners.md#the-code-review-process",
-		},
-		&state{
-			org:          "org",
-			repo:         "repo",
-			branch:       "master",
-			number:       prNumber,
-			author:       "cjwagner",
-			changedFiles: 5000,
-		},
-	)
-	if err != nil {
-		t.Fatalf("Unexpected error: %v", err)
-	}
-	foundWarning := false
-	for _, comment := range fghc.IssueCommentsAdded {
-		if strings.Contains(comment, "truncated file lists") {
-			foundWarning = true
-			break
-		}
-	}
-	if !foundWarning {
-		t.Error("Expected 'truncated file lists' warning for commits-insufficient case but didn't find it")
+			// Processing another event must not re-post the identical notification.
+			if err := runHandle(); err != nil {
+				t.Fatalf("Unexpected error handling second event: %v", err)
+			}
+			if len(fghc.IssueCommentsAdded) != 1 {
+				t.Errorf("Notification was re-posted on second handling: %v", fghc.IssueCommentsAdded)
+			}
+			if len(fghc.IssueCommentsDeleted) != 0 {
+				t.Errorf("Expected no notifications to be deleted, got %d", len(fghc.IssueCommentsDeleted))
+			}
+		})
 	}
 }
 

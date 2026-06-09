@@ -485,11 +485,18 @@ func (f *FakeClient) CloseIssueAsNotPlanned(org, repo string, number int) error 
 	return nil
 }
 
-// GetPullRequestChanges returns the file modifications in a PR.
+// GetPullRequestChanges returns the file modifications in a PR. Like the real
+// client, it returns the (incomplete) list together with a
+// PullRequestChangesTruncatedError when the PR object reports more changed
+// files than the listing contains.
 func (f *FakeClient) GetPullRequestChanges(org, repo string, number int) ([]github.PullRequestChange, error) {
 	f.lock.RLock()
 	defer f.lock.RUnlock()
-	return f.PullRequestChanges[number], nil
+	changes := f.PullRequestChanges[number]
+	if pr, ok := f.PullRequests[number]; ok && pr != nil && pr.ChangedFiles > len(changes) {
+		return changes, github.PullRequestChangesTruncatedError{Org: org, Repo: repo, Number: number, Returned: len(changes), Expected: pr.ChangedFiles}
+	}
+	return changes, nil
 }
 
 // GetRef returns the hash of a ref.

@@ -682,6 +682,11 @@ type ConfigMapSpec struct {
 // 3. If allow lists are specified, the repo must match an entry in the allowed list.
 // 4. If no allow lists are specified, it's allowed (unless denied).
 func (cm ConfigMapSpec) IsAllowed(repo string) bool {
+	// Empty repo means a non-PR context (e.g. config-bootstrapper) that bypasses ACLs
+	if repo == "" {
+		return true
+	}
+
 	or := config.NewOrgRepo(repo)
 
 	// Check denied list first

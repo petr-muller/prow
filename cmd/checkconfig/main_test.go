@@ -2502,6 +2502,48 @@ func TestValidateConfigUpdaterACLs(t *testing.T) {
 			expectedErrorMsg: `config_updater.maps["config.yaml"].allowed_repos: you cannot set a repo without an org`,
 		},
 		{
+			name: "trailing slash in allowed repos",
+			config: &plugins.Configuration{
+				ConfigUpdater: plugins.ConfigUpdater{
+					Maps: map[string]plugins.ConfigMapSpec{
+						"config.yaml": {
+							Name:         "config",
+							AllowedRepos: []string{"kubernetes/"},
+						},
+					},
+				},
+			},
+			expectedErrorMsg: `config_updater.maps["config.yaml"].allowed_repos: repo name cannot be empty after org`,
+		},
+		{
+			name: "leading whitespace in denied repos",
+			config: &plugins.Configuration{
+				ConfigUpdater: plugins.ConfigUpdater{
+					Maps: map[string]plugins.ConfigMapSpec{
+						"config.yaml": {
+							Name:        "config",
+							DeniedRepos: []string{" kubernetes"},
+						},
+					},
+				},
+			},
+			expectedErrorMsg: `config_updater.maps["config.yaml"].denied_repos: org/repo must not contain leading or trailing whitespace`,
+		},
+		{
+			name: "trailing whitespace in allowed repos",
+			config: &plugins.Configuration{
+				ConfigUpdater: plugins.ConfigUpdater{
+					Maps: map[string]plugins.ConfigMapSpec{
+						"config.yaml": {
+							Name:         "config",
+							AllowedRepos: []string{"kubernetes "},
+						},
+					},
+				},
+			},
+			expectedErrorMsg: `config_updater.maps["config.yaml"].allowed_repos: org/repo must not contain leading or trailing whitespace`,
+		},
+		{
 			name: "multiple maps with errors",
 			config: &plugins.Configuration{
 				ConfigUpdater: plugins.ConfigUpdater{

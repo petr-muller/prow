@@ -1550,6 +1550,9 @@ func validateRepoName(repo string) error {
 	if repo == "" {
 		return errors.New("org/repo cannot be empty")
 	}
+	if strings.TrimSpace(repo) != repo {
+		return errors.New("org/repo must not contain leading or trailing whitespace")
+	}
 
 	s := strings.SplitN(repo, "/", 3)
 	if len(s) > 2 {
@@ -1557,6 +1560,9 @@ func validateRepoName(repo string) error {
 	}
 	if s[0] == "" {
 		return errors.New("you cannot set a repo without an org")
+	}
+	if len(s) == 2 && s[1] == "" {
+		return errors.New("repo name cannot be empty after org")
 	}
 
 	return nil

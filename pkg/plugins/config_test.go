@@ -2712,6 +2712,15 @@ func TestConfigMapSpecIsAllowed(t *testing.T) {
 			expected: true,
 		},
 		{
+			name: "trailing-slash entry in allowed repos silently never matches",
+			cm: ConfigMapSpec{
+				Name:         "test-config",
+				AllowedRepos: []string{"kubernetes/"},
+			},
+			repo:     "kubernetes/test-infra",
+			expected: false,
+		},
+		{
 			name: "empty repo with no ACLs - allowed",
 			cm: ConfigMapSpec{
 				Name: "test-config",
@@ -2720,13 +2729,13 @@ func TestConfigMapSpecIsAllowed(t *testing.T) {
 			expected: true,
 		},
 		{
-			name: "empty repo with allowed repos - denied",
+			name: "empty repo with allowed repos - allowed (bypass)",
 			cm: ConfigMapSpec{
 				Name:         "test-config",
 				AllowedRepos: []string{"kubernetes"},
 			},
 			repo:     "",
-			expected: false,
+			expected: true,
 		},
 	}
 

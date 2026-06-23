@@ -154,7 +154,7 @@ func handle(gc githubClient, log *logrus.Entry, config *plugins.Configuration, p
 		if len(invalidCommits) != 0 {
 			sections = append(sections,
 				fmt.Sprintf(
-					"### Invalid commit messages\n\n[Keywords](https://help.github.com/articles/closing-issues-using-keywords) which can automatically close issues and hashtag(#) mentions are not allowed.\n\n%s",
+					"### Invalid commit messages\n\n[Keywords](https://docs.github.com/articles/closing-issues-using-keywords) which can automatically close issues are not allowed in commit messages.\n\n%s",
 					dco.MarkdownSHAList(org, repo, invalidCommits),
 				))
 		}
@@ -169,7 +169,7 @@ func handle(gc githubClient, log *logrus.Entry, config *plugins.Configuration, p
 
 		if invalidPRTitle {
 			sections = append(sections,
-				"### Invalid PR title\n\n[Keywords](https://help.github.com/articles/closing-issues-using-keywords) are not allowed in PR titles.\n\nUse `/retitle <new-title>` to fix it.",
+				"### Invalid PR title\n\n[Keywords](https://docs.github.com/articles/closing-issues-using-keywords) are not allowed in PR titles.\n\nUse `/retitle <new-title>` to fix it.",
 			)
 		}
 

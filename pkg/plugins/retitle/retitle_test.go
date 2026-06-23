@@ -128,7 +128,7 @@ Instructions for interacting with me using PR comments are available [here](http
 			trusted: func(user string) (bool, error) {
 				return true, nil
 			},
-			expectedComment: `org/repo#1:@user: Titles may not contain [keywords](https://help.github.com/articles/closing-issues-using-keywords) which can automatically close issues.
+			expectedComment: `org/repo#1:@user: Titles may not contain [keywords](https://docs.github.com/articles/closing-issues-using-keywords) which can automatically close issues.
 
 <details>
 

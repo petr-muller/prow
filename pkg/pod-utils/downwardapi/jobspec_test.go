@@ -191,6 +191,37 @@ func TestEnvironmentForSpec(t *testing.T) {
 			},
 		},
 		{
+			name: "postsubmit job with path alias without slash",
+			spec: JobSpec{
+				Type:      prowapi.PostsubmitJob,
+				Job:       "job-name",
+				BuildID:   "0",
+				ProwJobID: "prowjob",
+				Refs: &prowapi.Refs{
+					Org:       "org-name",
+					Repo:      "repo-name",
+					BaseRef:   "base-ref",
+					BaseSHA:   "base-sha",
+					PathAlias: "k8s.io",
+				},
+			},
+			expected: map[string]string{
+				"CI":            "true",
+				"JOB_NAME":      "job-name",
+				"BUILD_ID":      "0",
+				"PROW_JOB_ID":   "prowjob",
+				"JOB_TYPE":      "postsubmit",
+				"JOB_SPEC":      `{"type":"postsubmit","job":"job-name","buildid":"0","prowjobid":"prowjob","refs":{"org":"org-name","repo":"repo-name","base_ref":"base-ref","base_sha":"base-sha","path_alias":"k8s.io"}}`,
+				"REPO_OWNER":    "org-name",
+				"REPO_NAME":     "repo-name",
+				"SRC_BASE":      "",
+				"SRC_HOST":      "k8s.io",
+				"PULL_BASE_REF": "base-ref",
+				"PULL_BASE_SHA": "base-sha",
+				"PULL_REFS":     "base-ref:base-sha",
+			},
+		},
+		{
 			name: "postsubmit job with repo link",
 			spec: JobSpec{
 				Type:      prowapi.PostsubmitJob,

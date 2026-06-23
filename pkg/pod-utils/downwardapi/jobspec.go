@@ -22,12 +22,10 @@ import (
 	"os"
 	"reflect"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/GoogleCloudPlatform/testgrid/metadata"
 	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
-	"sigs.k8s.io/prow/pkg/github"
 	"sigs.k8s.io/prow/pkg/pod-utils/clone"
 )
 
@@ -142,28 +140,7 @@ func EnvForSpec(spec JobSpec) (map[string]string, error) {
 	env[RepoOwnerEnv] = spec.Refs.Org
 	env[RepoNameEnv] = spec.Refs.Repo
 
-	// Determine the source host and base path, mirroring
-	// the logic in clone.PathForRefs for consistency.
-	// SRC_HOST is the hosting service (e.g. "github.com").
-	// SRC_BASE is the path under the host (e.g. "org/repo").
-	srcHost := github.DefaultHost
-	srcBase := fmt.Sprintf("%s/%s", spec.Refs.Org, spec.Refs.Repo)
-
-	if spec.Refs.PathAlias != "" {
-		if h, b, ok := strings.Cut(spec.Refs.PathAlias, "/"); ok {
-			srcHost, srcBase = h, b
-		} else {
-			srcHost = spec.Refs.PathAlias
-		}
-	} else if spec.Refs.RepoLink != "" {
-		parts := strings.Split(spec.Refs.RepoLink, "://")
-		hostAndPath := parts[len(parts)-1]
-		if h, b, ok := strings.Cut(hostAndPath, "/"); ok {
-			srcHost, srcBase = h, b
-		} else {
-			srcHost = hostAndPath
-		}
-	}
+	srcHost, srcBase := clone.HostAndPathForRefs(*spec.Refs)
 	env[SrcHostEnv] = srcHost
 	env[SrcBaseEnv] = srcBase
 

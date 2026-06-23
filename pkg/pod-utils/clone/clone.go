@@ -134,20 +134,32 @@ func censorToken(msg, token string) string {
 	return string(censored)
 }
 
+// HostAndPathForRefs returns the hosting service and the path
+// under it for the given refs, using the same precedence order
+// (PathAlias > RepoLink > default github.com) as PathForRefs.
+func HostAndPathForRefs(refs prowapi.Refs) (host, basePath string) {
+	if refs.PathAlias != "" {
+		if h, b, ok := strings.Cut(refs.PathAlias, "/"); ok {
+			return h, b
+		}
+		return refs.PathAlias, ""
+	}
+	if refs.RepoLink != "" {
+		parts := strings.Split(refs.RepoLink, "://")
+		hostAndPath := parts[len(parts)-1]
+		if h, b, ok := strings.Cut(hostAndPath, "/"); ok {
+			return h, b
+		}
+		return hostAndPath, ""
+	}
+	return github.DefaultHost, fmt.Sprintf("%s/%s", refs.Org, refs.Repo)
+}
+
 // PathForRefs determines the full path to where
 // refs should be cloned
 func PathForRefs(baseDir string, refs prowapi.Refs) string {
-	var clonePath string
-	if refs.PathAlias != "" {
-		clonePath = refs.PathAlias
-	} else if refs.RepoLink != "" {
-		// Drop the protocol from the RepoLink
-		parts := strings.Split(refs.RepoLink, "://")
-		clonePath = parts[len(parts)-1]
-	} else {
-		clonePath = fmt.Sprintf("%s/%s/%s", github.DefaultHost, refs.Org, refs.Repo)
-	}
-	return path.Join(baseDir, "src", clonePath)
+	host, basePath := HostAndPathForRefs(refs)
+	return path.Join(baseDir, "src", host, basePath)
 }
 
 // gitCtx collects a few common values needed for all git commands.

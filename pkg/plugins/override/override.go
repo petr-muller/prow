@@ -490,15 +490,15 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 			continue
 		}
 
+		baseSHA, err := baseSHAGetter()
+		if err != nil {
+			resp := "Cannot get base ref of PR"
+			log.WithError(err).Warn(resp)
+			return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
+		}
+
 		// Create the overridden prow result if necessary
 		if pre != nil {
-			baseSHA, err := baseSHAGetter()
-			if err != nil {
-				resp := "Cannot get base ref of PR"
-				log.WithError(err).Warn(resp)
-				return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
-			}
-
 			pj := pjutil.NewPresubmit(*pr, baseSHA, *pre, e.GUID, nil)
 			now := metav1.Now()
 			pj.Status = prowapi.ProwJobStatus{
@@ -518,7 +518,7 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 			contextsWithCreatedJobs.Insert(status.Context)
 		}
 		status.State = github.StatusSuccess
-		status.Description = description(user)
+		status.Description = config.ContextDescriptionWithBaseSha(description(user), baseSHA)
 		if err := oc.CreateStatus(org, repo, sha, status); err != nil {
 			resp := fmt.Sprintf("Cannot update PR status for context %s", status.Context)
 			log.WithError(err).Warn(resp)

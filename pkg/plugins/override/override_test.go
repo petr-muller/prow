@@ -44,7 +44,7 @@ const (
 	fakePR      = 33
 	fakeSHA     = "deadbeef"
 	fakeBaseRef = "fake-branch"
-	fakeBaseSHA = "fffffff"
+	fakeBaseSHA = "fffffffffffffffffffffffffffffffffffffff0"
 	adminUser   = "admin-user"
 )
 
@@ -390,7 +390,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "broken-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -462,12 +462,12 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "broken-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 				{
 					Context:     "hung-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -553,7 +553,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "hung-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -641,12 +641,12 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "broken-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 				{
 					Context:     "hung-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -668,12 +668,12 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "broken-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 				{
 					Context:     "hung-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -692,7 +692,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "broken-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -863,7 +863,7 @@ func TestHandle(t *testing.T) {
 				{
 					Context:     "prow-job",
 					State:       github.StatusSuccess,
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 				},
 			},
 		},
@@ -892,7 +892,7 @@ func TestHandle(t *testing.T) {
 				{
 					Context:     "ci/prow/pkg-job",
 					State:       github.StatusSuccess,
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 				},
 			},
 		},
@@ -926,12 +926,12 @@ func TestHandle(t *testing.T) {
 				{
 					Context:     "ci/prow/context",
 					State:       github.StatusSuccess,
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 				},
 				{
 					Context:     "ci/prow/pkg-job",
 					State:       github.StatusSuccess,
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 				},
 			},
 		},
@@ -960,7 +960,7 @@ func TestHandle(t *testing.T) {
 				{
 					Context:     "ci/prow/pkg-job",
 					State:       github.StatusSuccess,
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 				},
 			},
 		},
@@ -977,7 +977,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -998,7 +998,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description("code_owner"),
+					Description: config.ContextDescriptionWithBaseSha(description("code_owner"), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -1019,7 +1019,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description("Code_owner"),
+					Description: config.ContextDescriptionWithBaseSha(description("Code_owner"), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -1063,7 +1063,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description("user1"),
+					Description: config.ContextDescriptionWithBaseSha(description("user1"), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -1087,7 +1087,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description("user1"),
+					Description: config.ContextDescriptionWithBaseSha(description("user1"), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -1115,7 +1115,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -1136,7 +1136,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "job",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 			},
@@ -1173,7 +1173,7 @@ func TestHandle(t *testing.T) {
 			expected: []github.Status{
 				{
 					Context:     "problematic-test",
-					Description: description(adminUser),
+					Description: config.ContextDescriptionWithBaseSha(description(adminUser), fakeBaseSHA),
 					State:       github.StatusSuccess,
 				},
 				{

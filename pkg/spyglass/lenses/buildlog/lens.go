@@ -34,10 +34,15 @@ import (
 	"github.com/sirupsen/logrus"
 
 	prowconfig "sigs.k8s.io/prow/pkg/config"
+	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 	pkgio "sigs.k8s.io/prow/pkg/io"
 	"sigs.k8s.io/prow/pkg/spyglass/api"
 	"sigs.k8s.io/prow/pkg/spyglass/lenses"
 )
+
+type jobStateChecker interface {
+	JobState() (prowapi.ProwJobState, error)
+}
 
 const (
 	name            = "buildlog"
@@ -228,6 +233,13 @@ func (lens Lens) Body(artifacts []api.Artifact, resourceDir string, data string,
 		lines, err := logLinesAll(a)
 		if err != nil {
 			logrus.WithError(err).Info("Error reading log.")
+			if checker, ok := a.(jobStateChecker); ok {
+				if state, stateErr := checker.JobState(); stateErr == nil && (state == prowapi.PendingState || state == prowapi.TriggeredState) {
+					av.Warning = "Pod is initializing, log will be available once the container starts."
+					buildLogsView.LogViews = append(buildLogsView.LogViews, av)
+					continue
+				}
+			}
 			av.Error = fmt.Sprintf("Failed to read log: %v", err)
 			buildLogsView.LogViews = append(buildLogsView.LogViews, av)
 			continue

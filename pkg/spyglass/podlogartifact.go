@@ -189,6 +189,15 @@ func (a *PodLogArtifact) Size() (int64, error) {
 
 }
 
+// JobState returns the current state of the ProwJob associated with this artifact.
+func (a *PodLogArtifact) JobState() (prowapi.ProwJobState, error) {
+	pj, err := a.GetProwJob(a.name, a.buildID)
+	if err != nil {
+		return "", fmt.Errorf("error getting prowjob state: %w", err)
+	}
+	return pj.Status.State, nil
+}
+
 func (a *PodLogArtifact) Metadata() (map[string]string, error) {
 	return nil, nil
 }

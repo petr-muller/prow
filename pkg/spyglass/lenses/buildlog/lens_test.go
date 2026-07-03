@@ -26,6 +26,7 @@ import (
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
+	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 	prowconfig "sigs.k8s.io/prow/pkg/config"
 	pkgio "sigs.k8s.io/prow/pkg/io"
 	"sigs.k8s.io/prow/pkg/spyglass/api"
@@ -1174,6 +1175,56 @@ func TestBodyReadAllError(t *testing.T) {
 	}
 	if !strings.Contains(got, "build-log.txt") {
 		t.Errorf("Body() should still reference the artifact name, got: %s", got[:min(200, len(got))])
+	}
+}
+
+type pendingArtifact struct {
+	errArtifact
+	state prowapi.ProwJobState
+}
+
+func (p *pendingArtifact) JobState() (prowapi.ProwJobState, error) {
+	return p.state, nil
+}
+
+func TestBodyPendingJobShowsWarning(t *testing.T) {
+	for _, state := range []prowapi.ProwJobState{prowapi.PendingState, prowapi.TriggeredState} {
+		t.Run(string(state), func(t *testing.T) {
+			art := &pendingArtifact{
+				errArtifact: errArtifact{
+					Artifact: fake.Artifact{
+						Path:    "build-log.txt",
+						Content: []byte("content"),
+					},
+					readAllErr: fmt.Errorf("some error fetching logs"),
+				},
+				state: state,
+			}
+			got := Lens{}.Body([]api.Artifact{art}, ".", "", nil, prowconfig.Spyglass{})
+			if strings.Contains(got, "Failed to read log") {
+				t.Errorf("Body() should not show an error for %s job, got: %s", state, got[:min(200, len(got))])
+			}
+			if !strings.Contains(got, "Pod is initializing") {
+				t.Errorf("Body() should show a warning for %s job, got: %s", state, got[:min(200, len(got))])
+			}
+		})
+	}
+}
+
+func TestBodyFailedJobShowsError(t *testing.T) {
+	art := &pendingArtifact{
+		errArtifact: errArtifact{
+			Artifact: fake.Artifact{
+				Path:    "build-log.txt",
+				Content: []byte("content"),
+			},
+			readAllErr: fmt.Errorf("some error fetching logs"),
+		},
+		state: prowapi.FailureState,
+	}
+	got := Lens{}.Body([]api.Artifact{art}, ".", "", nil, prowconfig.Spyglass{})
+	if !strings.Contains(got, "Failed to read log") {
+		t.Errorf("Body() should show an error for failed job, got: %s", got[:min(200, len(got))])
 	}
 }
 

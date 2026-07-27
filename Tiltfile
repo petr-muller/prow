@@ -130,10 +130,19 @@ local_resource(
 # custom_build tells Tilt how to rebuild an image when source files change.
 # k8s_yaml registers the deployment so Tilt can update it after each build.
 # ---------------------------------------------------------------------------
-def prow_component(name):
+# Tracks components already registered via prow_component(), so a tilt.d/
+# override (loaded below, before the core profile is registered) takes
+# precedence over the default registration instead of erroring on it.
+_REGISTERED_COMPONENTS = {}
+
+def prow_component(name, override_src_dirs=None):
+    if name in _REGISTERED_COMPONENTS:
+        return
     if name not in COMPONENT_DEFS:
         fail('Unknown component "' + name + '". Add it to COMPONENT_DEFS in the Tiltfile.')
     src_dirs, yaml_files = COMPONENT_DEFS[name]
+    if override_src_dirs:
+        src_dirs = override_src_dirs
     custom_build(
         REGISTRY + '/' + name,
         'hack/tilt-build.sh ' + name + ' $EXPECTED_REF',
@@ -141,6 +150,17 @@ def prow_component(name):
     )
     k8s_yaml([CLUSTER_CFG + f for f in yaml_files])
     k8s_resource(workload=name, labels=['prow'])
+    _REGISTERED_COMPONENTS[name] = True
+
+# ---------------------------------------------------------------------------
+# Personal Tiltfile overrides - load any *.tiltfile in tilt.d/ (git-ignored).
+# Loaded before the component registrations below so a tilt.d/ file can call
+# prow_component(name, override_src_dirs) to customize a component's watched
+# source directories before its default registration runs.
+# ---------------------------------------------------------------------------
+for f in listdir('tilt.d/'):
+    if f.endswith('.tiltfile'):
+        include('tilt.d/' + f)
 
 # Core profile (matches 'make dev' / 'hack/dev-env.sh -profile=core')
 prow_component('fakeghserver')
@@ -169,11 +189,3 @@ k8s_resource(workload='deck-tenanted', labels=['prow'])
 # Extra components from tilt-settings.yaml (requires 'make dev-full' first)
 for component in extra_components:
     prow_component(component)
-
-# ---------------------------------------------------------------------------
-# Personal Tiltfile overrides - load any *.tiltfile in tilt.d/ (git-ignored).
-# Use these for local customization without modifying the committed Tiltfile.
-# ---------------------------------------------------------------------------
-for f in listdir('tilt.d/'):
-    if f.endswith('.tiltfile'):
-        include('tilt.d/' + f)

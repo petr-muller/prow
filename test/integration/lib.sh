@@ -278,7 +278,7 @@ declare -ra PROW_DEPLOYMENT_ORDER=(
 
 # Core subset of PROW_COMPONENTS used by the lightweight dev environment.
 # Excludes tide, Gerrit, Gangway, Moonraker, Pub/Sub, Pipeline, and
-# webhook-server, which can be added individually with hack/dev-env.sh -add=.
+# webhook-server; deploy those by running hack/dev-env.sh -profile=full.
 declare -ra PROW_COMPONENTS_CORE=(
   crier
   deck

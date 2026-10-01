@@ -234,11 +234,6 @@ func requirementDiff(pr *PullRequest, q *config.TideQuery, cc contextChecker, me
 			for _, ctx := range unsuccessfulContexts(headContexts, cc, log) {
 				contexts = append(contexts, string(ctx.Context))
 			}
-			presentContexts := sets.New[string]()
-			for _, ctx := range headContexts {
-				presentContexts.Insert(string(ctx.Context))
-			}
-			contexts = append(contexts, cc.MissingRequiredContexts(presentContexts.UnsortedList())...)
 		}
 	}
 	diff += len(contexts)

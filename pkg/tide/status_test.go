@@ -1320,14 +1320,14 @@ func TestRequirementDiff(t *testing.T) {
 			expectedDiff:         100,
 			expectedDescContains: "Blocked by GitHub (branch rulesets or protection)",
 		},
-		// Tests for missing required contexts (new functionality)
+		// Missing required contexts remain reported and contribute once to the diff.
 		{
 			name: "Missing required context not present in PR",
 			prContexts: []Context{
 				{Context: githubql.String("ci/test"), State: githubql.StatusStateSuccess},
 			},
 			requiredContexts:     []string{"ci/required-check"},
-			expectedDiff:         2, // 1 for ci/test being present + 1 for missing ci/required-check
+			expectedDiff:         1, // 1 for missing ci/required-check
 			expectedDescContains: "Job ci/required-check has not succeeded",
 		},
 		{
@@ -1336,7 +1336,7 @@ func TestRequirementDiff(t *testing.T) {
 				{Context: githubql.String("ci/test"), State: githubql.StatusStateSuccess},
 			},
 			requiredContexts:     []string{"ci/required-1", "ci/required-2"},
-			expectedDiff:         4, // 1 for ci/test + 2 for missing required contexts + 1 for total context count
+			expectedDiff:         2, // 1 for each missing required context
 			expectedDescContains: "Jobs ci/required-1, ci/required-2 have not succeeded",
 		},
 		{
@@ -1376,7 +1376,7 @@ func TestRequirementDiff(t *testing.T) {
 				{Context: githubql.String("ci/test"), State: githubql.StatusStateFailure},
 			},
 			requiredContexts:     []string{"ci/required-check"},
-			expectedDiff:         3, // 1 for ci/test in contexts + 1 for failed ci/test + 1 for missing ci/required-check
+			expectedDiff:         2, // 1 for failed ci/test + 1 for missing ci/required-check
 			expectedDescContains: "Jobs ci/required-check, ci/test have not succeeded",
 		},
 		{
@@ -1386,7 +1386,7 @@ func TestRequirementDiff(t *testing.T) {
 				{Context: githubql.String("ci/lint"), State: githubql.StatusStateError},
 			},
 			requiredContexts:     []string{"ci/required-1", "ci/required-2"},
-			expectedDiff:         6, // 2 for contexts in PR + 2 failed + 2 missing required
+			expectedDiff:         4, // 2 failed contexts + 2 missing required contexts
 			expectedDescContains: "Jobs ci/lint, ci/required-1, ci/required-2, ci/test have not succeeded",
 		},
 		{
@@ -1404,7 +1404,7 @@ func TestRequirementDiff(t *testing.T) {
 				{Name: githubql.String("ci/other-check"), Status: githubql.String(githubql.CheckStatusStateCompleted), Conclusion: githubql.String(githubql.StatusStateSuccess)},
 			},
 			requiredContexts:     []string{"ci/required-check"},
-			expectedDiff:         2, // 1 for ci/other-check present + 1 for missing ci/required-check
+			expectedDiff:         1, // 1 for missing ci/required-check
 			expectedDescContains: "Job ci/required-check has not succeeded",
 		},
 		{
@@ -1427,7 +1427,7 @@ func TestRequirementDiff(t *testing.T) {
 				{Name: githubql.String("ci/lint"), Status: githubql.String(githubql.CheckStatusStateCompleted), Conclusion: githubql.String(githubql.StatusStateFailure)},
 			},
 			requiredContexts:     []string{"ci/required", "ci/build"},
-			expectedDiff:         5, // 2 contexts + 2 checkruns = 4 total, 2 failed ci/build + 1 failed ci/lint + 1 missing ci/required + 1 for ci/build in required = 5
+			expectedDiff:         4, // 2 failed ci/build + 1 failed ci/lint + 1 missing ci/required
 			expectedDescContains: "Jobs ci/build, ci/lint, ci/required have not succeeded",
 		},
 	}

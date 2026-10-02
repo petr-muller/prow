@@ -25,20 +25,20 @@ GitHub Apps require two secrets: the App ID and a private key. Components accept
 
 GitHub Apps are the recommended approach for production deployments because they provide:
 
-- **Higher rate limits:** GitHub Apps receive higher API rate limits (5,000 requests/hour per installation vs 5,000/hour for personal tokens)
+- **Installation-specific rate limits:** Installation access tokens have their own [REST API rate limit](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api#primary-rate-limit-for-github-app-installations), which can scale with the installation's repositories and organization users
 - **Granular permissions:** More fine-grained control over what Prow can access
 - **Audit trail:** Actions appear as the App rather than a user account
 - **Organization-wide:** Easier to manage access across multiple repositories
 
 ## Managing API Rate Limits
 
-GitHub enforces [rate limits](https://docs.github.com/en/rest/overview/resources-in-the-rest-api#rate-limiting) on API requests. Each authentication method receives an hourly token budget that is consumed by API calls. GitHub has separate rate limits for different API endpoints:
+GitHub enforces rate limits on API requests. REST and GraphQL have separate hourly budgets, while REST search has a separate per-minute limit:
 
-- **REST API (v3):** 5,000 requests/hour for authenticated requests (higher for GitHub Apps per installation)
-- **GraphQL API (v4):** Uses a point-based system with a budget of 5,000 points/hour
-- **Search API:** 30 requests/minute (shared across v3 and v4)
+- **REST API (v3):** [Personal access tokens and GitHub App installation tokens](https://docs.github.com/en/rest/using-the-rest-api/rate-limits-for-the-rest-api) start at 5,000 requests/hour. For installations outside GitHub Enterprise Cloud, the limit scales with repositories and organization users above 20 of each, up to 12,500 requests/hour. Installations on GitHub Enterprise Cloud organizations have a 15,000 requests/hour limit.
+- **GraphQL API (v4):** [A separate point-based limit](https://docs.github.com/en/graphql/overview/rate-limits-and-query-limits-for-the-graphql-api#primary-rate-limit) starts at 5,000 points/hour for users and App installations. Installation limits outside GitHub Enterprise Cloud can scale up to 12,500 points/hour; installations on GitHub Enterprise Cloud organizations have a 10,000 points/hour limit.
+- **REST Search API:** [Most authenticated search endpoints](https://docs.github.com/en/rest/search/search#rate-limit) allow 30 requests/minute in a separate REST search resource; code search is limited to 10 requests/minute. This resource is separate from GraphQL's rate limit.
 
-When the budget is exhausted, GitHub returns HTTP 403 responses until the hourly window resets. The GitHub client library tracks remaining tokens from response headers and can throttle requests to avoid hitting the limit.
+When a limit is exhausted, GitHub may return HTTP 403 or 429 for REST requests, or a GraphQL error. The GitHub client library tracks remaining tokens from response headers and can throttle requests to avoid hitting the limit.
 
 Prow provides two mechanisms to manage rate limits:
 
@@ -68,19 +68,17 @@ ghproxy is deployed as a service in the Prow cluster. It requires a persistent v
 
 ### Configuring Components to Use ghproxy
 
-Components that access the GitHub API accept multiple endpoint flags for different API types. Each flag can be specified multiple times to provide fallback endpoints:
+Components that access the GitHub API configure REST and GraphQL endpoints separately:
 
-- `--github-endpoint`: REST API (v3) endpoint
-- `--github-graphql-endpoint`: GraphQL API (v4) endpoint  
-- `--github-search-endpoint`: Search API endpoint (often the same as REST)
+- `--github-endpoint`: REST API (v3) endpoint. Repeat this flag to order endpoints for fallback. REST search requests use these endpoints too.
+- `--github-graphql-endpoint`: One GraphQL API (v4) endpoint.
 
-When multiple endpoints are provided for the same API type, components try them in order and fall back to the next if one is unavailable. The typical pattern is to specify ghproxy first, followed by the direct GitHub API as a fallback:
+For REST requests, the client tries the endpoints in order and moves to the next if a connection fails. A typical configuration uses ghproxy first and the direct GitHub REST API as a fallback. GraphQL uses only the single configured endpoint:
 
 ```
 --github-endpoint=http://ghproxy
 --github-endpoint=https://api.github.com
 --github-graphql-endpoint=http://ghproxy/graphql
---github-graphql-endpoint=https://api.github.com/graphql
 ```
 
 The GitHub client library automatically tracks which requests were served from cache (ghproxy) versus direct API calls, and optimizes throttling accordingly—cached responses don't count against the token budget.

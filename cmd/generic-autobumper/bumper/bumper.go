@@ -387,8 +387,7 @@ func processGitHubAppAuth(ctx context.Context, o *Options, prh PRHandler) error 
 		return nil
 	}
 
-	logrus.WithField("branch", o.HeadBranchName).Info("Pushing branch directly to upstream repo")
-	if err := repoClient.PushToCentral("HEAD:"+o.HeadBranchName, true); err != nil {
+	if err := pushAppAuthBranch(repoClient, o.HeadBranchName); err != nil {
 		return fmt.Errorf("push branch %s to %s/%s: %w", o.HeadBranchName, o.GitHubOrg, o.GitHubRepo, err)
 	}
 
@@ -406,6 +405,35 @@ func processGitHubAppAuth(ctx context.Context, o *Options, prh PRHandler) error 
 		summary, generatePRBody(body, getAssignment(o.AssignTo)),
 		o.HeadBranchName, o.GitHubBaseBranch, o.HeadBranchName,
 		true, o.Labels, false)
+}
+
+// pushAppAuthBranch avoids replacing a branch when only commit metadata changed.
+func pushAppAuthBranch(repoClient interface {
+	FetchRef(refspec string) error
+	RevParse(commitlike string) (string, error)
+	PushToCentral(branch string, force bool) error
+}, branch string) error {
+	fetchErr := repoClient.FetchRef("refs/heads/" + branch)
+	if fetchErr != nil && !strings.Contains(strings.ToLower(fetchErr.Error()), "couldn't find remote ref") {
+		return fmt.Errorf("fetch remote branch: %w", fetchErr)
+	}
+	if fetchErr == nil {
+		remoteTree, err := repoClient.RevParse("FETCH_HEAD^{tree}")
+		if err != nil {
+			return fmt.Errorf("get remote tree ref: %w", err)
+		}
+		localTree, err := repoClient.RevParse("HEAD^{tree}")
+		if err != nil {
+			return fmt.Errorf("get local tree ref: %w", err)
+		}
+		if strings.TrimSpace(remoteTree) == strings.TrimSpace(localTree) {
+			logrus.Info("Not pushing as up-to-date remote branch already exists")
+			return nil
+		}
+	}
+
+	logrus.WithField("branch", branch).Info("Pushing branch directly to upstream repo")
+	return repoClient.PushToCentral("HEAD:"+branch, true)
 }
 
 func processGerrit(ctx context.Context, o *Options, prh PRHandler) error {

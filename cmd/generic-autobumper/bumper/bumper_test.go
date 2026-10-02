@@ -17,6 +17,7 @@ limitations under the License.
 package bumper
 
 import (
+	"errors"
 	"os"
 	"path"
 	"path/filepath"
@@ -380,6 +381,71 @@ func TestResolvedPRSourceMode(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestPushAppAuthBranch(t *testing.T) {
+	tests := []struct {
+		name       string
+		fetchErr   error
+		remoteTree string
+		localTree  string
+		wantPush   bool
+	}{
+		{name: "new branch", fetchErr: errors.New("fatal: couldn't find remote ref refs/heads/autobump"), wantPush: true},
+		{name: "same tree", remoteTree: "same-tree", localTree: "same-tree", wantPush: false},
+		{name: "changed tree", remoteTree: "old-tree", localTree: "new-tree", wantPush: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repoClient := &appAuthRepoClientStub{fetchErr: tt.fetchErr, remoteTree: tt.remoteTree, localTree: tt.localTree}
+			if err := pushAppAuthBranch(repoClient, "autobump"); err != nil {
+				t.Fatalf("pushAppAuthBranch: %v", err)
+			}
+			if repoClient.fetched != "refs/heads/autobump" {
+				t.Errorf("fetched %q, want refs/heads/autobump", repoClient.fetched)
+			}
+			if tt.fetchErr == nil {
+				if len(repoClient.revisions) != 2 || repoClient.revisions[0] != "FETCH_HEAD^{tree}" || repoClient.revisions[1] != "HEAD^{tree}" {
+					t.Errorf("parsed revisions %v, want remote and local trees", repoClient.revisions)
+				}
+			} else if len(repoClient.revisions) != 0 {
+				t.Errorf("new branch unexpectedly parsed revisions: %v", repoClient.revisions)
+			}
+			if tt.wantPush {
+				if repoClient.pushed != "HEAD:autobump" || !repoClient.force {
+					t.Errorf("push was (%q, %t), want (HEAD:autobump, true)", repoClient.pushed, repoClient.force)
+				}
+			} else if repoClient.pushed != "" {
+				t.Errorf("same tree unexpectedly pushed %q", repoClient.pushed)
+			}
+		})
+	}
+}
+
+type appAuthRepoClientStub struct {
+	remoteTree, localTree string
+	fetched, pushed       string
+	force                 bool
+	revisions             []string
+	fetchErr              error
+}
+
+func (c *appAuthRepoClientStub) FetchRef(refspec string) error {
+	c.fetched = refspec
+	return c.fetchErr
+}
+
+func (c *appAuthRepoClientStub) RevParse(ref string) (string, error) {
+	c.revisions = append(c.revisions, ref)
+	if ref == "FETCH_HEAD^{tree}" {
+		return c.remoteTree + "\n", nil
+	}
+	return c.localTree + "\n", nil
+}
+
+func (c *appAuthRepoClientStub) PushToCentral(ref string, force bool) error {
+	c.pushed, c.force = ref, force
+	return nil
 }
 
 func TestValidateOptionsAppAuth(t *testing.T) {

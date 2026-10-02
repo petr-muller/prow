@@ -515,6 +515,19 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
+				Name: "extrarefs-multiple",
+			},
+			Spec: prowapi.ProwJobSpec{
+				Agent: prowapi.KubernetesAgent,
+				Job:   "periodic-job",
+				ExtraRefs: []prowapi.Refs{
+					{Org: "alpha", Repo: "one"},
+					{Org: "beta", Repo: "two"},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "noowner",
 			},
 			Spec: prowapi.ProwJobSpec{
@@ -560,7 +573,7 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 	testCases := []testCase{
 		{
 			Name:         "no filter should return all the tests",
-			ExpectedJobs: []string{"fullref", "nullref", "noowner", "multiowner", "differentorg", "extrarefs-org-match", "extrarefs-different-org"},
+			ExpectedJobs: []string{"fullref", "nullref", "noowner", "multiowner", "differentorg", "extrarefs-org-match", "extrarefs-different-org", "extrarefs-multiple"},
 		},
 		{
 			Name:         "owner filter should return just jobs with the right owner",
@@ -596,6 +609,18 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 			Repo:         "testinfra",
 			ExpectedJobs: []string{"extrarefs-different-org"},
 		},
+		{
+			Name:         "org and repo filter should not match different ExtraRefs",
+			Org:          "alpha",
+			Repo:         "two",
+			ExpectedJobs: []string{},
+		},
+		{
+			Name:         "org and repo filter should match the same ExtraRefs entry",
+			Org:          "alpha",
+			Repo:         "one",
+			ExpectedJobs: []string{"extrarefs-multiple"},
+		},
 	}
 
 	fakeJa := jobs.NewJobAgent(context.Background(), kc, false, true, []string{}, map[string]jobs.PodLogClient{}, fca{}.Config)
@@ -604,55 +629,52 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 	handler := handleProwJobs(fakeJa, logrus.WithField("handler", "/prowjobs.js"))
 
 	for _, tc := range testCases {
+		t.Run(tc.Name, func(t *testing.T) {
+			queryS := make(url.Values)
+			if tc.Org != "" {
+				queryS.Add("org", tc.Org)
+			}
+			if tc.Repo != "" {
+				queryS.Add("repo", tc.Repo)
+			}
+			if tc.Owner != "" {
+				queryS.Add("owner", tc.Owner)
+			}
 
-		queryS := make(url.Values)
-		if tc.Org != "" {
-			queryS.Add("org", tc.Org)
-		}
-		if tc.Repo != "" {
-			queryS.Add("repo", tc.Repo)
-		}
-		if tc.Owner != "" {
-			queryS.Add("owner", tc.Owner)
-		}
+			req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("/prowjobs.js?%s", queryS.Encode()), nil)
+			if err != nil {
+				t.Fatalf("Error making request: %v", err)
+			}
 
-		req, err := http.NewRequest(http.MethodGet, fmt.Sprintf("/prowjobs.js?%s", queryS.Encode()), nil)
-		if err != nil {
-			t.Errorf("Error making request: %v", err)
-		}
-
-		rr := httptest.NewRecorder()
-		handler.ServeHTTP(rr, req)
-		if rr.Code != http.StatusOK {
-			t.Errorf("Bad error code: %d", rr.Code)
-		}
-		resp := rr.Result()
-		if err := resp.Body.Close(); err != nil {
-			t.Errorf("Error closing the body stream: %v", err)
-		}
-		body, err := io.ReadAll(resp.Body)
-		if err != nil {
-			t.Errorf("Error reading response body: %v", err)
-		}
-		type prowjobItems struct {
-			Items []prowapi.ProwJob `json:"items"`
-		}
-		var res prowjobItems
-		if err := json.Unmarshal(body, &res); err != nil {
-			t.Errorf("Error unmarshalling: %v", err)
-		}
-		slices.Sort(tc.ExpectedJobs)
-		returnedJobs := make([]string, len(res.Items))
-		for i := range res.Items {
-			returnedJobs[i] = res.Items[i].Name
-		}
-		slices.Sort(returnedJobs)
-		if !slices.Equal(tc.ExpectedJobs, returnedJobs) {
-			t.Errorf("TEST %s: returned invalid jobs, expecting %+v returned %+v", tc.Name, tc.ExpectedJobs, returnedJobs)
-		}
-
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if rr.Code != http.StatusOK {
+				t.Fatalf("Bad error code: %d", rr.Code)
+			}
+			resp := rr.Result()
+			defer resp.Body.Close()
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("Error reading response body: %v", err)
+			}
+			type prowjobItems struct {
+				Items []prowapi.ProwJob `json:"items"`
+			}
+			var res prowjobItems
+			if err := json.Unmarshal(body, &res); err != nil {
+				t.Fatalf("Error unmarshalling: %v", err)
+			}
+			slices.Sort(tc.ExpectedJobs)
+			returnedJobs := make([]string, len(res.Items))
+			for i := range res.Items {
+				returnedJobs[i] = res.Items[i].Name
+			}
+			slices.Sort(returnedJobs)
+			if !slices.Equal(tc.ExpectedJobs, returnedJobs) {
+				t.Errorf("Returned invalid jobs, expecting %+v returned %+v", tc.ExpectedJobs, returnedJobs)
+			}
+		})
 	}
-
 }
 
 type fakeAuthenticatedUserIdentifier struct {

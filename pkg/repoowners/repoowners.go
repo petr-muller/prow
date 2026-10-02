@@ -248,6 +248,7 @@ type RepoOwner interface {
 	IsAutoApproveUnownedSubfolders(directory string) bool
 	LeafApprovers(path string) sets.Set[string]
 	Approvers(path string) layeredsets.String
+	AssignableApprovers(path string) layeredsets.String
 	LeafReviewers(path string) sets.Set[string]
 	Reviewers(path string) layeredsets.String
 	RequiredReviewers(path string) sets.Set[string]
@@ -900,11 +901,12 @@ func (o *RepoOwners) entriesForFile(path string, people map[string]map[*regexp.R
 // pkg/util/OWNERS has user2 this will only return user2 for the path
 // pkg/util/sets/file.go
 func (o *RepoOwners) LeafApprovers(path string) sets.Set[string] {
-	// Advisory approvers are included in o.approvers so Approvers() recognizes
-	// their /approve authority, but must be excluded here to prevent auto-assignment.
-	all := o.entriesForFile(path, o.approvers, true).Set()
-	advisory := o.entriesForFile(path, o.advisoryApprovers, true).Set()
-	return all.Difference(advisory)
+	for _, layer := range o.AssignableApprovers(path) {
+		if layer.Len() > 0 {
+			return layer
+		}
+	}
+	return sets.New[string]()
 }
 
 // Approvers returns ALL of the users who are approvers for the
@@ -913,6 +915,21 @@ func (o *RepoOwners) LeafApprovers(path string) sets.Set[string] {
 // will return both user1 and user2 for the path pkg/util/sets/file.go
 func (o *RepoOwners) Approvers(path string) layeredsets.String {
 	return o.entriesForFile(path, o.approvers, false)
+}
+
+// AssignableApprovers returns approvers eligible for automatic suggestions and
+// review requests, preserving their distance from the file. Advisory approvers
+// retain approval authority through Approvers but are excluded here.
+func (o *RepoOwners) AssignableApprovers(path string) layeredsets.String {
+	approvers := o.Approvers(path)
+	advisory := o.entriesForFile(path, o.advisoryApprovers, false)
+	// Advisory lookup may continue beyond a no_parent_owners boundary when it
+	// finds no advisory entries below it. Only consider layers within the
+	// authorization lookup's boundary.
+	if len(advisory) > len(approvers) {
+		advisory = advisory[:len(approvers)]
+	}
+	return approvers.Difference(advisory.Set())
 }
 
 // LeafReviewers returns a set of users who are the closest reviewers to the

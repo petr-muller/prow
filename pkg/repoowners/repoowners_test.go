@@ -1657,3 +1657,82 @@ aliases:
 		})
 	}
 }
+
+func TestAdvisoryOnlyLeafApprovers(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		options  map[string]dirOptions
+		expected sets.Set[string]
+	}{
+		{name: "inherit regular parent", expected: sets.New[string]("parent")},
+		{name: "advisory boundary", options: map[string]dirOptions{"child": {NoParentOwners: true}}, expected: sets.New[string]()},
+		{name: "empty boundary above advisory child", options: map[string]dirOptions{"child": {NoParentOwners: true}}, expected: sets.New[string]()},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			child := "child"
+			if tc.name == "empty boundary above advisory child" {
+				child = "child/nested"
+			}
+			ro := &RepoOwners{
+				approvers:         map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("parent", "parent-advisory"), child: regexpAll("advisory")},
+				advisoryApprovers: map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("parent-advisory"), child: regexpAll("advisory")},
+				options:           tc.options,
+			}
+			file := child + "/file.go"
+			if got := ro.LeafApprovers(file); !got.Equal(tc.expected) {
+				t.Errorf("LeafApprovers = %v, want %v", got, tc.expected)
+			}
+			if !ro.Approvers(file).Has("advisory") {
+				t.Error("advisory approver lost approval authority")
+			}
+		})
+	}
+}
+
+func TestAssignableApprovers(t *testing.T) {
+	matched := regexp.MustCompile(`\.go$`)
+	for _, tc := range []struct {
+		name                string
+		approvers, advisory map[string]map[*regexp.Regexp]sets.Set[string]
+		options             map[string]dirOptions
+		expected            []sets.Set[string]
+	}{
+		{
+			name:      "retain ordinary layer order and exclude inherited advisory users",
+			approvers: map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("parent", "parent-advisory"), "child": regexpAll("leaf", "child-advisory")},
+			advisory:  map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("parent-advisory"), "child": regexpAll("child-advisory")},
+			expected:  []sets.Set[string]{sets.New[string](), sets.New[string]("leaf"), sets.New[string]("parent")},
+		},
+		{
+			name:      "advisory beyond regular no_parent_owners boundary cannot exclude local approver",
+			approvers: map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("parent", "shared"), "child": regexpAll("shared")},
+			advisory:  map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("shared")},
+			options:   map[string]dirOptions{"child": {NoParentOwners: true}},
+			expected:  []sets.Set[string]{sets.New[string](), sets.New[string]("shared")},
+		},
+		{
+			name:      "matching advisory-only filter inherits ordinary parent",
+			approvers: map[string]map[*regexp.Regexp]sets.Set[string]{"": regexpAll("parent"), "child": {matched: sets.New[string]("advisory")}},
+			advisory:  map[string]map[*regexp.Regexp]sets.Set[string]{"child": {matched: sets.New[string]("advisory")}},
+			expected:  []sets.Set[string]{sets.New[string](), sets.New[string](), sets.New[string]("parent")},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ro := &RepoOwners{approvers: tc.approvers, advisoryApprovers: tc.advisory, options: tc.options}
+			got := ro.AssignableApprovers("child/file.go")
+			if !reflect.DeepEqual([]sets.Set[string](got), tc.expected) {
+				t.Errorf("AssignableApprovers = %v, want %v", got, tc.expected)
+			}
+			var expectedLeaf sets.Set[string]
+			for _, layer := range tc.expected {
+				if len(layer) > 0 {
+					expectedLeaf = layer
+					break
+				}
+			}
+			if leaf := ro.LeafApprovers("child/file.go"); !leaf.Equal(expectedLeaf) {
+				t.Errorf("LeafApprovers = %v, want %v", leaf, expectedLeaf)
+			}
+		})
+	}
+}

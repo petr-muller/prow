@@ -2152,3 +2152,5 @@ func TestHelpProvider(t *testing.T) {
 		})
 	}
 }
+
+func (fr fakeRepo) AssignableApprovers(path string) layeredsets.String { return fr.Approvers(path) }

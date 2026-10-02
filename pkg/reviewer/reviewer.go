@@ -42,7 +42,7 @@ type ReviewersClient interface {
 type OwnersClient interface {
 	ReviewersClient
 	FindApproverOwnersForFile(path string) string
-	Approvers(path string) layeredsets.String
+	AssignableApprovers(path string) layeredsets.String
 	LeafApprovers(path string) sets.Set[string]
 	AllOwners() sets.Set[string]
 }
@@ -56,7 +56,7 @@ func (foc FallbackReviewersClient) FindReviewersOwnersForFile(path string) strin
 }
 
 func (foc FallbackReviewersClient) Reviewers(path string) layeredsets.String {
-	return foc.OwnersClient.Approvers(path)
+	return foc.OwnersClient.AssignableApprovers(path)
 }
 
 func (foc FallbackReviewersClient) LeafReviewers(path string) sets.Set[string] {

@@ -35,6 +35,7 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/prow/pkg/config"
+	"sigs.k8s.io/prow/pkg/git/localgit"
 	"sigs.k8s.io/prow/pkg/github"
 	"sigs.k8s.io/prow/pkg/layeredsets"
 	"sigs.k8s.io/prow/pkg/plugins"
@@ -1115,4 +1116,57 @@ func TestPopActiveReviewer(t *testing.T) {
 			t.Errorf("[%s] expected the requested reviewers to be %q, but got %q.", tc.name, tc.expectedRequested, fghc.requested)
 		}
 	}
+}
+
+type advisoryRepoownersClient struct{ repoowners.RepoOwner }
+
+func (c advisoryRepoownersClient) LoadRepoOwners(string, string, string) (repoowners.RepoOwner, error) {
+	return c.RepoOwner, nil
+}
+
+func TestAdvisoryApproverReviewRequests(t *testing.T) {
+	for _, tc := range []struct {
+		name, childOwners string
+		expected          sets.Set[string]
+	}{
+		{name: "fallback after ordinary leaf exhaustion", childOwners: "approvers:\n- leaf\nadvisory_approvers:\n- advisory\n", expected: sets.New[string]("leaf", "parent")},
+		{name: "advisory only leaf", childOwners: "advisory_approvers:\n- advisory\n", expected: sets.New[string]("parent")},
+		{name: "advisory explicitly listed as reviewer", childOwners: "approvers:\n- leaf\nadvisory_approvers:\n- advisory\nreviewers:\n- advisory\n", expected: sets.New[string]("advisory", "parent", "leaf")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			lg, factory, err := localgit.NewV2()
+			if err != nil {
+				t.Fatal(err)
+			}
+			t.Cleanup(func() { lg.Clean(); factory.Clean() })
+			if err := lg.MakeFakeRepo("org", "repo"); err != nil {
+				t.Fatal(err)
+			}
+			if err := lg.AddCommit("org", "repo", map[string][]byte{
+				"OWNERS":       []byte("approvers:\n- parent\nadvisory_approvers:\n- parent-advisory\n"),
+				"child/OWNERS": []byte(tc.childOwners),
+			}); err != nil {
+				t.Fatal(err)
+			}
+			client := repoowners.NewClient(factory, nil, func(string, string) bool { return false }, func(string, string) bool { return true }, func() *config.OwnersDirDenylist { return &config.OwnersDirDenylist{} }, func(string, string) ownersconfig.Filenames { return ownersconfig.FakeFilenames })
+			ro, err := client.LoadRepoOwnersSha("org", "repo", localgit.DefaultBranch(""), "HEAD", false)
+			if err != nil {
+				t.Fatal(err)
+			}
+			pr := github.PullRequest{Number: 5, User: github.User{Login: "author"}}
+			repo := github.Repo{Owner: github.User{Login: "org"}, Name: "repo"}
+			ghc := newFakeGitHubClient(&pr, []string{"child/file.go"})
+			count := 10
+			if err := handle(ghc, advisoryRepoownersClient{ro}, logrus.WithField("plugin", PluginName), &count, 0, false, false, &repo, &pr); err != nil {
+				t.Fatal(err)
+			}
+			if got := sets.New[string](ghc.requested...); !got.Equal(tc.expected) {
+				t.Errorf("requested = %v, want %v", got, tc.expected)
+			}
+		})
+	}
+}
+
+func (foc *fakeOwnersClient) AssignableApprovers(path string) layeredsets.String {
+	return foc.Approvers(path)
 }

@@ -596,3 +596,7 @@ func TestHandleRifleBlamesMergeBase(t *testing.T) {
 		})
 	}
 }
+
+func (foc *fakeOwnersClient) AssignableApprovers(path string) layeredsets.String {
+	return foc.Approvers(path)
+}

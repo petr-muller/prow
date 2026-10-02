@@ -27,7 +27,10 @@ import (
 
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"sigs.k8s.io/prow/pkg/config"
+	"sigs.k8s.io/prow/pkg/git/localgit"
 	"sigs.k8s.io/prow/pkg/plugins/ownersconfig"
+	"sigs.k8s.io/prow/pkg/repoowners"
 )
 
 func TestUnapprovedFiles(t *testing.T) {
@@ -1143,5 +1146,42 @@ Approvers can cancel approval by writing ` + "`/approve cancel`" + ` in a commen
 		t.Error("GetMessage() failed")
 	} else if *got != want {
 		t.Errorf("GetMessage() = %+v, want = %+v", *got, want)
+	}
+}
+
+func TestAdvisoryOnlyApprovalSuggestions(t *testing.T) {
+	lg, factory, err := localgit.NewV2()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { lg.Clean(); factory.Clean() })
+	if err := lg.MakeFakeRepo("org", "repo"); err != nil {
+		t.Fatal(err)
+	}
+	if err := lg.AddCommit("org", "repo", map[string][]byte{
+		"OWNERS":       []byte("approvers:\n- parent\nadvisory_approvers:\n- parent-advisory\n"),
+		"child/OWNERS": []byte("advisory_approvers:\n- advisory\n"),
+	}); err != nil {
+		t.Fatal(err)
+	}
+	client := repoowners.NewClient(factory, nil, func(string, string) bool { return false }, func(string, string) bool { return true }, func() *config.OwnersDirDenylist { return &config.OwnersDirDenylist{} }, func(string, string) ownersconfig.Filenames { return ownersconfig.FakeFilenames })
+	ro, err := client.LoadRepoOwnersSha("org", "repo", localgit.DefaultBranch(""), "HEAD", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	owners := NewOwners(logrus.WithField("test", t.Name()), []string{"child/file.go"}, ro, TestSeed)
+	if got := owners.GetAllPotentialApprovers(); !reflect.DeepEqual(got, []string{"parent"}) {
+		t.Errorf("candidates = %v, want [parent]", got)
+	}
+	ap := NewApprovers(owners)
+	if got := ap.SuggestedCCs(); !reflect.DeepEqual(got, []string{"parent"}) {
+		t.Errorf("suggestions = %v, want [parent]", got)
+	}
+	ap.AddApprover("advisory", "REFERENCE", false)
+	if !ap.AreFilesApproved() {
+		t.Error("advisory /approve must authorize approval")
+	}
+	if got := ap.SuggestedCCs(); len(got) != 0 {
+		t.Errorf("approved files have suggestions: %v", got)
 	}
 }

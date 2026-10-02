@@ -19,6 +19,7 @@ package github
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"crypto/rsa"
 	"crypto/tls"
 	"encoding/base64"
@@ -3742,6 +3743,150 @@ func TestV4ClientSetsUserAgent(t *testing.T) {
 			t.Error(err)
 		}
 	})
+}
+
+func TestGraphQLDryRun(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate app key: %v", err)
+	}
+
+	for _, tc := range []struct {
+		name   string
+		apps   bool
+		dryRun bool
+	}{
+		{name: "PAT dry-run", dryRun: true},
+		{name: "Apps dry-run", apps: true, dryRun: true},
+		{name: "PAT live"},
+		{name: "Apps live", apps: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var queries, mutations, tokenFetches int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				switch r.URL.Path {
+				case "/app/installations":
+					_ = json.NewEncoder(w).Encode([]AppInstallation{{ID: 1, Account: User{Login: "org"}}})
+				case "/app/installations/1/access_tokens":
+					tokenFetches++
+					w.WriteHeader(http.StatusCreated)
+					_ = json.NewEncoder(w).Encode(AppInstallationToken{Token: "app-token", ExpiresAt: time.Now().Add(time.Hour)})
+				case "/app":
+					_ = json.NewEncoder(w).Encode(App{Slug: "test-app"})
+				case "/graphql":
+					wantAuth := "Bearer pat-token"
+					if tc.apps {
+						wantAuth = "Bearer app-token"
+					}
+					if got := r.Header.Get("Authorization"); got != wantAuth {
+						t.Errorf("GraphQL Authorization = %q, want %q", got, wantAuth)
+					}
+					body, err := io.ReadAll(r.Body)
+					if err != nil {
+						t.Errorf("read GraphQL request: %v", err)
+						return
+					}
+					if bytes.Contains(body, []byte("mutation")) {
+						mutations++
+					} else if bytes.Contains(body, []byte("query")) {
+						queries++
+					} else {
+						t.Errorf("unexpected GraphQL request: %s", body)
+					}
+					_, _ = io.WriteString(w, `{"data":{}}`)
+				default:
+					t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+				}
+			}))
+			defer server.Close()
+
+			var client Client
+			if tc.apps {
+				if tc.dryRun {
+					_, _, client, err = NewAppsAuthDryRunClientWithFields(logrus.Fields{}, nil, "app-id", func() *rsa.PrivateKey { return key }, server.URL+"/graphql", server.URL)
+				} else {
+					_, _, client, err = NewAppsAuthClientWithFields(logrus.Fields{}, nil, "app-id", func() *rsa.PrivateKey { return key }, server.URL+"/graphql", server.URL)
+				}
+			} else if tc.dryRun {
+				client, err = NewDryRunClientWithFields(logrus.Fields{}, func() []byte { return []byte("pat-token") }, nil, server.URL+"/graphql", server.URL)
+			} else {
+				client, err = NewClientWithFields(logrus.Fields{}, func() []byte { return []byte("pat-token") }, nil, server.URL+"/graphql", server.URL)
+			}
+			if err != nil {
+				t.Fatalf("construct client: %v", err)
+			}
+
+			if err := client.QueryWithGitHubAppsSupport(context.Background(), &struct{}{}, nil, "org"); err != nil {
+				t.Fatalf("GraphQL query: %v", err)
+			}
+			if queries != 1 {
+				t.Errorf("GraphQL queries = %d, want 1", queries)
+			}
+			if tc.apps && tokenFetches != 1 {
+				t.Errorf("Apps token fetches = %d, want 1", tokenFetches)
+			}
+
+			if err := client.MutateWithGitHubAppsSupport(context.Background(), &struct{}{}, githubv4.Input(struct{}{}), nil, "org"); err != nil {
+				t.Fatalf("GraphQL mutation: %v", err)
+			}
+			wantMutations := 1
+			if tc.dryRun {
+				wantMutations = 0
+			}
+			if mutations != wantMutations {
+				t.Errorf("GraphQL mutations = %d, want %d", mutations, wantMutations)
+			}
+		})
+	}
+}
+
+func TestNewAppsAuthDryRunClientWithFields(t *testing.T) {
+	key, err := rsa.GenerateKey(rand.Reader, 1024)
+	if err != nil {
+		t.Fatalf("generate app key: %v", err)
+	}
+
+	var requests []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/app":
+			_ = json.NewEncoder(w).Encode(App{Slug: "test-app"})
+		case "/app/installations":
+			_ = json.NewEncoder(w).Encode([]AppInstallation{{ID: 1, Account: User{Login: "org"}}})
+		case "/app/installations/1/access_tokens":
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(AppInstallationToken{Token: "app-token", ExpiresAt: time.Now().Add(time.Hour)})
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	getToken, _, client, err := NewAppsAuthDryRunClientWithFields(logrus.Fields{}, nil, "app-id", func() *rsa.PrivateKey { return key }, server.URL+"/graphql", server.URL)
+	if err != nil {
+		t.Fatalf("construct Apps dry-run client: %v", err)
+	}
+
+	token, err := getToken("org")
+	if err != nil {
+		t.Fatalf("get Apps installation token: %v", err)
+	}
+	if token != "app-token" {
+		t.Errorf("installation token = %q, want app-token", token)
+	}
+	if err := client.CreateComment("org", "repo", 1, "dry-run comment"); err != nil {
+		t.Fatalf("create comment in dry-run mode: %v", err)
+	}
+
+	wantRequests := []string{
+		"GET /app",
+		"GET /app/installations",
+		"POST /app/installations/1/access_tokens",
+	}
+	if !reflect.DeepEqual(requests, wantRequests) {
+		t.Errorf("requests = %v, want %v", requests, wantRequests)
+	}
 }
 
 func TestGetDirectory(t *testing.T) {

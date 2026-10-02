@@ -780,7 +780,7 @@ func NewAppsAuthDryRunClientWithFields(fields logrus.Fields, censor func([]byte)
 		AppPrivateKey:   appPrivateKey,
 		GraphqlEndpoint: graphqlEndpoint,
 		Bases:           bases,
-		DryRun:          false,
+		DryRun:          true,
 	}.Default())
 }
 
@@ -3853,6 +3853,9 @@ func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, 
 
 // MutateWithGitHubAppsSupport runs a GraphQL mutation using shurcooL/githubql's client.
 func (c *client) MutateWithGitHubAppsSupport(ctx context.Context, m interface{}, input githubql.Input, vars map[string]interface{}, org string) error {
+	if c.dry {
+		return nil
+	}
 	return c.gqlc.MutateWithGitHubAppsSupport(ctx, m, input, vars, org)
 }
 

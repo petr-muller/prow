@@ -37,7 +37,16 @@ approvers:
 - jack
 - ken
 - lina
+
+advisory_approvers:
+- maya
 ```
+
+Users in `advisory_approvers` retain the same `/approve` authority as users in `approvers`, including inheritance by subdirectories. Use this field for approvers who should not receive automatic approval requests, and list them there rather than duplicating them under `approvers`.
+
+The approval notifier excludes advisory approvers from its suggestions of additional approvers to assign. It can still include an advisory approver who is already assigned to the PR. Blunderbuss also excludes advisory approvers when it falls back to selecting reviewers from approvers. However, an advisory approver explicitly listed in `reviewers` remains eligible for automatic review requests; omit them from `reviewers` if they should not receive those requests.
+
+An OWNERS file containing only `advisory_approvers` is valid at the root or in a subdirectory, including within `filters`. A subdirectory with only advisory approvers can still use ordinary approvers inherited from its parents for automatic suggestions and review requests. If there are no inherited ordinary approvers, or inheritance is disabled with `options.no_parent_owners: true`, there are no ordinary approver candidates to select.
 
 Note that items in the OWNERS files can be GitHub usernames, or aliases defined in OWNERS_ALIASES files. An OWNERS_ALIASES file is another co-existed file that delivers a mechanism for defining groups. However, GitHub Team names are not supported. We do not use them because there is no audit log for changes to the GitHub Teams. This way we have an audit log.
 

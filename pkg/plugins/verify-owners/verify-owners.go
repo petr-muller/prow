@@ -455,8 +455,9 @@ func parseOwnersFile(oc ownersClient, path string, c github.PullRequestChange, l
 			fmt.Sprintf("File contains banned labels: %s.", sets.List(sets.New[string](labels...).Intersection(sets.New[string](bannedLabels...)))),
 		}, nil
 	}
-	// Check approvers isn't empty
-	if filepath.Dir(c.Filename) == "." && len(approvers) == 0 {
+	// Root OWNERS must grant approval authority. Advisory-only OWNERS are
+	// valid at any level: advisory approvers can approve but are not assigned.
+	if filepath.Dir(c.Filename) == "." && len(approvers) == 0 && len(advisoryApprovers) == 0 {
 		return &messageWithLine{
 			lineNumber,
 			fmt.Sprintf("No approvers defined in this root directory %s file.", filenames.Owners),

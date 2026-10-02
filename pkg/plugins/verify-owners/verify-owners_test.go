@@ -1663,3 +1663,30 @@ func testHandleParseAliasesConfigWarningLabels(clients localgit.Clients, t *test
 func (foc *fakeOwnersClient) AssignableApprovers(path string) layeredsets.String {
 	return foc.Approvers(path)
 }
+
+func TestParseAdvisoryOnlyOwnersFile(t *testing.T) {
+	for _, filename := range []string{"OWNERS", "nested/OWNERS"} {
+		for name, document := range map[string]string{
+			"simple":   "advisory_approvers:\n- advisor\n",
+			"filtered": "filters:\n  \"\\\\.go$\":\n    advisory_approvers:\n    - advisor\n",
+		} {
+			t.Run(filename+"/"+name, func(t *testing.T) {
+				path := filepath.Join(t.TempDir(), filename)
+				if err := os.MkdirAll(filepath.Dir(path), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(path, []byte(document), 0644); err != nil {
+					t.Fatal(err)
+				}
+				change := github.PullRequestChange{Filename: filename, Patch: makePatch([]byte(document))}
+				message, owners := parseOwnersFile(&fakeOwnersClient{}, path, change, logrus.NewEntry(logrus.New()), nil, ownersconfig.FakeFilenames)
+				if message != nil {
+					t.Fatalf("advisory-only OWNERS should be valid: %s", message.message)
+				}
+				if diff := cmp.Diff([]string{"advisor"}, owners); diff != "" {
+					t.Errorf("owners mismatch (-want +got): %s", diff)
+				}
+			})
+		}
+	}
+}

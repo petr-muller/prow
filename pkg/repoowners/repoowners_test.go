@@ -1736,3 +1736,55 @@ func TestAssignableApprovers(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadAdvisoryOnlyOwners(t *testing.T) {
+	for name, document := range map[string]string{
+		"simple":   "advisory_approvers:\n- advisor\n",
+		"filtered": "filters:\n  \"\\\\.go$\":\n    advisory_approvers:\n    - advisor\n",
+	} {
+		for _, location := range []string{"root", "nested", "nested without parent owners"} {
+			t.Run(name+"/"+location, func(t *testing.T) {
+				dir := t.TempDir()
+				filename, path := "OWNERS", "file.go"
+				expectedApprovers := sets.New[string]("advisor")
+				expectedAssignable := sets.New[string]()
+				if location != "root" {
+					filename, path = "nested/OWNERS", "nested/file.go"
+					if err := os.WriteFile(filepath.Join(dir, "OWNERS"), []byte("approvers:\n- parent\n"), 0644); err != nil {
+						t.Fatal(err)
+					}
+					if location == "nested" {
+						expectedApprovers.Insert("parent")
+						expectedAssignable.Insert("parent")
+					}
+				}
+				contents := document
+				if location == "nested without parent owners" {
+					contents += "options:\n  no_parent_owners: true\n"
+				}
+				if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, filename)), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(dir, filename), []byte(contents), 0644); err != nil {
+					t.Fatal(err)
+				}
+				owners, err := loadOwnersFrom(dir, false, nil, nil, ownersconfig.FakeFilenames, logrus.NewEntry(logrus.New()))
+				if err != nil {
+					t.Fatalf("load advisory-only OWNERS: %v", err)
+				}
+				if got := owners.Approvers(path).Set(); !got.Equal(expectedApprovers) {
+					t.Errorf("approval authority: want %v, got %v", sets.List(expectedApprovers), sets.List(got))
+				}
+				if got := owners.AssignableApprovers(path).Set(); !got.Equal(expectedAssignable) {
+					t.Errorf("assignable approvers: want %v, got %v", sets.List(expectedAssignable), sets.List(got))
+				}
+				if got := owners.LeafApprovers(path); !got.Equal(expectedAssignable) {
+					t.Errorf("leaf approvers: want %v, got %v", sets.List(expectedAssignable), sets.List(got))
+				}
+				if name == "filtered" && owners.Approvers(filepath.Join(filepath.Dir(path), "file.txt")).Has("advisor") {
+					t.Error("advisory approver applies outside its filter")
+				}
+			})
+		}
+	}
+}

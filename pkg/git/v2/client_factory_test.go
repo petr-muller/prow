@@ -17,6 +17,7 @@ limitations under the License.
 package git
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -30,6 +31,102 @@ func runGit(t *testing.T, dir string, args ...string) {
 	cmd.Dir = dir
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git %v: %v\n%s", args, err, out)
+	}
+}
+
+func TestClientFromDirSigningKey(t *testing.T) {
+	t.Parallel()
+
+	existingConfig := map[string]string{
+		"gpg.format":      "openpgp",
+		"user.signingkey": "existing-key",
+		"commit.gpgsign":  "false",
+	}
+	for _, tc := range []struct {
+		name           string
+		signingKeyPath string
+		initialConfig  map[string]string
+		wantConfig     map[string]string
+	}{
+		{
+			name:           "configured signing key",
+			signingKeyPath: "/path/to/signing key",
+			initialConfig:  existingConfig,
+			wantConfig: map[string]string{
+				"gpg.format":      "ssh",
+				"user.signingkey": "/path/to/signing key",
+				"commit.gpgsign":  "true",
+			},
+		},
+		{
+			name: "unconfigured signing key",
+		},
+		{
+			name:          "unconfigured signing key preserves existing config",
+			initialConfig: existingConfig,
+			wantConfig:    existingConfig,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			repoDir := t.TempDir()
+			runGit(t, repoDir, "init")
+			for key, value := range tc.initialConfig {
+				runGit(t, repoDir, "config", key, value)
+			}
+			factory, err := NewClientFactory(WithCacheDirBase(t.TempDir()), WithSigningKeyPath(tc.signingKeyPath))
+			if err != nil {
+				t.Fatalf("creating factory: %v", err)
+			}
+			defer factory.Clean()
+
+			client, err := factory.ClientFromDir("org", "repo", repoDir)
+			if err != nil {
+				t.Fatalf("getting client: %v", err)
+			}
+			for _, key := range []string{"gpg.format", "user.signingkey", "commit.gpgsign"} {
+				out, err := exec.Command("git", "-C", client.Directory(), "config", "--local", "--get", key).CombinedOutput()
+				want, configured := tc.wantConfig[key]
+				if !configured {
+					var exitErr *exec.ExitError
+					if !errors.As(err, &exitErr) || exitErr.ExitCode() != 1 || len(out) != 0 {
+						t.Errorf("expected %s to remain unset, got %q, error: %v", key, out, err)
+					}
+					continue
+				}
+				if err != nil || strings.TrimSpace(string(out)) != want {
+					t.Errorf("expected %s=%q, got %q, error: %v", key, want, out, err)
+				}
+			}
+		})
+	}
+}
+
+func TestClientFromDirSigningConfigError(t *testing.T) {
+	t.Parallel()
+
+	repoDir := t.TempDir()
+	runGit(t, repoDir, "init")
+	if err := os.WriteFile(filepath.Join(repoDir, ".git", "config.lock"), nil, 0644); err != nil {
+		t.Fatal(err)
+	}
+	factory, err := NewClientFactory(WithCacheDirBase(t.TempDir()), WithSigningKeyPath("/path/to/key"))
+	if err != nil {
+		t.Fatalf("creating factory: %v", err)
+	}
+	defer factory.Clean()
+
+	client, err := factory.ClientFromDir("org", "repo", repoDir)
+	if client != nil || err == nil {
+		t.Fatalf("expected no client and a config error, got client %v, error: %v", client, err)
+	}
+	for _, context := range []string{"failed to configure commit signing", "gpg.format", ".git/config"} {
+		if !strings.Contains(err.Error(), context) {
+			t.Errorf("expected error to contain %q, got: %v", context, err)
+		}
+	}
+	var exitErr *exec.ExitError
+	if !errors.As(err, &exitErr) {
+		t.Errorf("expected wrapped Git exit error, got: %v", err)
 	}
 }
 

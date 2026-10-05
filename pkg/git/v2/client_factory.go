@@ -126,7 +126,7 @@ type ClientFactoryOpts struct {
 	// If set, cacheDir persist. Otherwise temp dir will be used for CacheDir
 	Persist *bool
 	// SigningKeyPath is the path to an SSH private key for signing commits.
-	// When set, cloned repos are configured with gpg.format=ssh and commit.gpgsign=true.
+	// When set, repos are configured with gpg.format=ssh and commit.gpgsign=true.
 	SigningKeyPath string
 }
 
@@ -434,7 +434,13 @@ func (c *clientFactory) bootstrapClients(org, repo, dir string) (cacher, cloner,
 // If the directory isn't specified, the current working directory is used.
 func (c *clientFactory) ClientFromDir(org, repo, dir string) (RepoClient, error) {
 	_, _, client, err := c.bootstrapClients(org, repo, dir)
-	return client, err
+	if err != nil {
+		return nil, err
+	}
+	if err := c.configureCommitSigning(client); err != nil {
+		return nil, err
+	}
+	return client, nil
 }
 
 // ClientFor wraps around ClientForWithRepoOpts using the default RepoOpts{}
@@ -494,19 +500,27 @@ func (c *clientFactory) ClientForWithRepoOpts(org, repo string, repoOpts RepoOpt
 	}
 	gitMetrics.secondaryCloneDuration.WithLabelValues(org, repo).Observe(time.Since(timeBeforeSecondaryClone).Seconds())
 
+	if err := c.configureCommitSigning(repoClient); err != nil {
+		return nil, err
+	}
+
+	return repoClient, nil
+}
+
+func (c *clientFactory) configureCommitSigning(client RepoClient) error {
 	if c.signingKeyPath != "" {
 		for _, args := range [][]string{
 			{"gpg.format", "ssh"},
 			{"user.signingkey", c.signingKeyPath},
 			{"commit.gpgsign", "true"},
 		} {
-			if err := repoClient.Config(args...); err != nil {
-				return nil, fmt.Errorf("failed to configure commit signing: %w", err)
+			if err := client.Config(args...); err != nil {
+				return fmt.Errorf("failed to configure commit signing: %w", err)
 			}
 		}
 	}
 
-	return repoClient, nil
+	return nil
 }
 
 func (c *clientFactory) ensureFreshPrimary(

@@ -200,9 +200,12 @@ func (s *queryShardCounts) report(controller string) {
 	tideMetrics.queryShards.WithLabelValues(controller, "success").Set(float64(s.success))
 	tideMetrics.queryShards.WithLabelValues(controller, "partial").Set(float64(s.partial))
 	tideMetrics.queryShards.WithLabelValues(controller, "error").Set(float64(s.failed))
+	// An empty cycle is complete: no scheduled shards remain incomplete.
+	completeness := 1.0
 	if total := s.success + s.partial + s.failed; total > 0 {
-		tideMetrics.poolCompletenessRatio.WithLabelValues(controller).Set(float64(s.success) / float64(total))
+		completeness = float64(s.success) / float64(total)
 	}
+	tideMetrics.poolCompletenessRatio.WithLabelValues(controller).Set(completeness)
 }
 
 func queryResult(err error, resultCount int) string {

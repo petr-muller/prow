@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/api/equality"
@@ -41,6 +42,73 @@ import (
 	"sigs.k8s.io/prow/pkg/git/types"
 	"sigs.k8s.io/prow/pkg/github"
 )
+
+func TestQueryGaugesAfterEmptyCycle(t *testing.T) {
+	// These gauges are shared with other controller tests, so do not run in parallel.
+	for _, controller := range []string{"sync", "status"} {
+		for _, emptyCycle := range []struct {
+			name    string
+			queries config.TideQueries
+		}{
+			{name: "no configured queries"},
+			{name: "configured query without org shards", queries: config.TideQueries{{Labels: []string{"approved"}}}},
+		} {
+			t.Run(controller+"/"+emptyCycle.name, func(t *testing.T) {
+				cfg := &config.Config{ProwConfig: config.ProwConfig{Tide: config.Tide{
+					TideGitHubConfig: config.TideGitHubConfig{Queries: config.TideQueries{{Orgs: []string{"success", "partial", "error"}}}},
+				}}}
+				getter := func() *config.Config { return cfg }
+				pr := testPR("partial", "repo", "A", 1, githubql.MergeableStateMergeable)
+				ghc := &ghcInterceptor{
+					c: &fgc{prs: map[string][]PullRequest{"partial": {*pr}}},
+					interceptors: githubClientFuncs{QueryWithGitHubAppsSupport: func(c githubClient, ctx context.Context, q any, vars map[string]any, org string) error {
+						if org == "error" || (org == "partial" && vars["searchCursor"].(*githubql.String) != nil) {
+							return errors.New("query failed")
+						}
+						if err := c.QueryWithGitHubAppsSupport(ctx, q, vars, org); err != nil {
+							return err
+						}
+						if org == "partial" {
+							sq := q.(*searchQuery)
+							sq.Search.PageInfo.HasNextPage = true
+							sq.Search.PageInfo.EndCursor = "next"
+						}
+						return nil
+					}},
+				}
+				provider := &GitHubProvider{cfg: getter, ghc: ghc, logger: logrus.WithField("test", t.Name()), usesGitHubAppsAuth: true}
+				search := func() int {
+					prs, _ := provider.Query()
+					return len(prs)
+				}
+				if controller == "status" {
+					sc := &statusController{config: getter, ghc: ghc, ghProvider: provider, logger: provider.logger, usesGitHubAppsAuth: true}
+					search = func() int { return len(sc.search()) }
+				}
+				checkGauges := func(shards, completeness float64) {
+					t.Helper()
+					for _, result := range []string{"success", "partial", "error"} {
+						if got := promtestutil.ToFloat64(tideMetrics.queryShards.WithLabelValues(controller, result)); got != shards {
+							t.Errorf("%s shards = %v, want %v", result, got, shards)
+						}
+					}
+					if got := promtestutil.ToFloat64(tideMetrics.poolCompletenessRatio.WithLabelValues(controller)); got != completeness {
+						t.Errorf("completeness = %v, want %v", got, completeness)
+					}
+				}
+				if got := search(); got != 1 {
+					t.Fatalf("populated cycle returned %d PRs, want 1", got)
+				}
+				checkGauges(1, 1.0/3)
+				cfg.Tide.Queries = emptyCycle.queries
+				if got := search(); got != 0 {
+					t.Errorf("empty cycle returned %d PRs, want 0", got)
+				}
+				checkGauges(0, 1)
+			})
+		}
+	}
+}
 
 func TestSearch(t *testing.T) {
 	const q = "random search string"

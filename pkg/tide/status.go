@@ -639,8 +639,10 @@ func (sc *statusController) sync(pool map[string]CodeReviewCommon, blocks blocke
 
 func (sc *statusController) search() []CodeReviewCommon {
 	const controller = "status"
+	var shards queryShardCounts
 	rawQueries := sc.config().Tide.Queries
 	if len(rawQueries) == 0 {
+		shards.report(controller)
 		return nil
 	}
 
@@ -668,7 +670,6 @@ func (sc *statusController) search() []CodeReviewCommon {
 	var prs []CodeReviewCommon
 	var errs []error
 	var lock sync.Mutex
-	var shards queryShardCounts
 
 	// Use the group only to limit concurrency; errors are collected in errs.
 	g := new(errgroup.Group)

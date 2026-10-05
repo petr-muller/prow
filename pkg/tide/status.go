@@ -677,9 +677,11 @@ func (sc *statusController) search() []CodeReviewCommon {
 	}
 
 	for org, query := range queries {
-
+		// Go blocks while the concurrency limit is saturated.
+		submitted := time.Now()
 		g.Go(func() error {
 			now := time.Now()
+			tideMetrics.queryWaitDuration.WithLabelValues(controller).Observe(now.Sub(submitted).Seconds())
 			log := sc.logger.WithField("query", query)
 
 			sc.storedStateLock.Lock()

@@ -221,6 +221,7 @@ var (
 
 		// Query observability
 		queryDuration         *prometheus.HistogramVec
+		queryWaitDuration     *prometheus.HistogramVec
 		queryPRsReturned      *prometheus.HistogramVec
 		queryErrors           *prometheus.CounterVec
 		queryPartialResults   *prometheus.CounterVec
@@ -313,6 +314,13 @@ var (
 			"controller",
 			"result",
 		}),
+		queryWaitDuration: prometheus.NewHistogramVec(prometheus.HistogramOpts{
+			Name:    "tide_query_wait_duration_seconds",
+			Help:    "Time from Tide query shard submission to worker start, including waiting for a concurrency slot.",
+			Buckets: []float64{0.001, 0.01, 0.1, 0.5, 1, 2, 5, 10, 30, 60, 120, 300, 600},
+		}, []string{
+			"controller",
+		}),
 		queryPRsReturned: prometheus.NewHistogramVec(prometheus.HistogramOpts{
 			Name:    "tide_query_prs_returned",
 			Help:    "Number of PRs returned per Tide query shard.",
@@ -402,6 +410,7 @@ func init() {
 	prometheus.MustRegister(tideMetrics.statusUpdateDuration)
 	prometheus.MustRegister(tideMetrics.syncHeartbeat)
 	prometheus.MustRegister(tideMetrics.queryDuration)
+	prometheus.MustRegister(tideMetrics.queryWaitDuration)
 	prometheus.MustRegister(tideMetrics.queryPRsReturned)
 	prometheus.MustRegister(tideMetrics.queryErrors)
 	prometheus.MustRegister(tideMetrics.queryPartialResults)

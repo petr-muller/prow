@@ -2331,7 +2331,6 @@ func TestNewBaseSHAGetter(t *testing.T) {
 }
 
 func TestStatusControllerSearch(t *testing.T) {
-	t.Parallel()
 	orgAPR := testPR("org-a", "repo", "A", 1, githubql.MergeableStateMergeable)
 	orgBPR := testPR("org-b", "repo", "B", 2, githubql.MergeableStateMergeable)
 	orgCPR := testPR("org-c", "repo", "C", 3, githubql.MergeableStateMergeable)
@@ -2411,9 +2410,11 @@ func TestStatusControllerSearch(t *testing.T) {
 			}
 
 			var result []CodeReviewCommon
+			before := queryWaitHistogram(t, "status")
 			peak := testQueryConcurrency(t, ghc, func() {
 				result = sc.search()
 			})
+			checkQueryWaitHistogram(t, "status", before, len(tc.prs), tc.maxQueryConcurrency)
 			if peak != tc.expectedPeakConcurrency {
 				t.Errorf("peak in-flight queries = %d, want %d", peak, tc.expectedPeakConcurrency)
 			}

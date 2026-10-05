@@ -126,8 +126,11 @@ func (gi *GitHubProvider) Query() (map[string]CodeReviewCommon, error) {
 
 		for org, q := range queries {
 			org, q, i := org, q, i
+			// Go blocks while the concurrency limit is saturated.
+			submitted := time.Now()
 			g.Go(func() error {
 				start := time.Now()
+				tideMetrics.queryWaitDuration.WithLabelValues(controller).Observe(start.Sub(submitted).Seconds())
 				results, err := gi.search(gi.ghc.QueryWithGitHubAppsSupport, gi.logger, q, time.Time{}, time.Now(), org)
 				duration := time.Since(start)
 				result := queryResult(err, len(results))

@@ -21,6 +21,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/rand"
 	"net/http"
 	"net/http/httptest"
@@ -39,7 +40,9 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
 	fuzz "github.com/google/gofuzz"
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
+	dto "github.com/prometheus/client_model/go"
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	"github.com/sirupsen/logrus/hooks/test"
@@ -876,12 +879,41 @@ func testQueryConcurrency(t *testing.T, ghc *fgc, query func()) int {
 		go func() {
 			// Let every runnable query reach the fake before releasing any.
 			synctest.Wait()
+			// Advance fake time with every runnable query blocked. A queued
+			// submission must include this delay; unlimited submissions do not.
+			time.Sleep(time.Second)
 			close(release)
 		}()
 
 		query()
 	})
 	return ghc.peakInFlightQueries
+}
+
+// Query metric tests run serially so global observations from parallel tests
+// cannot interfere with their deltas.
+func queryWaitHistogram(t *testing.T, controller string) *dto.Histogram {
+	t.Helper()
+	metric := &dto.Metric{}
+	if err := tideMetrics.queryWaitDuration.WithLabelValues(controller).(prometheus.Metric).Write(metric); err != nil {
+		t.Fatalf("reading query wait histogram: %v", err)
+	}
+	return metric.GetHistogram()
+}
+
+func checkQueryWaitHistogram(t *testing.T, controller string, before *dto.Histogram, queries, limit int) {
+	t.Helper()
+	after := queryWaitHistogram(t, controller)
+	if got := after.GetSampleCount() - before.GetSampleCount(); got != uint64(queries) {
+		t.Errorf("query wait observations = %d, want %d", got, queries)
+	}
+	var want float64
+	if limit == 1 && queries > 1 {
+		want = 1 // The second submission waited for the first worker's release.
+	}
+	if got := after.GetSampleSum() - before.GetSampleSum(); math.Abs(got-want) > 1e-9 {
+		t.Errorf("query wait seconds = %v, want %v", got, want)
+	}
 }
 
 func (f *fgc) Merge(org, repo string, number int, details github.MergeDetails) error {
@@ -4912,8 +4944,6 @@ func TestPickSmallestPassingNumber(t *testing.T) {
 }
 
 func TestQueryShardsByOrgWhenAppsAuthIsEnabledOnly(t *testing.T) {
-	t.Parallel()
-
 	orgPR := testPR("org", "repo", "A", 1, githubql.MergeableStateMergeable)
 	otherOrgPR := testPR("other-org", "repo", "B", 2, githubql.MergeableStateMergeable)
 	thirdOrgPR := testPR("third-org", "repo", "C", 3, githubql.MergeableStateMergeable)
@@ -4980,9 +5010,11 @@ func TestQueryShardsByOrgWhenAppsAuthIsEnabledOnly(t *testing.T) {
 
 			var prs map[string]CodeReviewCommon
 			var err error
+			before := queryWaitHistogram(t, "sync")
 			peak := testQueryConcurrency(t, ghc, func() {
 				prs, err = provider.Query()
 			})
+			checkQueryWaitHistogram(t, "sync", before, tc.expectedNumberOfApiCalls, tc.maxQueryConcurrency)
 			if err != nil {
 				t.Fatalf("query() failed: %v", err)
 			}

@@ -22,6 +22,7 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -218,6 +219,22 @@ func (o *GitHubOptions) Validate(bool) error {
 	}
 	if o.AppID == "" != (o.AppPrivateKeyPath == "") {
 		return errors.New("--app-id and --app-private-key-path must be set together")
+	}
+	if o.SigningKeyPath != "" {
+		info, err := os.Stat(o.SigningKeyPath)
+		if err != nil {
+			return fmt.Errorf("invalid --git-signing-key-path %q: %w", o.SigningKeyPath, err)
+		}
+		if !info.Mode().IsRegular() {
+			return fmt.Errorf("invalid --git-signing-key-path %q: must be a regular file", o.SigningKeyPath)
+		}
+		key, err := os.Open(o.SigningKeyPath)
+		if err != nil {
+			return fmt.Errorf("cannot open --git-signing-key-path %q for reading: %w", o.SigningKeyPath, err)
+		}
+		if err := key.Close(); err != nil {
+			return fmt.Errorf("cannot close --git-signing-key-path %q: %w", o.SigningKeyPath, err)
+		}
 	}
 
 	if o.TokenPath != "" && len(endpoints) == 1 && endpoints[0] == github.DefaultAPIEndpoint && !o.AllowDirectAccess {

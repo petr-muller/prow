@@ -19,14 +19,50 @@ package flagutil
 import (
 	"flag"
 	"fmt"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
 
 	"sigs.k8s.io/prow/pkg/github"
 )
+
+func TestGitHubOptions_ValidateSigningKeyPath(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	keyPath := filepath.Join(dir, "signing-key")
+	if err := os.WriteFile(keyPath, []byte("key contents must not be read or logged"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name    string
+		path    string
+		wantErr bool
+	}{
+		{name: "empty path disables signing"},
+		{name: "readable file", path: keyPath},
+		{name: "missing file", path: filepath.Join(dir, "missing"), wantErr: true},
+		{name: "directory", path: dir, wantErr: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			opts := &GitHubOptions{SigningKeyPath: tc.path}
+			err := opts.Validate(false)
+			if (err != nil) != tc.wantErr {
+				t.Fatalf("Validate() error = %v, want error: %t", err, tc.wantErr)
+			}
+			if err != nil && (!strings.Contains(err.Error(), "--git-signing-key-path") || !strings.Contains(err.Error(), tc.path)) {
+				t.Errorf("error must identify the flag and configured path: %v", err)
+			}
+			if opts.SigningKeyPath != tc.path {
+				t.Errorf("SigningKeyPath = %q, want %q", opts.SigningKeyPath, tc.path)
+			}
+		})
+	}
+}
 
 func TestGitHubOptions_Validate(t *testing.T) {
 	t.Parallel()

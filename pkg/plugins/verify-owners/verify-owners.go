@@ -263,6 +263,8 @@ func handle(ghc githubClient, gc git.ClientFactory, roc repoownersClient, log *l
 	if err := r.Config("user.email", "prow@localhost"); err != nil {
 		return err
 	}
+	// Override the factory's signing default: this temporary merge commit is
+	// only used to inspect OWNERS files and aliases and is never published.
 	if err := r.Config("commit.gpgsign", "false"); err != nil {
 		log.WithError(err).Errorf("Cannot set gpgsign=false in gitconfig: %v", err)
 	}

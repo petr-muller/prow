@@ -170,6 +170,8 @@ func prowYAMLGetter(
 	if err := repo.Config("user.email", "prow@localhost"); err != nil {
 		return nil, err
 	}
+	// Override the factory's signing default: these temporary merge commits are
+	// only used to read in-repo configuration and are never published.
 	if err := repo.Config("commit.gpgsign", "false"); err != nil {
 		return nil, err
 	}

@@ -32,7 +32,7 @@ type GitOptions struct {
 
 // AddFlags injects git options into the given FlagSet.
 func (o *GitOptions) AddFlags(fs *flag.FlagSet) {
-	fs.StringVar(&o.SigningKeyPath, "git-signing-key-path", "", "Path to an SSH private key for signing git commits. When set, all commits made by the git client are signed using SSH.")
+	fs.StringVar(&o.SigningKeyPath, "git-signing-key-path", "", "Path to an SSH private key for signing git commits. When set, factory-created clones are configured to sign commits using SSH by default; callers can override this configuration, for example for temporary local merge commits.")
 }
 
 // Validate checks that the signing key is a readable regular file without reading its contents.

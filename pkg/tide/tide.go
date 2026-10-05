@@ -1233,6 +1233,8 @@ func pickNewBatch(gc git.ClientFactory, cfg config.Getter, provider provider) fu
 		if err := r.Config("user.email", "prow@localhost"); err != nil {
 			return nil, err
 		}
+		// Override the factory's signing default: these temporary merge commits
+		// only check whether candidates merge together and are never published.
 		if err := r.Config("commit.gpgsign", "false"); err != nil {
 			sp.log.Warningf("Cannot set gpgsign=false in gitconfig: %v", err)
 		}

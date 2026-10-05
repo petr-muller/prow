@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/prometheus/client_golang/prometheus"
 	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
@@ -42,6 +43,181 @@ import (
 	"sigs.k8s.io/prow/pkg/git/types"
 	"sigs.k8s.io/prow/pkg/github"
 )
+
+func TestQueryOutcomeMetrics(t *testing.T) {
+	testQueryOutcomeMetrics(t, "sync", func(provider *GitHubProvider) int {
+		prs, err := provider.Query()
+		if !errors.Is(err, context.DeadlineExceeded) {
+			t.Errorf("Query error = %v, want terminal deadline error", err)
+		}
+		return len(prs)
+	})
+}
+
+// Keep these tests sequential: both controllers share the metric vectors.
+func testQueryOutcomeMetrics(t *testing.T, controller string, search func(*GitHubProvider) int) {
+	t.Helper()
+	registry := prometheus.NewRegistry()
+	for _, metric := range []interface {
+		prometheus.Collector
+		Reset()
+	}{tideMetrics.queryResults, tideMetrics.queryDuration, tideMetrics.queryPRsReturned, tideMetrics.queryErrors, tideMetrics.queryPartialResults} {
+		metric.Reset()
+		t.Cleanup(metric.Reset)
+		registry.MustRegister(metric)
+	}
+	const requestDelay = time.Millisecond
+	searchStarts := map[string]time.Time{}
+	searchDurations := map[string]float64{}
+	ghc := &ghcInterceptor{
+		c: &fgc{prs: map[string][]PullRequest{
+			"success": {
+				*testPR("success", "repo", "A", 1, githubql.MergeableStateMergeable),
+				*testPR("success", "repo", "B", 2, githubql.MergeableStateMergeable),
+			},
+			"partial": {*testPR("partial", "repo", "C", 3, githubql.MergeableStateMergeable)},
+		}},
+		interceptors: githubClientFuncs{QueryWithGitHubAppsSupport: func(c githubClient, ctx context.Context, q any, vars map[string]any, org string) error {
+			if _, ok := searchStarts[org]; !ok {
+				searchStarts[org] = time.Now()
+			}
+			defer func() { searchDurations[org] = time.Since(searchStarts[org]).Seconds() }()
+			// A measurable delay lets us check that duration is in seconds and
+			// includes the complete search, including a failed later page.
+			delay := requestDelay
+			if org == "error" {
+				delay *= 2
+			} else if org == "partial" {
+				delay *= 3
+			}
+			time.Sleep(delay)
+			if org == "error" {
+				return fmt.Errorf("terminal search error: %w", context.DeadlineExceeded)
+			}
+			if org == "partial" && vars["searchCursor"].(*githubql.String) != nil {
+				return errors.New("Resource limits exceeded")
+			}
+			if err := c.QueryWithGitHubAppsSupport(ctx, q, vars, org); err != nil {
+				return err
+			}
+			if org == "partial" {
+				sq := q.(*searchQuery)
+				sq.Search.PageInfo.HasNextPage = true
+				sq.Search.PageInfo.EndCursor = "next"
+			}
+			return nil
+		}},
+	}
+	cfg := func() *config.Config {
+		return &config.Config{ProwConfig: config.ProwConfig{Tide: config.Tide{
+			// Serialize shards so the unmeasured overhead bounds each duration.
+			MaxQueryConcurrency: 1,
+			TideGitHubConfig: config.TideGitHubConfig{Queries: config.TideQueries{
+				{Orgs: []string{"success"}},
+				{Orgs: []string{"error", "partial"}},
+			}},
+		}}}
+	}
+	provider := &GitHubProvider{cfg: cfg, ghc: ghc, logger: logrus.WithField("test", t.Name()), usesGitHubAppsAuth: true}
+	start := time.Now()
+	if got := search(provider); got != 3 {
+		t.Fatalf("search returned %d PRs, want 3", got)
+	}
+	elapsed := time.Since(start).Seconds()
+	overhead := elapsed
+	for _, duration := range searchDurations {
+		overhead -= duration
+	}
+	families, err := registry.Gather()
+	if err != nil {
+		t.Fatal(err)
+	}
+	queryID := "1"
+	if controller == "status" {
+		queryID = ""
+	}
+	wantCounters := map[string]map[string]float64{
+		"tide_query_errors_total": {
+			fmt.Sprintf("controller=%s,error_class=context_deadline,org_shard=error,query_id=%s", controller, queryID):  1,
+			fmt.Sprintf("controller=%s,error_class=resource_limits,org_shard=partial,query_id=%s", controller, queryID): 1,
+		},
+		"tide_query_partial_results_total": {
+			fmt.Sprintf("controller=%s,org_shard=partial,query_id=%s", controller, queryID): 1,
+		},
+	}
+	if controller == "sync" {
+		wantCounters["tidequeryresults"] = map[string]float64{
+			"org_shard=success,query_index=0,result=success": 1,
+			"org_shard=error,query_index=1,result=error":     1,
+			"org_shard=partial,query_index=1,result=error":   1,
+		}
+	}
+	gotCounters := map[string]map[string]float64{}
+	durationResults := map[string]uint64{}
+	var returnedObservations uint64
+	for _, family := range families {
+		for _, metric := range family.Metric {
+			var labels []string
+			for _, label := range metric.Label {
+				labels = append(labels, label.GetName()+"="+label.GetValue())
+			}
+			slices.Sort(labels)
+			labelKey := strings.Join(labels, ",")
+			if metric.Counter != nil {
+				if gotCounters[family.GetName()] == nil {
+					gotCounters[family.GetName()] = map[string]float64{}
+				}
+				gotCounters[family.GetName()][labelKey] = metric.Counter.GetValue()
+				continue
+			}
+			histogram := metric.GetHistogram()
+			switch family.GetName() {
+			case "tide_query_duration_seconds":
+				durationResults[labelKey] = histogram.GetSampleCount()
+				var minimum float64
+				for org, duration := range searchDurations {
+					if labelKey == "controller="+controller+",result="+org {
+						minimum = duration
+					}
+				}
+				maximum := minimum + overhead
+				if got := histogram.GetSampleSum(); got < minimum || got > maximum {
+					t.Errorf("duration{%s} sum = %v seconds, want [%v, %v]", labelKey, got, minimum, maximum)
+				}
+			case "tide_query_prs_returned":
+				returnedObservations += histogram.GetSampleCount()
+				if labelKey != "controller="+controller || histogram.GetSampleCount() != 3 || histogram.GetSampleSum() != 3 {
+					t.Errorf("returned PR histogram{%s} = %v, want controller=%s, count=3, sum=3", labelKey, histogram, controller)
+				}
+				for _, bucket := range histogram.Bucket {
+					want := uint64(3)
+					if bucket.GetUpperBound() == 0 {
+						want = 1 // Terminal failure returns no PRs.
+					} else if bucket.GetUpperBound() == 1 {
+						want = 2 // The partial search returns one PR.
+					}
+					if got := bucket.GetCumulativeCount(); got != want {
+						t.Errorf("returned PR bucket %v = %d, want %d", bucket.GetUpperBound(), got, want)
+					}
+				}
+			}
+		}
+	}
+	if diff := cmp.Diff(wantCounters, gotCounters); diff != "" {
+		t.Errorf("query counters differ (-want +got):\n%s", diff)
+	}
+	wantDurations := map[string]uint64{
+		"controller=" + controller + ",result=success": 1,
+		"controller=" + controller + ",result=error":   1,
+		"controller=" + controller + ",result=partial": 1,
+	}
+	if diff := cmp.Diff(wantDurations, durationResults); diff != "" {
+		t.Errorf("duration observations differ (-want +got):\n%s", diff)
+	}
+	if returnedObservations != 3 {
+		t.Errorf("returned PR observations = %d, want 3", returnedObservations)
+	}
+}
 
 func TestQueryGaugesAfterEmptyCycle(t *testing.T) {
 	// These gauges are shared with other controller tests, so do not run in parallel.

@@ -2330,6 +2330,19 @@ func TestNewBaseSHAGetter(t *testing.T) {
 	}
 }
 
+func TestStatusControllerQueryOutcomeMetrics(t *testing.T) {
+	testQueryOutcomeMetrics(t, "status", func(provider *GitHubProvider) int {
+		sc := &statusController{
+			config:             provider.cfg,
+			ghc:                provider.ghc,
+			ghProvider:         provider,
+			logger:             provider.logger,
+			usesGitHubAppsAuth: true,
+		}
+		return len(sc.search())
+	})
+}
+
 func TestStatusControllerSearch(t *testing.T) {
 	t.Parallel()
 	orgAPR := testPR("org-a", "repo", "A", 1, githubql.MergeableStateMergeable)

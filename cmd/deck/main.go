@@ -770,21 +770,19 @@ func handleProwJobs(ja *jobs.JobAgent, log *logrus.Entry) http.HandlerFunc {
 			})
 		}
 
-		refsMatch := func(job prowapi.ProwJob, value string, field func(prowapi.Refs) string) bool {
-			if job.Spec.Refs == nil {
-				return slices.ContainsFunc(job.Spec.ExtraRefs, func(ref prowapi.Refs) bool {
-					return field(ref) == value
-				})
+		refsMatch := func(job prowapi.ProwJob) bool {
+			match := func(ref prowapi.Refs) bool {
+				return (org == "" || ref.Org == org) && (repo == "" || ref.Repo == repo)
 			}
-			return field(*job.Spec.Refs) == value
+			if job.Spec.Refs == nil {
+				return slices.ContainsFunc(job.Spec.ExtraRefs, match)
+			}
+			return match(*job.Spec.Refs)
 		}
 
 		finalJobs := make([]prowapi.ProwJob, 0)
 		for i := range jobs {
-			if org != "" && !refsMatch(jobs[i], org, func(r prowapi.Refs) string { return r.Org }) {
-				continue
-			}
-			if repo != "" && !refsMatch(jobs[i], repo, func(r prowapi.Refs) string { return r.Repo }) {
+			if (org != "" || repo != "") && !refsMatch(jobs[i]) {
 				continue
 			}
 			if owner != "" && !ownerMatch(jobs[i], owner) {

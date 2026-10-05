@@ -515,6 +515,19 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 		},
 		{
 			ObjectMeta: metav1.ObjectMeta{
+				Name: "multiple-extrarefs",
+			},
+			Spec: prowapi.ProwJobSpec{
+				Agent: prowapi.KubernetesAgent,
+				Job:   "periodic-job",
+				ExtraRefs: []prowapi.Refs{
+					{Org: "alpha", Repo: "one"},
+					{Org: "beta", Repo: "two"},
+				},
+			},
+		},
+		{
+			ObjectMeta: metav1.ObjectMeta{
 				Name: "noowner",
 			},
 			Spec: prowapi.ProwJobSpec{
@@ -560,7 +573,7 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 	testCases := []testCase{
 		{
 			Name:         "no filter should return all the tests",
-			ExpectedJobs: []string{"fullref", "nullref", "noowner", "multiowner", "differentorg", "extrarefs-org-match", "extrarefs-different-org"},
+			ExpectedJobs: []string{"fullref", "nullref", "noowner", "multiowner", "differentorg", "extrarefs-org-match", "extrarefs-different-org", "multiple-extrarefs"},
 		},
 		{
 			Name:         "owner filter should return just jobs with the right owner",
@@ -595,6 +608,33 @@ func TestHandleProwJobsWithFilter(t *testing.T) {
 			Org:          "otherk8s",
 			Repo:         "testinfra",
 			ExpectedJobs: []string{"extrarefs-different-org"},
+		},
+		{
+			Name: "org and repo filters should not match different ExtraRefs entries",
+			Org:  "alpha",
+			Repo: "two",
+		},
+		{
+			Name:         "org and repo filters should match the first ExtraRefs entry",
+			Org:          "alpha",
+			Repo:         "one",
+			ExpectedJobs: []string{"multiple-extrarefs"},
+		},
+		{
+			Name:         "org and repo filters should match the second ExtraRefs entry",
+			Org:          "beta",
+			Repo:         "two",
+			ExpectedJobs: []string{"multiple-extrarefs"},
+		},
+		{
+			Name:         "org filter should match one of multiple ExtraRefs entries",
+			Org:          "alpha",
+			ExpectedJobs: []string{"multiple-extrarefs"},
+		},
+		{
+			Name:         "repo filter should match one of multiple ExtraRefs entries",
+			Repo:         "two",
+			ExpectedJobs: []string{"multiple-extrarefs"},
 		},
 	}
 

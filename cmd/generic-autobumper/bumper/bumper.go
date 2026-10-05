@@ -81,6 +81,8 @@ type Options struct {
 	// GitHubOptions provides standard Prow GitHub auth flags. When set and containing app credentials,
 	// takes precedence over GitHubToken. Not serialized from YAML -- populated from CLI flags.
 	GitHubOptions *flagutil.GitHubOptions `json:"-"`
+	// GitOptions configures the git client factory. Populated from CLI flags.
+	GitOptions flagutil.GitOptions `json:"-"`
 }
 
 // Information needed for gerrit bump
@@ -167,6 +169,9 @@ func (o *Options) resolvedPRSourceMode() string {
 }
 
 func validateOptions(o *Options) error {
+	if err := o.GitOptions.Validate(false); err != nil {
+		return fmt.Errorf("invalid git options: %w", err)
+	}
 	if !o.SkipPullRequest && o.Gerrit == nil {
 		mode := o.resolvedPRSourceMode()
 		switch mode {
@@ -313,8 +318,8 @@ func processGitHub(ctx context.Context, o *Options, prh PRHandler) error {
 }
 
 // processGitHubAppAuth handles the GitHub App authentication flow. It uses
-// flagutil.GitHubOptions to construct the GitHub API client and GitClientFactory
-// to push branches directly to the upstream repository (no fork needed).
+// flagutil.GitHubOptions to construct the GitHub API client and flagutil.GitOptions
+// to construct the GitClientFactory to push branches directly to the upstream repository (no fork needed).
 func processGitHubAppAuth(ctx context.Context, o *Options, prh PRHandler) error {
 	stdout := HideSecretsWriter{Delegate: os.Stdout, Censor: secret.Censor}
 	stderr := HideSecretsWriter{Delegate: os.Stderr, Censor: secret.Censor}
@@ -368,7 +373,7 @@ func processGitHubAppAuth(ctx context.Context, o *Options, prh PRHandler) error 
 		return nil
 	}
 
-	gitClientFactory, err := o.GitHubOptions.GitClientFactory("", nil, false, false)
+	gitClientFactory, err := o.GitOptions.GitClientFactory(o.GitHubOptions, "", nil, false, false)
 	if err != nil {
 		return fmt.Errorf("create git client factory: %w", err)
 	}

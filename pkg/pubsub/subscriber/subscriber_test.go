@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -178,6 +179,8 @@ func TestProwJobEvent_ToFromMessage(t *testing.T) {
 }
 
 func TestHandleMessage(t *testing.T) {
+	// Gerrit factories configure cookies globally; keep that configuration local to this test.
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 	for _, tc := range []struct {
 		name, eventType string
 		msg             *pubSubMessage
@@ -337,8 +340,19 @@ func TestHandleMessage(t *testing.T) {
 			tc.config.ProwJobNamespace = "prowjobs"
 			ca.Set(tc.config)
 			fr := fakeReporter{}
-			gitClient, _ := (&flagutil.GitHubOptions{}).GitClientFactory("abc", nil, true, false)
-			cache, _ := config.NewInRepoConfigCache(100, ca, gitClient)
+			gitClient, err := (&flagutil.GitOptions{}).GitClientFactory(nil, "abc", nil, true, false)
+			if err != nil {
+				t1.Fatal(err)
+			}
+			t1.Cleanup(func() {
+				if err := gitClient.Clean(); err != nil {
+					t1.Error(err)
+				}
+			})
+			cache, err := config.NewInRepoConfigCache(100, ca, gitClient)
+			if err != nil {
+				t1.Fatal(err)
+			}
 			s := Subscriber{
 				Metrics:            NewMetrics(),
 				ProwJobClient:      fakeProwJobClient.ProwV1().ProwJobs(tc.config.ProwJobNamespace),
@@ -413,6 +427,8 @@ func CheckProwJob(pe *ProwJobEvent, pj *prowapi.ProwJob) error {
 }
 
 func TestHandlePeriodicJob(t *testing.T) {
+	// Gerrit factories configure cookies globally; keep that configuration local to this test.
+	t.Setenv("GIT_CONFIG_GLOBAL", filepath.Join(t.TempDir(), "gitconfig"))
 	for _, tc := range []struct {
 		name            string
 		pe              *ProwJobEvent
@@ -583,8 +599,19 @@ func TestHandlePeriodicJob(t *testing.T) {
 			tc.config.ProwJobNamespace = "prowjobs"
 			ca.Set(tc.config)
 			fr := fakeReporter{}
-			gitClient, _ := (&flagutil.GitHubOptions{}).GitClientFactory("abc", nil, true, false)
-			cache, _ := config.NewInRepoConfigCache(100, ca, gitClient)
+			gitClient, err := (&flagutil.GitOptions{}).GitClientFactory(nil, "abc", nil, true, false)
+			if err != nil {
+				t1.Fatal(err)
+			}
+			t1.Cleanup(func() {
+				if err := gitClient.Clean(); err != nil {
+					t1.Error(err)
+				}
+			})
+			cache, err := config.NewInRepoConfigCache(100, ca, gitClient)
+			if err != nil {
+				t1.Fatal(err)
+			}
 			s := Subscriber{
 				Metrics:            NewMetrics(),
 				ProwJobClient:      fakeProwJobClient.ProwV1().ProwJobs(ca.Config().ProwJobNamespace),

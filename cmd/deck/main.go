@@ -120,6 +120,7 @@ type options struct {
 	instrumentation       prowflagutil.InstrumentationOptions
 	kubernetes            prowflagutil.KubernetesOptions
 	github                prowflagutil.GitHubOptions
+	git                   prowflagutil.GitOptions
 	tideURL               string
 	hookURL               string
 	oauthURL              string
@@ -143,7 +144,7 @@ type options struct {
 }
 
 func (o *options) Validate() error {
-	for _, group := range []pkgFlagutil.OptionGroup{&o.kubernetes, &o.github, &o.config, &o.pluginsConfig, &o.controllerManager} {
+	for _, group := range []pkgFlagutil.OptionGroup{&o.kubernetes, &o.github, &o.git, &o.config, &o.pluginsConfig, &o.controllerManager} {
 		if err := group.Validate(o.dryRun); err != nil {
 			return err
 		}
@@ -192,6 +193,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	o.controllerManager.AddFlags(fs)
 	o.kubernetes.AddFlags(fs)
 	o.github.AddFlags(fs)
+	o.git.AddFlags(fs)
 	o.github.AllowAnonymous = true
 	o.github.AllowDirectAccess = true
 	o.storage.AddFlags(fs)
@@ -409,7 +411,7 @@ func main() {
 			if err != nil {
 				logrus.WithError(err).Fatal("Error getting GitHub client.")
 			}
-			gitClient, err = o.github.GitClientFactory("", &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
+			gitClient, err = o.git.GitClientFactory(&o.github, "", &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
 			if err != nil {
 				logrus.WithError(err).Fatal("Error getting Git client.")
 			}

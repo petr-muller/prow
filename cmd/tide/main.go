@@ -60,6 +60,7 @@ type options struct {
 	runOnce                bool
 	kubernetes             prowflagutil.KubernetesOptions
 	github                 prowflagutil.GitHubOptions
+	git                    prowflagutil.GitOptions
 	gerrit                 prowflagutil.GerritOptions
 	storage                prowflagutil.StorageClientOptions
 	instrumentationOptions prowflagutil.InstrumentationOptions
@@ -88,7 +89,7 @@ type options struct {
 }
 
 func (o *options) Validate() error {
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.storage, &o.config, &o.controllerManager} {
+	for _, group := range []flagutil.OptionGroup{&o.git, &o.kubernetes, &o.storage, &o.config, &o.controllerManager} {
 		if err := group.Validate(o.dryRun); err != nil {
 			return err
 		}
@@ -112,7 +113,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.BoolVar(&o.dryRun, "dry-run", true, "Whether to mutate any real-world state.")
 	fs.BoolVar(&o.runOnce, "run-once", false, "If true, run only once then quit.")
 	o.github.AddCustomizedFlags(fs, prowflagutil.DisableThrottlerOptions())
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.storage, &o.instrumentationOptions, &o.config, &o.gerrit} {
+	for _, group := range []flagutil.OptionGroup{&o.git, &o.kubernetes, &o.storage, &o.instrumentationOptions, &o.config, &o.gerrit} {
 		group.AddFlags(fs)
 	}
 	fs.IntVar(&o.syncThrottle, "sync-hourly-tokens", 800, "The maximum number of tokens per hour to be used by the sync controller.")
@@ -179,7 +180,7 @@ func main() {
 	}
 
 	var c *tide.Controller
-	gitClient, err := o.github.GitClientFactory(o.cookiefilePath, &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
+	gitClient, err := o.git.GitClientFactory(&o.github, o.cookiefilePath, &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
 	if err != nil {
 		logrus.WithError(err).Fatal("Error getting Git client.")
 	}

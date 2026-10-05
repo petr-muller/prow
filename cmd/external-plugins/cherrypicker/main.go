@@ -40,6 +40,7 @@ type options struct {
 
 	dryRun                 bool
 	github                 prowflagutil.GitHubOptions
+	git                    prowflagutil.GitOptions
 	labels                 prowflagutil.Strings
 	instrumentationOptions prowflagutil.InstrumentationOptions
 	logLevel               string
@@ -52,7 +53,7 @@ type options struct {
 }
 
 func (o *options) Validate() error {
-	for idx, group := range []flagutil.OptionGroup{&o.github} {
+	for idx, group := range []flagutil.OptionGroup{&o.github, &o.git} {
 		if err := group.Validate(o.dryRun); err != nil {
 			return fmt.Errorf("%d: %w", idx, err)
 		}
@@ -73,7 +74,7 @@ func gatherOptions() options {
 	fs.BoolVar(&o.allowAll, "allow-all", false, "Allow anybody to use automated cherrypicks by skipping GitHub organization membership checks.")
 	fs.BoolVar(&o.issueOnConflict, "create-issue-on-conflict", false, "Create a GitHub issue and assign it to the requestor on cherrypick conflict.")
 	fs.StringVar(&o.labelPrefix, "label-prefix", defaultLabelPrefix, "Set a custom label prefix.")
-	for _, group := range []flagutil.OptionGroup{&o.github, &o.instrumentationOptions} {
+	for _, group := range []flagutil.OptionGroup{&o.github, &o.git, &o.instrumentationOptions} {
 		group.AddFlags(fs)
 	}
 	fs.Parse(os.Args[1:])
@@ -102,7 +103,7 @@ func main() {
 	if err != nil {
 		logrus.WithError(err).Fatal("Error getting GitHub client.")
 	}
-	gitClient, err := o.github.GitClientFactory("", nil, o.dryRun, false)
+	gitClient, err := o.git.GitClientFactory(&o.github, "", nil, o.dryRun, false)
 	if err != nil {
 		logrus.WithError(err).Fatal("Error getting Git client.")
 	}

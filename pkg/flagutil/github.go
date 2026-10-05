@@ -22,7 +22,6 @@ import (
 	"flag"
 	"fmt"
 	"net/url"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -49,7 +48,6 @@ type GitHubOptions struct {
 	AllowDirectAccess bool
 	AppID             string
 	AppPrivateKeyPath string
-	SigningKeyPath    string
 
 	ThrottleHourlyTokens int
 	ThrottleAllowBurst   int
@@ -149,7 +147,6 @@ func (o *GitHubOptions) addFlags(fs *flag.FlagSet, paramFuncs ...FlagParameter) 
 	fs.IntVar(&o.max404Retries, "github-client.max-404-retries", github.DefaultMax404Retries, "Maximum number of retries that will be used for a 404-ing request to the GitHub API.")
 	fs.DurationVar(&o.maxSleepTime, "github-client.backoff-timeout", github.DefaultMaxSleepTime, "Largest allowable Retry-After time for requests to the GitHub API.")
 	fs.DurationVar(&o.initialDelay, "github-client.initial-delay", github.DefaultInitialDelay, "Initial delay before retries begin for requests to the GitHub API.")
-	fs.StringVar(&o.SigningKeyPath, "git-signing-key-path", "", "Path to an SSH private key for signing git commits. When set, all commits made by the git client are signed using SSH.")
 }
 
 func (o *GitHubOptions) parseOrgThrottlers() error {
@@ -219,22 +216,6 @@ func (o *GitHubOptions) Validate(bool) error {
 	}
 	if o.AppID == "" != (o.AppPrivateKeyPath == "") {
 		return errors.New("--app-id and --app-private-key-path must be set together")
-	}
-	if o.SigningKeyPath != "" {
-		info, err := os.Stat(o.SigningKeyPath)
-		if err != nil {
-			return fmt.Errorf("invalid --git-signing-key-path %q: %w", o.SigningKeyPath, err)
-		}
-		if !info.Mode().IsRegular() {
-			return fmt.Errorf("invalid --git-signing-key-path %q: must be a regular file", o.SigningKeyPath)
-		}
-		key, err := os.Open(o.SigningKeyPath)
-		if err != nil {
-			return fmt.Errorf("cannot open --git-signing-key-path %q for reading: %w", o.SigningKeyPath, err)
-		}
-		if err := key.Close(); err != nil {
-			return fmt.Errorf("cannot close --git-signing-key-path %q: %w", o.SigningKeyPath, err)
-		}
 	}
 
 	if o.TokenPath != "" && len(endpoints) == 1 && endpoints[0] == github.DefaultAPIEndpoint && !o.AllowDirectAccess {
@@ -348,40 +329,6 @@ func (o *GitHubOptions) GitHubClientWithAccessToken(token string) (github.Client
 	options.AppID = "" // Since we are using a token, we should not use the app auth
 	_, _, client, err := github.NewClientFromOptions(logrus.Fields{}, options)
 	return client, err
-}
-
-// GitClientFactory returns git.ClientFactory. Passing non-empty cookieFilePath
-// will result in git ClientFactory to work with Gerrit.
-// TODO(chaodaiG): move this logic to somewhere more appropriate instead of in
-// github.go.
-func (o *GitHubOptions) GitClientFactory(cookieFilePath string, cacheDir *string, dryRun, persistCache bool) (gitv2.ClientFactory, error) {
-	opts := gitv2.ClientFactoryOpts{
-		Censor:         secret.Censor,
-		CookieFilePath: cookieFilePath,
-		Host:           o.Host,
-		Persist:        &persistCache,
-		SigningKeyPath: o.SigningKeyPath,
-	}
-	if cacheDir != nil && *cacheDir != "" {
-		opts.CacheDirBase = cacheDir
-	}
-
-	if cookieFilePath == "" && (o.TokenPath != "" || o.AppPrivateKeyPath != "") {
-		// Make a client with auth suitable for GitHub
-		user, generator, err := o.getGitHubAuthentication(dryRun)
-		if err != nil {
-			return nil, fmt.Errorf("failed to get git authentication: %w", err)
-		}
-		opts.Username = func() (string, error) { return user, nil }
-		opts.Token = generator
-	}
-	// If the client is for Gerrit we're already set with the cookie filepath.
-
-	gitClientFactory, err := gitv2.NewClientFactory(opts.Apply)
-	if err != nil {
-		return nil, fmt.Errorf("failed to create git client factory: %w", err)
-	}
-	return gitClientFactory, nil
 }
 
 func (o *GitHubOptions) getGitHubAuthentication(dryRun bool) (string, gitv2.TokenGetter, error) {

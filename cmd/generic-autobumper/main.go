@@ -181,6 +181,8 @@ func parseOptions() (*options, *bumper.Options, error) {
 	var o options
 	var githubOpts flagutil.GitHubOptions
 	githubOpts.AddFlags(goflag.CommandLine)
+	var gitOpts flagutil.GitOptions
+	gitOpts.AddFlags(goflag.CommandLine)
 	flag.CommandLine.AddGoFlagSet(goflag.CommandLine)
 
 	flag.StringVar(&config, "config", "", "The path to the config file for the autobumber.")
@@ -214,6 +216,7 @@ func parseOptions() (*options, *bumper.Options, error) {
 	pro.SkipPullRequest = skipPullRequest
 	pro.Signoff = signoff
 	pro.GitHubOptions = &githubOpts
+	pro.GitOptions = gitOpts
 	if prSourceMode != "" {
 		pro.PRSourceMode = prSourceMode
 	}

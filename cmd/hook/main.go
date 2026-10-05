@@ -67,6 +67,7 @@ type options struct {
 	gracePeriod            time.Duration
 	kubernetes             prowflagutil.KubernetesOptions
 	github                 prowflagutil.GitHubOptions
+	git                    prowflagutil.GitOptions
 	githubEnablement       prowflagutil.GitHubEnablementOptions
 	bugzilla               prowflagutil.BugzillaOptions
 	instrumentationOptions prowflagutil.InstrumentationOptions
@@ -77,7 +78,7 @@ type options struct {
 }
 
 func (o *options) Validate() error {
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github, &o.bugzilla, &o.jira, &o.githubEnablement, &o.config, &o.pluginsConfig} {
+	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github, &o.git, &o.bugzilla, &o.jira, &o.githubEnablement, &o.config, &o.pluginsConfig} {
 		if err := group.Validate(o.dryRun); err != nil {
 			return err
 		}
@@ -94,7 +95,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.BoolVar(&o.dryRun, "dry-run", true, "Dry run for testing. Uses API tokens but does not mutate.")
 	fs.DurationVar(&o.gracePeriod, "grace-period", 180*time.Second, "On shutdown, try to handle remaining events for the specified duration. ")
 	o.pluginsConfig.PluginConfigPathDefault = "/etc/plugins/plugins.yaml"
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github, &o.bugzilla, &o.instrumentationOptions, &o.jira, &o.githubEnablement, &o.config, &o.pluginsConfig} {
+	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.github, &o.git, &o.bugzilla, &o.instrumentationOptions, &o.jira, &o.githubEnablement, &o.config, &o.pluginsConfig} {
 		group.AddFlags(fs)
 	}
 
@@ -151,7 +152,7 @@ func main() {
 	if err != nil {
 		logrus.WithError(err).Fatal("Error getting GitHub client.")
 	}
-	gitClient, err := o.github.GitClientFactory("", &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
+	gitClient, err := o.git.GitClientFactory(&o.github, "", &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
 	if err != nil {
 		logrus.WithError(err).Fatal("Error getting Git client.")
 	}

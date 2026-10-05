@@ -44,6 +44,7 @@ import (
 type options struct {
 	client         prowflagutil.KubernetesOptions
 	github         prowflagutil.GitHubOptions
+	git            prowflagutil.GitOptions
 	port           int
 	cookiefilePath string
 
@@ -56,7 +57,7 @@ type options struct {
 
 func (o *options) validate() error {
 	var errs []error
-	for _, group := range []flagutil.OptionGroup{&o.client, &o.github, &o.instrumentationOptions, &o.config} {
+	for _, group := range []flagutil.OptionGroup{&o.client, &o.github, &o.git, &o.instrumentationOptions, &o.config} {
 		if err := group.Validate(o.dryRun); err != nil {
 			errs = append(errs, err)
 		}
@@ -71,7 +72,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.BoolVar(&o.dryRun, "dry-run", true, "Dry run for testing. Uses API tokens but does not mutate.")
 	fs.DurationVar(&o.gracePeriod, "grace-period", 180*time.Second, "On shutdown, try to handle remaining events for the specified duration. ")
 	fs.StringVar(&o.cookiefilePath, "cookiefile", "", "Path to git http.cookiefile, leave empty for github or anonymous")
-	for _, group := range []flagutil.OptionGroup{&o.client, &o.github, &o.instrumentationOptions, &o.config} {
+	for _, group := range []flagutil.OptionGroup{&o.client, &o.github, &o.git, &o.instrumentationOptions, &o.config} {
 		group.AddFlags(fs)
 	}
 
@@ -129,7 +130,7 @@ func main() {
 		}
 		s.InRepoConfigGetter = moonrakerClient
 	} else {
-		gitClient, err := o.github.GitClientFactory(o.cookiefilePath, &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
+		gitClient, err := o.git.GitClientFactory(&o.github, o.cookiefilePath, &o.config.InRepoConfigCacheDirBase, o.dryRun, false)
 		if err != nil {
 			logrus.WithError(err).Fatal("Error getting Git client.")
 		}

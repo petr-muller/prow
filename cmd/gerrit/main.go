@@ -80,6 +80,7 @@ func init() {
 }
 
 type options struct {
+	git               prowflagutil.GitOptions
 	cookiefilePath    string
 	tokenPathOverride string
 	config            configflagutil.ConfigOptions
@@ -104,7 +105,7 @@ func (o *options) validate() error {
 		logrus.Info("--cookiefile is not set, using anonymous authentication")
 	}
 
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.storage, &o.instrumentationOptions, &o.config, &o.gerrit} {
+	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.storage, &o.instrumentationOptions, &o.config, &o.gerrit, &o.git} {
 		if err := group.Validate(o.dryRun); err != nil {
 			return err
 		}
@@ -136,7 +137,7 @@ func gatherOptions(fs *flag.FlagSet, args ...string) options {
 	fs.DurationVar(&o.pushGatewayInterval, "push-gateway-interval", time.Minute, "Interval at which prometheus metrics for disk space are pushed.")
 	// TODO(cjwagner): remove deprecated flag.
 	fs.UintVar(&o.instanceConcurrencyLimit, "instance-concurrency-limit", 5, "[DEPRECATED] Number of concurrent calls that can be made to any single Gerrit host instance simultaneously.")
-	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.storage, &o.instrumentationOptions, &o.config, &o.gerrit} {
+	for _, group := range []flagutil.OptionGroup{&o.kubernetes, &o.storage, &o.instrumentationOptions, &o.config, &o.gerrit, &o.git} {
 		group.AddFlags(fs)
 	}
 	fs.Parse(args)
@@ -184,7 +185,7 @@ func main() {
 		}
 		ircg = moonrakerClient
 	} else {
-		gitClient, err := (&prowflagutil.GitHubOptions{}).GitClientFactory(o.cookiefilePath, &o.config.InRepoConfigCacheDirBase, o.dryRun, persist)
+		gitClient, err := o.git.GitClientFactory(nil, o.cookiefilePath, &o.config.InRepoConfigCacheDirBase, o.dryRun, persist)
 		if err != nil {
 			logrus.WithError(err).Fatal("Error creating git client.")
 		}

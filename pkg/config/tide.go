@@ -235,9 +235,10 @@ type Tide struct {
 	// controller to handle org/repo:branch pools. Defaults to 20. Needs to be a
 	// positive number.
 	MaxGoroutines int `json:"max_goroutines,omitempty"`
-	// MaxQueryConcurrency limits how many GitHub PR search queries each Tide
-	// controller (sync and status) runs in parallel. The limit applies per
-	// controller, so up to 2x this many searches may be in flight at once.
+	// MaxQueryConcurrency limits how many GitHub PR search tasks each Tide
+	// controller (sync and status) runs in parallel within one Tide process.
+	// For a positive limit N, each controller has its own limit, allowing up to
+	// 2*N tasks per process and up to 2*N*R tasks across R Tide replicas.
 	// Queries are sharded per org only when GitHub Apps auth is in use.
 	// 0 means no limit. Unlike MaxGoroutines, 0 is not defaulted.
 	MaxQueryConcurrency int `json:"max_query_concurrency,omitempty"`

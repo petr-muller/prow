@@ -515,7 +515,7 @@ func (c *clientFactory) configureCommitSigning(client RepoClient) error {
 			{"commit.gpgsign", "true"},
 		} {
 			if err := client.Config(args...); err != nil {
-				return fmt.Errorf("failed to configure commit signing: %w", err)
+				return fmt.Errorf("failed to configure commit signing (%s): %w", args[0], err)
 			}
 		}
 	}

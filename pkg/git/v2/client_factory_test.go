@@ -130,6 +130,38 @@ func TestClientFromDirSigningConfigError(t *testing.T) {
 	}
 }
 
+type signingConfigErrorClient struct {
+	RepoClient
+	failingKey string
+	err        error
+}
+
+func (c signingConfigErrorClient) Config(args ...string) error {
+	if args[0] == c.failingKey {
+		return c.err
+	}
+	return nil
+}
+
+func TestConfigureCommitSigningError(t *testing.T) {
+	t.Parallel()
+
+	for _, key := range []string{"gpg.format", "user.signingkey", "commit.gpgsign"} {
+		t.Run(key, func(t *testing.T) {
+			configErr := errors.New("config failed")
+			factory := &clientFactory{signingKeyPath: "/path/to/key"}
+			err := factory.configureCommitSigning(signingConfigErrorClient{failingKey: key, err: configErr})
+			want := "failed to configure commit signing (" + key + "): config failed"
+			if err == nil || err.Error() != want {
+				t.Errorf("expected error %q, got: %v", want, err)
+			}
+			if !errors.Is(err, configErr) {
+				t.Errorf("expected wrapped config error, got: %v", err)
+			}
+		})
+	}
+}
+
 func TestClientFactorySigningKey(t *testing.T) {
 	t.Parallel()
 

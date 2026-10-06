@@ -836,8 +836,9 @@ func (f *fgc) GetRef(o, r, ref string) (string, error) {
 }
 
 func (f *fgc) QueryWithGitHubAppsSupport(ctx context.Context, q any, vars map[string]any, org string) error {
-	sq, ok := q.(*searchQuery)
-	if !ok {
+	switch q.(type) {
+	case *searchQuery, *statusSearchQuery:
+	default:
 		return errors.New("unexpected query type")
 	}
 
@@ -858,12 +859,32 @@ func (f *fgc) QueryWithGitHubAppsSupport(ctx context.Context, q any, vars map[st
 		f.lock.Unlock()
 	}()
 	for _, pr := range f.prs[org] {
-		sq.Search.Nodes = append(
-			sq.Search.Nodes,
-			struct {
-				PullRequest PullRequest `graphql:"... on PullRequest"`
-			}{PullRequest: pr},
-		)
+		switch sq := q.(type) {
+		case *searchQuery:
+			sq.Search.Nodes = append(sq.Search.Nodes, PRNode{PullRequest: pr})
+		case *statusSearchQuery:
+			// Copy common metadata, then serve only the head commit's contexts.
+			data, err := json.Marshal(pr)
+			if err != nil {
+				return err
+			}
+			var statusPR statusPullRequest
+			if err := json.Unmarshal(data, &statusPR); err != nil {
+				return err
+			}
+			for _, node := range pr.Commits.Nodes {
+				if node.Commit.OID == pr.HeadRefOID {
+					statusPR.StatusCheckRollup = &statusHeadRollup{
+						Commit:   &statusHeadCommit{OID: node.Commit.OID, Status: node.Commit.Status},
+						Contexts: node.Commit.StatusCheckRollup.Contexts,
+					}
+					break
+				}
+			}
+			sq.Search.Nodes = append(sq.Search.Nodes, struct {
+				PullRequest statusPullRequest `graphql:"... on PullRequest"`
+			}{PullRequest: statusPR})
+		}
 	}
 	return nil
 }

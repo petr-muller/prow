@@ -691,7 +691,7 @@ func (sc *statusController) search() []CodeReviewCommon {
 			}
 			sc.storedStateLock.Unlock()
 
-			result, err := sc.ghProvider.search(sc.ghc.QueryWithGitHubAppsSupport, sc.logger, query, latestPR.Time, now, org)
+			result, err := sc.ghProvider.search(sc.ghProvider.queryStatusPRs, sc.logger, query, latestPR.Time, now, org)
 			duration := time.Since(now)
 			log.WithField("duration", duration.String()).WithField("result_count", len(result)).Debug("Searched for open PRs.")
 			resultLabel := queryResult(err, len(result))

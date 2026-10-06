@@ -5000,21 +5000,35 @@ func TestGraphQLServerErrorTransportLimitsBodyReads(t *testing.T) {
 // function that returns the requests made so far.
 func newGraphQLRetryTestClient(t *testing.T, options ClientOptions, statuses ...int) (Client, func() []*http.Request) {
 	t.Helper()
+	responses := make([]graphQLTestResponse, len(statuses))
+	for i, code := range statuses {
+		body := "{}"
+		if code != http.StatusOK {
+			body = "<html>"
+		}
+		responses[i] = graphQLTestResponse{status: code, body: body}
+	}
+	return newGraphQLResponseRetryTestClient(t, options, responses...)
+}
+
+type graphQLTestResponse struct {
+	status int
+	body   string
+}
+
+func newGraphQLResponseRetryTestClient(t *testing.T, options ClientOptions, responses ...graphQLTestResponse) (Client, func() []*http.Request) {
+	t.Helper()
 	var lock sync.Mutex
 	var requests []*http.Request
 	roundTripper := testRoundTripper{func(r *http.Request) (*http.Response, error) {
 		lock.Lock()
 		defer lock.Unlock()
-		code := statuses[min(len(requests), len(statuses)-1)]
+		response := responses[min(len(requests), len(responses)-1)]
 		requests = append(requests, r)
-		body := "{}"
-		if code != http.StatusOK {
-			body = "<html>"
-		}
 		return &http.Response{
-			StatusCode: code,
-			Status:     fmt.Sprintf("%d %s", code, http.StatusText(code)),
-			Body:       io.NopCloser(strings.NewReader(body)),
+			StatusCode: response.status,
+			Status:     fmt.Sprintf("%d %s", response.status, http.StatusText(response.status)),
+			Body:       io.NopCloser(strings.NewReader(response.body)),
 		}, nil
 	}}
 	options.Censor = func(b []byte) []byte { return b }
@@ -5150,6 +5164,150 @@ func TestGraphQLRetries(t *testing.T) {
 				if n := len(r.Header.Values("Accept")); n != 2 {
 					t.Errorf("request %d: expected 2 Accept values, got %d: %v", i, n, r.Header.Values("Accept"))
 				}
+			}
+		})
+	}
+}
+
+func TestGraphQLRetriesIncompleteResponses(t *testing.T) {
+	const success = `{"data":{"repository":{"name":"fresh"}}}`
+	const truncated = `{"data":{"repository":{"name":"partial"}}`
+	testCases := []struct {
+		name                  string
+		bodies                []string
+		mutate                bool
+		callerHandlesTimeouts bool
+		maxRetries            int
+		expectedRequests      int
+		expectedErr           error
+		expectedErrContains   string
+		expectedName          githubv4.String
+	}{
+		{
+			name:             "empty response is retried",
+			bodies:           []string{"", success},
+			expectedRequests: 2,
+			expectedName:     "fresh",
+		},
+		{
+			name:             "truncated response is retried",
+			bodies:           []string{truncated, success},
+			expectedRequests: 2,
+			expectedName:     "fresh",
+		},
+		{
+			name:                "empty responses exhaust the retry limit",
+			bodies:              []string{""},
+			expectedRequests:    1 + graphQLMaxRetries,
+			expectedErr:         io.EOF,
+			expectedErrContains: "after 3 attempts",
+		},
+		{
+			name:                "truncated responses exhaust the retry limit",
+			bodies:              []string{truncated},
+			expectedRequests:    1 + graphQLMaxRetries,
+			expectedErr:         io.ErrUnexpectedEOF,
+			expectedErrContains: "after 3 attempts",
+		},
+		{
+			name:             "MaxRetries limits EOF attempts",
+			bodies:           []string{""},
+			maxRetries:       2,
+			expectedRequests: 2,
+			expectedErr:      io.EOF,
+		},
+		{
+			name:             "MaxRetries of 1 disables EOF retries",
+			bodies:           []string{"", success},
+			maxRetries:       1,
+			expectedRequests: 1,
+			expectedErr:      io.EOF,
+		},
+		{
+			name:             "mutation with an empty response is not retried",
+			bodies:           []string{"", success},
+			mutate:           true,
+			expectedRequests: 1,
+			expectedErr:      io.EOF,
+		},
+		{
+			name:             "mutation with a truncated response is not retried",
+			bodies:           []string{truncated, success},
+			mutate:           true,
+			expectedRequests: 1,
+			expectedErr:      io.ErrUnexpectedEOF,
+		},
+		{
+			name:                  "caller handling gateway timeouts still retries EOF",
+			bodies:                []string{"", success},
+			callerHandlesTimeouts: true,
+			expectedRequests:      2,
+			expectedName:          "fresh",
+		},
+		{
+			name:             "retry does not retain stale response fields",
+			bodies:           []string{truncated, `{"data":{"repository":null}}`},
+			expectedRequests: 2,
+		},
+		{
+			name:                "GraphQL error mentioning EOF is not retried",
+			bodies:              []string{`{"errors":[{"message":"EOF"}]}`, success},
+			expectedRequests:    1,
+			expectedErrContains: "EOF",
+		},
+		{
+			name:                "other JSON errors are not retried",
+			bodies:              []string{"<html>", success},
+			expectedRequests:    1,
+			expectedErrContains: "invalid character",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			responses := make([]graphQLTestResponse, len(tc.bodies))
+			for i, body := range tc.bodies {
+				responses[i] = graphQLTestResponse{status: http.StatusOK, body: body}
+			}
+			client, requests := newGraphQLResponseRetryTestClient(t, ClientOptions{InitialDelay: time.Millisecond, MaxRetries: tc.maxRetries}, responses...)
+			ctx := context.Background()
+			if tc.callerHandlesTimeouts {
+				ctx = WithCallerHandledGatewayTimeouts(ctx)
+			}
+			var query struct {
+				Repository struct {
+					Name githubv4.String
+				} `graphql:"repository(owner: $owner, name: $name)"`
+			}
+			// A nullable object decoded into a struct would otherwise keep data
+			// from an earlier response when the same query object is reused.
+			query.Repository.Name = "stale"
+			vars := map[string]interface{}{"owner": githubv4.String("org"), "name": githubv4.String("repo")}
+			var err error
+			if tc.mutate {
+				err = client.MutateWithGitHubAppsSupport(ctx, &query, githubv4.Input(struct{}{}), vars, "org")
+			} else {
+				err = client.QueryWithGitHubAppsSupport(ctx, &query, vars, "org")
+			}
+			if tc.expectedErr == nil && tc.expectedErrContains == "" {
+				if err != nil {
+					t.Fatalf("expected success, got %v", err)
+				}
+				if query.Repository.Name != tc.expectedName {
+					t.Errorf("expected repository name %q, got %q", tc.expectedName, query.Repository.Name)
+				}
+			} else {
+				if err == nil {
+					t.Fatal("expected an error")
+				}
+				if tc.expectedErr != nil && !errors.Is(err, tc.expectedErr) {
+					t.Errorf("expected error wrapping %v, got %v", tc.expectedErr, err)
+				}
+				if !strings.Contains(err.Error(), tc.expectedErrContains) {
+					t.Errorf("expected error containing %q, got %v", tc.expectedErrContains, err)
+				}
+			}
+			if n := len(requests()); n != tc.expectedRequests {
+				t.Errorf("expected %d requests, got %d", tc.expectedRequests, n)
 			}
 		})
 	}

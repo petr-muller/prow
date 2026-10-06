@@ -28,6 +28,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"reflect"
 	"regexp"
 	"slices"
 	"strconv"
@@ -3980,7 +3981,7 @@ func (c *client) GetFile(org, repo, filepath, commit string) ([]byte, error) {
 }
 
 // QueryWithGitHubAppsSupport runs a GraphQL query using shurcooL/githubql's client.
-// Transient server errors (502/503/504) are retried with backoff.
+// Transient server errors (502/503/504) and incomplete responses (EOF) are retried with backoff.
 func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error {
 	// Don't log query here because Query is typically called multiple times to get all pages.
 	// Instead log once per search and include total search cost.
@@ -3988,11 +3989,18 @@ func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, 
 	maxRetries := min(graphQLMaxRetries, c.maxRetries-1)
 	backoff := c.initialDelay
 	for retries := 0; ; retries++ {
+		if retries > 0 {
+			// Discard response data from previous attempts before decoding again.
+			if response := reflect.ValueOf(q); response.Kind() == reflect.Ptr && !response.IsNil() {
+				response.Elem().SetZero()
+			}
+		}
 		// Like REST requests, every attempt goes through the throttler and is
 		// bounded by its own request timeout.
 		err := c.gqlc.QueryWithGitHubAppsSupport(ctx, q, vars, org)
 		var serverErr graphQLServerError
-		if !errors.As(err, &serverErr) {
+		isServerError := errors.As(err, &serverErr)
+		if !isServerError && !errors.Is(err, io.EOF) && !errors.Is(err, io.ErrUnexpectedEOF) {
 			return err
 		}
 		if isGatewayTimeoutStatus(serverErr.StatusCode) && CallerHandlesGatewayTimeouts(ctx) {
@@ -4007,11 +4015,14 @@ func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, 
 		if deadline, ok := ctx.Deadline(); ok && time.Until(deadline) < backoff {
 			return fmt.Errorf("GraphQL query failed after %d attempts: %w", retries+1, err)
 		}
-		c.logger.WithFields(logrus.Fields{
-			"status_code": serverErr.StatusCode,
-			"retry":       retries + 1,
-			"backoff":     backoff.String(),
-		}).Debug("Retrying GraphQL query after transient server error")
+		fields := logrus.Fields{
+			"retry":   retries + 1,
+			"backoff": backoff.String(),
+		}
+		if isServerError {
+			fields["status_code"] = serverErr.StatusCode
+		}
+		c.logger.WithError(err).WithFields(fields).Debug("Retrying GraphQL query after transient error")
 		if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
 			return fmt.Errorf("GraphQL query failed after %d attempts: %w (last error: %w)", retries+1, sleepErr, err)
 		}

@@ -68,6 +68,13 @@ func TestStatusSearchHeadRollup(t *testing.T) {
 					if strings.Contains(req.Query, "commits(") {
 						t.Error("status search still fetches PR commit history")
 					}
+					if strings.Contains(req.Query, "body") {
+						t.Error("status search still fetches the PR body")
+					}
+					// The milestone title is used in status decisions; the PR title is not.
+					if strings.Count(req.Query, "title") != 1 || !strings.Contains(req.Query, "milestone{title}") {
+						t.Error("status search must fetch only the milestone title")
+					}
 					for _, field := range []string{"statusCheckRollup", "mergeable", "mergeStateStatus", "canBeRebased", "reviewDecision", "authorMetadata:author", "contexts(last: 100)"} {
 						if !strings.Contains(req.Query, field) {
 							t.Errorf("status query is missing %s", field)
@@ -79,7 +86,7 @@ func TestStatusSearchHeadRollup(t *testing.T) {
 						"author":{"login":"bot"},"authorMetadata":{"__typename":"Bot"},
 						"mergeable":"CONFLICTING","mergeStateStatus":"BLOCKED","canBeRebased":true,
 						"reviewDecision":"APPROVED","labels":{"nodes":[{"name":"approved"}]},"milestone":{"title":"v1"},
-						"body":"body","title":"title","updatedAt":"2026-10-05T22:30:00Z","statusCheckRollup":%s
+						"updatedAt":"2026-10-05T22:30:00Z","statusCheckRollup":%s
 					}]}}}`, tc.rollup)
 				case http.MethodGet:
 					switch r.URL.Path {
@@ -115,7 +122,7 @@ func TestStatusSearchHeadRollup(t *testing.T) {
 				t.Fatalf("got %d PRs, want 1", len(prs))
 			}
 			pr := &prs[0]
-			if pr.Org != "org" || pr.Repo != "repo" || pr.HeadRefOID != "head" || pr.BaseRefName != "main" || pr.HeadRefName != "feature" || pr.AuthorLogin != "bot" || pr.Title != "title" || pr.Body != "body" {
+			if pr.Org != "org" || pr.Repo != "repo" || pr.HeadRefOID != "head" || pr.BaseRefName != "main" || pr.HeadRefName != "feature" || pr.AuthorLogin != "bot" {
 				t.Errorf("PR metadata changed: %+v", pr)
 			}
 			if pr.GitHub.Mergeable != githubql.MergeableStateConflicting || pr.GitHub.MergeStateStatus != MergeStateStatusBlocked || !pr.GitHub.CanBeRebased || pr.GitHub.ReviewDecision != githubql.PullRequestReviewDecisionApproved || pr.GitHub.AuthorMetadata.TypeName != "Bot" || pr.GitHub.Milestone.Title != "v1" || pr.GitHub.Labels.Nodes[0].Name != "approved" {

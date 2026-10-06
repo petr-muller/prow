@@ -22,8 +22,8 @@ import (
 	githubql "github.com/shurcooL/githubv4"
 )
 
-// statusPullRequest fetches the same PR metadata as PullRequest, but only
-// fetches status contexts and check runs for the PR's head commit.
+// statusPullRequest omits the PR body and title and fetches status contexts
+// and check runs only for the PR's head commit.
 type statusPullRequest struct {
 	Number githubql.Int
 	Author struct {
@@ -53,8 +53,6 @@ type statusPullRequest struct {
 	StatusCheckRollup *statusHeadRollup
 	Labels            Labels `graphql:"labels(first: 100)"`
 	Milestone         *Milestone
-	Body              githubql.String
-	Title             githubql.String
 	UpdatedAt         githubql.DateTime
 }
 
@@ -84,8 +82,6 @@ func (pr statusPullRequest) pullRequest() PullRequest {
 		ReviewDecision:   pr.ReviewDecision,
 		Labels:           pr.Labels,
 		Milestone:        pr.Milestone,
-		Body:             pr.Body,
-		Title:            pr.Title,
 		UpdatedAt:        pr.UpdatedAt,
 	}
 	// Missing or stale rollup data must use headContexts' existing fallback,

@@ -17,8 +17,11 @@ limitations under the License.
 package statusreconciler
 
 import (
+	"context"
 	"errors"
+	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
@@ -602,6 +605,7 @@ func newFakeMigrator(key orgRepo) fakeMigrator {
 type fakeMigrator struct {
 	retireErrors  map[orgRepo]sets.Set[string]
 	migrateErrors map[orgRepo]migrationSet
+	onRetire      func()
 
 	retired  map[orgRepo]sets.Set[string]
 	migrated map[orgRepo]migrationSet
@@ -611,6 +615,9 @@ func (m *fakeMigrator) retire(org, repo, context string, _ func(string) bool) er
 	key := orgRepo{org: org, repo: repo}
 	if contexts, exist := m.retireErrors[key]; exist && contexts.Has(context) {
 		return errors.New("failed to retire context")
+	}
+	if m.onRetire != nil {
+		m.onRetire()
 	}
 	if _, exist := m.retired[key]; exist {
 		m.retired[key].Insert(context)
@@ -1315,6 +1322,63 @@ func TestControllerReconcile(t *testing.T) {
 			}
 			check(t)
 		})
+	}
+}
+
+type checkpointStatusClient struct {
+	*statusController
+	changes config.DeltaChan
+}
+
+func (s *checkpointStatusClient) Load() (config.DeltaChan, error) {
+	return s.changes, nil
+}
+
+func TestControllerRunSavesReconciledConfig(t *testing.T) {
+	before := config.Config{
+		ProwConfig: config.ProwConfig{ConfigVersionSHA: "A"},
+		JobConfig: config.JobConfig{
+			PresubmitsStatic: map[string][]config.Presubmit{"org/repo": getPresubmits([]string{"removed-job"})},
+		},
+	}
+	after := config.Config{ProwConfig: config.ProwConfig{ConfigVersionSHA: "B"}}
+	newer := config.Config{
+		ProwConfig: config.ProwConfig{ConfigVersionSHA: "C"},
+		JobConfig: config.JobConfig{
+			PresubmitsStatic: map[string][]config.Presubmit{"org/repo": getPresubmits([]string{"queued-job"})},
+		},
+	}
+	sc := &statusController{
+		logger:    logrusEntry(),
+		statusURI: filepath.Join(t.TempDir(), "status.yaml"),
+		opener:    &testOpener{},
+	}
+	sc.Agent.Set(&after)
+	changes := make(chan config.Delta, 1)
+	changes <- config.Delta{Before: before, After: after}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	migrator := newFakeMigrator(orgRepo{org: "org", repo: "repo"})
+	migrator.onRetire = func() {
+		// Advance the live config before reconciliation completes.
+		sc.Agent.Set(&newer)
+		cancel()
+	}
+	controller := Controller{
+		statusClient:   &checkpointStatusClient{statusController: sc, changes: changes},
+		statusMigrator: &migrator,
+	}
+	controller.Run(ctx)
+	if sc.Config().ConfigVersionSHA != "C" {
+		t.Fatal("expected live config to advance during reconciliation")
+	}
+	saved, err := sc.loadState()
+	if err != nil {
+		t.Fatalf("loading checkpoint: %v", err)
+	}
+	if diff := cmp.Diff(after, saved.Config, config.DefaultDiffOpts...); diff != "" {
+		t.Errorf("checkpoint differs from reconciled config (-want +got):\n%s", diff)
 	}
 }
 

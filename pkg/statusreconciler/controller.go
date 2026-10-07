@@ -174,7 +174,7 @@ func (c *Controller) Run(ctx context.Context) {
 				log.WithError(err).Error("Error reconciling statuses.")
 			}
 			log.WithField("duration", fmt.Sprintf("%v", time.Since(start))).Info("Statuses reconciled")
-			c.statusClient.Save()
+			c.statusClient.Save(&change.After)
 		case <-ctx.Done():
 			logrus.Info("status-reconciler is shutting down...")
 			return

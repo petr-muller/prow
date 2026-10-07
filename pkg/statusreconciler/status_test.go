@@ -171,11 +171,7 @@ func TestSave(t *testing.T) {
 		},
 	}
 
-	configFile, cleanupConfig := getConfigFile(t, config.Config{ProwConfig: prowConfig})
-	defer cleanupConfig()
-
-	jobConfigFile, cleanupJobConfig := getConfigFile(t, config.Config{JobConfig: jobConfig})
-	defer cleanupJobConfig()
+	reconciled := config.Config{ProwConfig: prowConfig, JobConfig: jobConfig}
 
 	testCases := []struct {
 		name               string
@@ -188,6 +184,7 @@ func TestSave(t *testing.T) {
 		},
 		{
 			name:               "save stores the configuration in the specified statusURI",
+			specifyStatusFile:  true,
 			expectedNamespace:  "default",
 			expectedPresubmits: []string{"presubmit-bar", "presubmit-foo"},
 		},
@@ -206,12 +203,9 @@ func TestSave(t *testing.T) {
 				logger:    logrus.NewEntry(logrus.StandardLogger()),
 				statusURI: statusURI,
 				opener:    &testOpener{},
-				configOpts: configflagutil.ConfigOptions{
-					ConfigPath:    configFile,
-					JobConfigPath: jobConfigFile,
-				},
 			}
-			if err := sc.Save(); err != nil {
+			sc.Agent.Set(&config.Config{ProwConfig: config.ProwConfig{ProwJobNamespace: "unreconciled"}})
+			if err := sc.Save(&reconciled); err != nil {
 				t.Fatalf("%s: unexpected error: %v", tc.name, err)
 			}
 

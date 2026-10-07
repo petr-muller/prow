@@ -35,7 +35,7 @@ type storedState struct {
 
 type statusClient interface {
 	Load() (config.DeltaChan, error)
-	Save() error
+	Save(*config.Config) error
 }
 
 // opener has methods to read and write paths
@@ -69,13 +69,12 @@ func (s *statusController) Load() (config.DeltaChan, error) {
 	return changes, nil
 }
 
-func (s *statusController) Save() error {
+func (s *statusController) Save(reconciled *config.Config) error {
 	if s.statusURI == "" {
 		return nil
 	}
 	entry := s.logger.WithField("path", s.statusURI)
-	current := s.Agent.Config()
-	buf, err := yaml.Marshal(current)
+	buf, err := yaml.Marshal(reconciled)
 	if err != nil {
 		entry.WithError(err).Warn("Cannot marshal state")
 		return err

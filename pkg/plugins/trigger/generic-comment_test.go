@@ -69,6 +69,7 @@ type testcase struct {
 	Body           string
 	State          string
 	IsPR           bool
+	Draft          bool
 	Branch         string
 	ShouldBuild    bool
 	AddedLabels    []string
@@ -85,6 +86,45 @@ func TestHandleGenericComment(t *testing.T) {
 	helpComment := "The following commands are available to trigger required jobs:\n```\n/test jib\n```\n```\n/test job\n```\n\n"
 	helpTestAllWithJobsComment := fmt.Sprintf("Use `/test all` to run the following jobs that were automatically triggered:%s\n\n", "\n```\njob\n```")
 	var testcases = []testcase{
+		{
+			name:        "Draft PR allows explicit test after ok to test",
+			Author:      "trusted-member",
+			PRAuthor:    "untrusted-member",
+			Body:        "/test all",
+			State:       "open",
+			IsPR:        true,
+			Draft:       true,
+			IssueLabels: issueLabels(labels.OkToTest),
+			ShouldBuild: true,
+			PruneHelp:   true,
+		},
+		{
+			name:          "Draft PR ok to test with explicit job runs only that job",
+			Author:        "trusted-member",
+			PRAuthor:      "untrusted-member",
+			Body:          "/ok-to-test\n/test jib",
+			State:         "open",
+			IsPR:          true,
+			Draft:         true,
+			IssueLabels:   issueLabels(labels.NeedsOkToTest),
+			AddedLabels:   issueLabels(labels.OkToTest),
+			RemovedLabels: issueLabels(labels.NeedsOkToTest),
+			ShouldBuild:   true,
+			StartsExactly: "pull-jib",
+			PruneHelp:     true,
+		},
+		{
+			name:          "Draft PR ok to test grants trust without starting jobs",
+			Author:        "trusted-member",
+			PRAuthor:      "untrusted-member",
+			Body:          "/ok-to-test",
+			State:         "open",
+			IsPR:          true,
+			Draft:         true,
+			IssueLabels:   issueLabels(labels.NeedsOkToTest),
+			AddedLabels:   issueLabels(labels.OkToTest),
+			RemovedLabels: issueLabels(labels.NeedsOkToTest),
+		},
 		{
 			name: "Not a PR.",
 
@@ -1525,6 +1565,7 @@ func TestHandleGenericComment(t *testing.T) {
 				0: {
 					User:   github.User{Login: tc.PRAuthor},
 					Number: 0,
+					Draft:  tc.Draft,
 					Head: github.PullRequestBranch{
 						SHA: "cafe",
 					},
@@ -1865,6 +1906,7 @@ func TestApproveGitHubActionsWorkflowRuns(t *testing.T) {
 	testCases := []struct {
 		name                   string
 		body                   string
+		draft                  bool
 		triggerGitHubWorkflows bool
 		ignoreOkToTest         bool
 		pendingRuns            []github.WorkflowRun
@@ -1873,6 +1915,25 @@ func TestApproveGitHubActionsWorkflowRuns(t *testing.T) {
 		expectApproved         []string
 		expectProwJob          bool
 	}{
+		{
+			name:                   "/ok-to-test on a draft PR should not approve workflows or start jobs",
+			body:                   "/ok-to-test",
+			draft:                  true,
+			triggerGitHubWorkflows: true,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+		},
+		{
+			name:                   "/ok-to-test with explicit test on a draft PR starts jobs without approving workflows",
+			body:                   "/ok-to-test\n/test all",
+			draft:                  true,
+			triggerGitHubWorkflows: true,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			expectProwJob: true,
+		},
 		{
 			name:                   "/ok-to-test with TriggerGitHubWorkflows enabled - should approve",
 			body:                   "/ok-to-test",
@@ -1955,6 +2016,7 @@ func TestApproveGitHubActionsWorkflowRuns(t *testing.T) {
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			g := newActionsFakeClient()
+			g.PullRequests[0].Draft = tc.draft
 			g.PendingApprovalRuns[actionsRunsKey] = tc.pendingRuns
 			g.IssueLabelsExisting = tc.existingLabels
 			commenter := tc.commenter
@@ -1978,13 +2040,16 @@ func TestApproveGitHubActionsWorkflowRuns(t *testing.T) {
 			if len(g.ReranWorkflowRuns) > 0 {
 				t.Errorf("Expected no re-run runs, got %v", g.ReranWorkflowRuns)
 			}
-			if tc.expectProwJob {
+			if tc.expectProwJob || tc.draft {
 				prowJobs, err := prowJobClient.ProwV1().ProwJobs("prowjobs").List(context.Background(), metav1.ListOptions{})
 				if err != nil {
 					t.Fatalf("failed to list ProwJobs: %v", err)
 				}
-				if len(prowJobs.Items) == 0 {
+				if tc.expectProwJob && len(prowJobs.Items) == 0 {
 					t.Error("Expected a ProwJob, got none")
+				}
+				if !tc.expectProwJob && len(prowJobs.Items) > 0 {
+					t.Errorf("Expected no ProwJobs for a draft PR, got %d", len(prowJobs.Items))
 				}
 			}
 		})

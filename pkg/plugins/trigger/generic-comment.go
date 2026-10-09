@@ -147,7 +147,7 @@ func handleGenericComment(c Client, cp commentPruner, trigger plugins.Trigger, g
 
 	// The ok-to-test label stays on the PR after a new push, so only a trusted
 	// commenter can approve or re-run GitHub Actions workflow runs.
-	if isOkToTest && trigger.TriggerGitHubWorkflows {
+	if isOkToTest && !pr.Draft && trigger.TriggerGitHubWorkflows {
 		if trustedResponse.IsTrusted {
 			// The approvals run in parallel with the ProwJob creation. The
 			// handler waits for them, because hook waits only for the
@@ -274,7 +274,9 @@ func FilterPresubmits(honorOkToTest bool, gitHubClient GitHubClient, body string
 		return failedContexts, allContexts, nil
 	}
 
-	filter, err := pjutil.PresubmitFilter(honorOkToTest, contextGetter, body, logger)
+	// Draft PRs can be marked trusted, but only explicit test commands should
+	// trigger jobs until the PR is ready for review.
+	filter, err := pjutil.PresubmitFilter(honorOkToTest && !pr.Draft, contextGetter, body, logger)
 	if err != nil {
 		return nil, err
 	}

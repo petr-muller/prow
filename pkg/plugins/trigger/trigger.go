@@ -118,7 +118,7 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 	}
 	pluginHelp.AddCommand(pluginhelp.Command{
 		Usage:       "/ok-to-test",
-		Description: "Marks a PR as 'trusted' and starts tests.",
+		Description: "Marks a PR as 'trusted' and starts tests if the PR is not a draft.",
 		Featured:    false,
 		WhoCanUse:   "Members of the trusted organization for the repo.",
 		Examples:    []string{"/ok-to-test"},

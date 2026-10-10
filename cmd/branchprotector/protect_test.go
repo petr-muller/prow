@@ -81,15 +81,18 @@ func TestOptions_Validate(t *testing.T) {
 }
 
 type fakeClient struct {
-	repos                map[string][]github.Repo
-	branches             map[string][]github.Branch
-	deleted              map[string]bool
-	updated              map[string]github.BranchProtectionRequest
-	branchProtections    map[string]github.BranchProtection
-	appInstallations     []github.AppInstallation
-	collaborators        []github.User
-	teams                []github.Team
-	signedCommitsEnabled map[string]bool
+	repos                  map[string][]github.Repo
+	branches               map[string][]github.Branch
+	deleted                map[string]bool
+	updated                map[string]github.BranchProtectionRequest
+	branchProtections      map[string]github.BranchProtection
+	appInstallations       []github.AppInstallation
+	collaborators          []github.User
+	teams                  []github.Team
+	signedCommitsEnabled   map[string]bool
+	signatureOperations    []string
+	enableSignatureErrors  map[string]error
+	disableSignatureErrors map[string]error
 }
 
 func (c fakeClient) GetRepo(org string, repo string) (github.FullRepo, error) {
@@ -167,25 +170,33 @@ func (c *fakeClient) RemoveBranchProtection(org, repo, branch string) error {
 }
 
 func (c *fakeClient) EnableCommitSignProtection(org, repo, branch string) error {
+	ctx := org + "/" + repo + "=" + branch
+	c.signatureOperations = append(c.signatureOperations, "enable "+ctx)
+	if err := c.enableSignatureErrors[ctx]; err != nil {
+		return err
+	}
 	if branch == "error" {
 		return errors.New("failed to enable commit sign protection")
 	}
 	if c.signedCommitsEnabled == nil {
 		c.signedCommitsEnabled = map[string]bool{}
 	}
-	ctx := org + "/" + repo + "=" + branch
 	c.signedCommitsEnabled[ctx] = true
 	return nil
 }
 
 func (c *fakeClient) DisableCommitSignProtection(org, repo, branch string) error {
+	ctx := org + "/" + repo + "=" + branch
+	c.signatureOperations = append(c.signatureOperations, "disable "+ctx)
+	if err := c.disableSignatureErrors[ctx]; err != nil {
+		return err
+	}
 	if branch == "error" {
 		return errors.New("failed to disable commit sign protection")
 	}
 	if c.signedCommitsEnabled == nil {
 		c.signedCommitsEnabled = map[string]bool{}
 	}
-	ctx := org + "/" + repo + "=" + branch
 	c.signedCommitsEnabled[ctx] = false
 	return nil
 }
@@ -204,6 +215,9 @@ func (c *fakeClient) ListRepoTeams(org, repo string) ([]github.Team, error) {
 
 func TestConfigureBranches(t *testing.T) {
 	yes := true
+	no := false
+	enableError := errors.New("signature enable failed")
+	disableError := errors.New("signature disable failed")
 
 	prot := github.BranchProtectionRequest{}
 	diffprot := github.BranchProtectionRequest{
@@ -211,11 +225,16 @@ func TestConfigureBranches(t *testing.T) {
 	}
 
 	cases := []struct {
-		name    string
-		updates []requirements
-		deletes map[string]bool
-		sets    map[string]github.BranchProtectionRequest
-		errors  int
+		name                   string
+		updates                []requirements
+		deletes                map[string]bool
+		sets                   map[string]github.BranchProtectionRequest
+		errors                 int
+		signatureOperations    []string
+		signedCommitsEnabled   map[string]bool
+		enableSignatureErrors  map[string]error
+		disableSignatureErrors map[string]error
+		retainedErrors         []error
 	}{
 		{
 			name: "remove-protection",
@@ -259,6 +278,72 @@ func TestConfigureBranches(t *testing.T) {
 			},
 		},
 		{
+			name: "enable-signed-commits",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "master", Request: &prot, Separate: &separateRequests{RequireSignedCommits: &yes}},
+			},
+			sets:                 map[string]github.BranchProtectionRequest{"one/1=master": prot},
+			signatureOperations:  []string{"enable one/1=master"},
+			signedCommitsEnabled: map[string]bool{"one/1=master": true},
+		},
+		{
+			name: "disable-signed-commits",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "master", Request: &prot, Separate: &separateRequests{RequireSignedCommits: &no}},
+			},
+			sets:                 map[string]github.BranchProtectionRequest{"one/1=master": prot},
+			signatureOperations:  []string{"disable one/1=master"},
+			signedCommitsEnabled: map[string]bool{"one/1=master": false},
+		},
+		{
+			name: "no-separate-settings",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "master", Request: &prot, Separate: nil},
+			},
+			sets: map[string]github.BranchProtectionRequest{"one/1=master": prot},
+		},
+		{
+			name: "signed-commits-unspecified",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "master", Request: &prot, Separate: &separateRequests{}},
+			},
+			sets: map[string]github.BranchProtectionRequest{"one/1=master": prot},
+		},
+		{
+			name: "remove-protection-with-signature-settings",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "enabled", Request: nil, Separate: &separateRequests{RequireSignedCommits: &yes}},
+				{Org: "one", Repo: "1", Branch: "disabled", Request: nil, Separate: &separateRequests{RequireSignedCommits: &no}},
+			},
+			deletes: map[string]bool{"one/1=enabled": true, "one/1=disabled": true},
+		},
+		{
+			name: "enable-error-continues-processing",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "failed-enable", Request: &prot, Separate: &separateRequests{RequireSignedCommits: &yes}},
+				{Org: "one", Repo: "1", Branch: "next", Request: &diffprot, Separate: &separateRequests{RequireSignedCommits: &yes}},
+			},
+			sets:                  map[string]github.BranchProtectionRequest{"one/1=failed-enable": prot, "one/1=next": diffprot},
+			signatureOperations:   []string{"enable one/1=failed-enable", "enable one/1=next"},
+			signedCommitsEnabled:  map[string]bool{"one/1=next": true},
+			enableSignatureErrors: map[string]error{"one/1=failed-enable": enableError},
+			errors:                1,
+			retainedErrors:        []error{enableError},
+		},
+		{
+			name: "disable-error-continues-processing",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "failed-disable", Request: &prot, Separate: &separateRequests{RequireSignedCommits: &no}},
+				{Org: "one", Repo: "1", Branch: "next", Request: &diffprot, Separate: &separateRequests{RequireSignedCommits: &no}},
+			},
+			sets:                   map[string]github.BranchProtectionRequest{"one/1=failed-disable": prot, "one/1=next": diffprot},
+			signatureOperations:    []string{"disable one/1=failed-disable", "disable one/1=next"},
+			signedCommitsEnabled:   map[string]bool{"one/1=next": false},
+			disableSignatureErrors: map[string]error{"one/1=failed-disable": disableError},
+			errors:                 1,
+			retainedErrors:         []error{disableError},
+		},
+		{
 			name: "complex",
 			updates: []requirements{
 				{Org: "update", Repo: "1", Branch: "master", Request: &prot},
@@ -277,7 +362,10 @@ func TestConfigureBranches(t *testing.T) {
 	}
 
 	for _, tc := range cases {
-		fc := fakeClient{}
+		fc := fakeClient{
+			enableSignatureErrors:  tc.enableSignatureErrors,
+			disableSignatureErrors: tc.disableSignatureErrors,
+		}
 		p := protector{
 			client:  &fc,
 			updates: make(chan requirements),
@@ -297,6 +385,24 @@ func TestConfigureBranches(t *testing.T) {
 		}
 		if !reflect.DeepEqual(fc.updated, tc.sets) {
 			t.Errorf("%s: updates %v != expected %v", tc.name, fc.updated, tc.sets)
+		}
+		if diff := cmp.Diff(tc.signatureOperations, fc.signatureOperations); diff != "" {
+			t.Errorf("%s: unexpected signature operations (-want +got):\n%s", tc.name, diff)
+		}
+		if diff := cmp.Diff(tc.signedCommitsEnabled, fc.signedCommitsEnabled); diff != "" {
+			t.Errorf("%s: unexpected signature settings (-want +got):\n%s", tc.name, diff)
+		}
+		for _, expected := range tc.retainedErrors {
+			found := false
+			for _, err := range errs {
+				if errors.Is(err, expected) {
+					found = true
+					break
+				}
+			}
+			if !found {
+				t.Errorf("%s: expected retained error %v, got %v", tc.name, expected, errs)
+			}
 		}
 
 	}

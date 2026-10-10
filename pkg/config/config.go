@@ -236,6 +236,10 @@ type ProwConfig struct {
 
 	// DisabledClusters holds a list of disabled build cluster names. The same context names will be ignored while
 	// Prow components load the kubeconfig files.
+	// When membership in this set changes on config reload, prow-controller-manager gracefully shuts down;
+	// its container supervisor must restart it to rebuild build cluster clients, caches, and pod watches.
+	// Reordering, duplicates, and nil versus empty lists do not change membership. This restart does not retry
+	// jobs already marked errored or imply that all Prow components automatically reload their cluster clients.
 	DisabledClusters []string `json:"disabled_clusters,omitempty"`
 }
 

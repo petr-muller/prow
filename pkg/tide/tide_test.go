@@ -541,6 +541,78 @@ func TestAccumulate(t *testing.T) {
 			none: []int{1},
 		},
 		{
+			name:         "Successful skip-retest status context with a different base SHA is accepted without a prowjob",
+			presubmits:   map[int][]config.Presubmit{1: {{Reporter: config.Reporter{Context: "job1"}}}},
+			pullRequests: map[int]string{1: "headsha"},
+			pullRequestModifier: func(pr *PullRequest) {
+				pr.Commits.Nodes = []struct{ Commit Commit }{{
+					Commit: Commit{
+						OID: githubql.String("headsha"),
+						Status: CommitStatus{Contexts: []Context{{
+							Context:     githubql.String("job1"),
+							Description: githubql.String("Overridden. " + config.SkipRetestSentinel + " BaseSHA:c22a32add1a36daf3b16af3762b3922e70c9626a"),
+							State:       githubql.StatusStateSuccess,
+						}}}},
+				}}
+			},
+
+			successes: []int{1},
+		},
+		{
+			name:         "Successful skip-retest status context without a base SHA is accepted without a prowjob",
+			presubmits:   map[int][]config.Presubmit{1: {{Reporter: config.Reporter{Context: "job1"}}}},
+			pullRequests: map[int]string{1: "headsha"},
+			pullRequestModifier: func(pr *PullRequest) {
+				pr.Commits.Nodes = []struct{ Commit Commit }{{
+					Commit: Commit{
+						OID: githubql.String("headsha"),
+						Status: CommitStatus{Contexts: []Context{{
+							Context:     githubql.String("job1"),
+							Description: githubql.String("Overridden. " + config.SkipRetestSentinel),
+							State:       githubql.StatusStateSuccess,
+						}}}},
+				}}
+			},
+
+			successes: []int{1},
+		},
+		{
+			name:         "Failed skip-retest status context cannot supply success without a prowjob",
+			presubmits:   map[int][]config.Presubmit{1: {{Reporter: config.Reporter{Context: "job1"}}}},
+			pullRequests: map[int]string{1: "headsha"},
+			pullRequestModifier: func(pr *PullRequest) {
+				pr.Commits.Nodes = []struct{ Commit Commit }{{
+					Commit: Commit{
+						OID: githubql.String("headsha"),
+						Status: CommitStatus{Contexts: []Context{{
+							Context:     githubql.String("job1"),
+							Description: githubql.String("Overridden. " + config.SkipRetestSentinel + " BaseSHA:" + baseSHA),
+							State:       githubql.StatusStateFailure,
+						}}}},
+				}}
+			},
+
+			none: []int{1},
+		},
+		{
+			name:         "Pending skip-retest status context cannot supply success without a prowjob",
+			presubmits:   map[int][]config.Presubmit{1: {{Reporter: config.Reporter{Context: "job1"}}}},
+			pullRequests: map[int]string{1: "headsha"},
+			pullRequestModifier: func(pr *PullRequest) {
+				pr.Commits.Nodes = []struct{ Commit Commit }{{
+					Commit: Commit{
+						OID: githubql.String("headsha"),
+						Status: CommitStatus{Contexts: []Context{{
+							Context:     githubql.String("job1"),
+							Description: githubql.String("Overridden. " + config.SkipRetestSentinel + " BaseSHA:" + baseSHA),
+							State:       githubql.StatusStatePending,
+						}}}},
+				}}
+			},
+
+			none: []int{1},
+		},
+		{
 			name:         "Results from failed status context for which we do not have a prowjob anymore are irrelevant",
 			presubmits:   map[int][]config.Presubmit{1: {{Reporter: config.Reporter{Context: "job1"}}}},
 			pullRequests: map[int]string{1: "headsha"},

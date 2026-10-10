@@ -77,6 +77,13 @@ multiple times.
 
 ## Pushgateway and Proxy
 
+Without a `push_gateway.endpoint`, components serve metrics at `/metrics`.
+When an endpoint is configured, components periodically push metrics there;
+setting `push_gateway.serve_metrics: true` also keeps the local endpoint enabled.
+Both outputs gather the same collectors, including controller-runtime metrics.
+For exporter, this includes its custom ProwJob collectors in pushed output as
+well as in the local endpoint.
+
 To support metric collection from ephemeral tasks like request handling and to
 provide a single scrape endpoint, Prow's prometheus metrics are pushed to a
 Prometheus pushgateway that is scraped instead of the metric source. A proxy is

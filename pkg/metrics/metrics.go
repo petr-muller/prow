@@ -34,26 +34,19 @@ import (
 
 type CreateServer func(http.Handler) interrupts.ListenAndServer
 
-// ExposeMetricsWithRegistry chooses whether to serve or push metrics for the service with the registry.
+// ExposeMetricsWithRegistry serves and/or pushes the same metrics from the supplied registry
+// (or the default registry when nil), controller-runtime's registry, and additional collectors.
 // Additional collectors are registered once and included in both paths. They must not already be
-// registered in the default or supplied registry.
+// registered in any of the included registries.
 func ExposeMetricsWithRegistry(component string, pushGateway config.PushGateway, port int, reg prometheus.Gatherer, createServer CreateServer, additionalCollectors ...prometheus.Collector) {
-	pushGatherer := prometheus.DefaultGatherer
+	if reg == nil {
+		reg = prometheus.DefaultGatherer
+	}
+	gatherer := prometheus.Gatherers{reg, ctrlruntimemetrics.Registry}
 	if len(additionalCollectors) > 0 {
 		additionalRegistry := prometheus.NewRegistry()
 		additionalRegistry.MustRegister(additionalCollectors...)
-		pushGatherer = prometheus.Gatherers{pushGatherer, additionalRegistry}
-		if reg == nil {
-			reg = prometheus.DefaultGatherer
-		}
-		reg = prometheus.Gatherers{reg, additionalRegistry}
-	}
-
-	if pushGateway.Endpoint != "" {
-		pushMetrics(component, pushGateway.Endpoint, pushGateway.Interval.Duration, pushGatherer)
-		if !pushGateway.ServeMetrics {
-			return
-		}
+		gatherer = append(gatherer, additionalRegistry)
 	}
 
 	// These get registered in controller-runtimes registry via an init in the internal/controller/metrics package. if
@@ -71,11 +64,14 @@ func ExposeMetricsWithRegistry(component string, pushGateway config.PushGateway,
 	//nolint:staticcheck
 	ctrlruntimemetrics.Registry.Unregister(prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}))
 
-	if reg == nil {
-		reg = prometheus.DefaultGatherer
+	if pushGateway.Endpoint != "" {
+		pushMetrics(component, pushGateway.Endpoint, pushGateway.Interval.Duration, gatherer)
+		if !pushGateway.ServeMetrics {
+			return
+		}
 	}
 	handler := promhttp.HandlerFor(
-		prometheus.Gatherers{reg, ctrlruntimemetrics.Registry},
+		gatherer,
 		promhttp.HandlerOpts{},
 	)
 	metricsMux := http.NewServeMux()

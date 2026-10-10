@@ -70,63 +70,102 @@ func TestExposeMetrics(t *testing.T) {
 	}
 }
 
-func TestExposeMetricsWithAdditionalCollector(t *testing.T) {
-	defaultMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_default"})
-	prometheus.MustRegister(defaultMetric)
-	t.Cleanup(func() { prometheus.Unregister(defaultMetric) })
+func TestExposeMetricsWithSharedGatherer(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		customRegistry bool
+		serveMetrics   bool
+	}{
+		{name: "default registry", serveMetrics: true},
+		{name: "custom registry", customRegistry: true, serveMetrics: true},
+		{name: "push only", customRegistry: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			defaultMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_default"})
+			prometheus.MustRegister(defaultMetric)
+			t.Cleanup(func() { prometheus.Unregister(defaultMetric) })
 
-	customRegistry := prometheus.NewRegistry()
-	customRegistry.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_custom"}))
-	additionalMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_additional"})
+			customRegistry := prometheus.NewRegistry()
+			customRegistry.MustRegister(
+				prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_custom"}),
+				collectors.NewGoCollector(),
+				prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{}),
+			)
+			additionalMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_additional"})
+			runtimeMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_runtime"})
+			// Match the collectors registered by controller-runtime's init to ensure
+			// duplicate runtime collectors are removed even when only pushing.
+			goC := collectors.NewGoCollector(collectors.WithGoCollectorRuntimeMetrics(collectors.MetricsAll))
+			procC := prometheus.NewProcessCollector(prometheus.ProcessCollectorOpts{})
+			//nolint:staticcheck
+			ctrlruntimemetrics.Registry.MustRegister(runtimeMetric, goC, procC)
+			t.Cleanup(func() {
+				ctrlruntimemetrics.Registry.Unregister(runtimeMetric)
+				//nolint:staticcheck
+				ctrlruntimemetrics.Registry.Unregister(goC)
+				//nolint:staticcheck
+				ctrlruntimemetrics.Registry.Unregister(procC)
+			})
 
-	pushBody := make(chan string, 1)
-	pushServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			t.Errorf("failed reading pushed metrics: %v", err)
-		}
-		pushBody <- string(body)
-		w.WriteHeader(http.StatusAccepted)
-	}))
-	defer pushServer.Close()
+			pushBody := make(chan string, 1)
+			pushServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				body, err := io.ReadAll(r.Body)
+				if err != nil {
+					t.Errorf("failed reading pushed metrics: %v", err)
+				}
+				pushBody <- string(body)
+				w.WriteHeader(http.StatusAccepted)
+			}))
+			defer pushServer.Close()
 
-	fls := fakeListenAndServer{ctx: t.Context()}
-	ExposeMetricsWithRegistry("test", config.PushGateway{
-		Endpoint:     pushServer.URL,
-		Interval:     &metav1.Duration{Duration: time.Hour},
-		ServeMetrics: true,
-	}, flagutil.DefaultMetricsPort, customRegistry, fls.CreateServer, additionalMetric)
-
-	resp, err := http.Get(fls.server.URL + "/metrics")
-	if err != nil {
-		t.Fatalf("failed getting metrics: %v", err)
-	}
-	defer resp.Body.Close()
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		t.Fatalf("failed reading metrics: %v", err)
-	}
-	for _, name := range []string{"prow_metrics_test_custom", "prow_metrics_test_additional"} {
-		if !strings.Contains(string(body), name) {
-			t.Errorf("scrape missing %s", name)
-		}
-	}
-	if strings.Contains(string(body), "prow_metrics_test_default") {
-		t.Error("scrape unexpectedly includes the default registry")
-	}
-
-	select {
-	case body := <-pushBody:
-		for _, name := range []string{"prow_metrics_test_default", "prow_metrics_test_additional"} {
-			if !strings.Contains(body, name) {
-				t.Errorf("push missing %s", name)
+			var registry prometheus.Gatherer
+			if tc.customRegistry {
+				registry = customRegistry
 			}
-		}
-		if strings.Contains(body, "prow_metrics_test_custom") {
-			t.Error("push unexpectedly includes the custom scrape registry")
-		}
-	case <-time.After(5 * time.Second):
-		t.Fatal("timed out waiting for metrics push")
+			fls := fakeListenAndServer{ctx: t.Context()}
+			ExposeMetricsWithRegistry("test", config.PushGateway{
+				Endpoint:     pushServer.URL,
+				Interval:     &metav1.Duration{Duration: time.Hour},
+				ServeMetrics: tc.serveMetrics,
+			}, flagutil.DefaultMetricsPort, registry, fls.CreateServer, additionalMetric)
+
+			checkMetrics := func(output, body string) {
+				for name, want := range map[string]bool{
+					"prow_metrics_test_default":    !tc.customRegistry,
+					"prow_metrics_test_custom":     tc.customRegistry,
+					"prow_metrics_test_additional": true,
+					"prow_metrics_test_runtime":    true,
+				} {
+					if got := strings.Contains(body, name); got != want {
+						t.Errorf("%s contains %s: got %v, want %v", output, name, got, want)
+					}
+				}
+			}
+			if tc.serveMetrics {
+				resp, err := http.Get(fls.server.URL + "/metrics")
+				if err != nil {
+					t.Fatalf("failed getting metrics: %v", err)
+				}
+				defer resp.Body.Close()
+				body, err := io.ReadAll(resp.Body)
+				if err != nil {
+					t.Fatalf("failed reading metrics: %v", err)
+				}
+				if resp.StatusCode != http.StatusOK {
+					t.Fatalf("scrape returned %d: %s", resp.StatusCode, body)
+				}
+				checkMetrics("scrape", string(body))
+			} else if fls.server != nil {
+				t.Error("push-only configuration started a scrape server")
+			}
+
+			select {
+			case body := <-pushBody:
+				checkMetrics("push", body)
+			case <-time.After(5 * time.Second):
+				t.Fatal("timed out waiting for metrics push")
+			}
+		})
 	}
 }
 

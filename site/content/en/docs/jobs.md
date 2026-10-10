@@ -265,7 +265,7 @@ If a job should no longer trigger on the pull request, use the
 `skip` plugin).
 
 Repo administrators can also `/override job-name` in case of emergency
-(depends on the `override` plugin).
+(depends on the [override plugin](/docs/components/plugins/override/)).
 
 ### Requiring Job Statuses
 

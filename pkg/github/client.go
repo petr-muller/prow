@@ -330,8 +330,10 @@ type client struct {
 	// identifier is used to add more identification to the user-agent header
 	identifier string
 	gqlc       gqlClient
-	used       bool
-	mutUsed    sync.Mutex // protects used
+	// graphQLSleep lets tests observe query backoff without waiting.
+	graphQLSleep func(context.Context, time.Duration) error
+	used         bool
+	mutUsed      sync.Mutex // protects used
 	*delegate
 }
 
@@ -3987,6 +3989,10 @@ func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, 
 	// c.maxRetries counts attempts, like it does for REST requests.
 	maxRetries := min(graphQLMaxRetries, c.maxRetries-1)
 	backoff := c.initialDelay
+	sleep := c.graphQLSleep
+	if sleep == nil {
+		sleep = sleepWithContext
+	}
 	var lastServerErr error
 	for retries := 0; ; retries++ {
 		// Like REST requests, every attempt goes through the throttler and is
@@ -4017,7 +4023,7 @@ func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, 
 			"retry":       retries + 1,
 			"backoff":     backoff.String(),
 		}).Debug("Retrying GraphQL query after transient server error")
-		if sleepErr := sleepWithContext(ctx, backoff); sleepErr != nil {
+		if sleepErr := sleep(ctx, backoff); sleepErr != nil {
 			return fmt.Errorf("GraphQL query failed after %d attempts: %w (last error: %w)", retries+1, sleepErr, err)
 		}
 		backoff *= 2

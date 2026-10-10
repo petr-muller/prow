@@ -5239,6 +5239,125 @@ func TestGraphQLRetries(t *testing.T) {
 	}
 }
 
+func TestGraphQLRetryBackoff(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		statuses       []int
+		maxRetries     int
+		mutate         bool
+		expectedDelays []time.Duration
+	}{
+		{
+			name:           "query doubles its backoff",
+			statuses:       []int{http.StatusServiceUnavailable, http.StatusServiceUnavailable, http.StatusOK},
+			expectedDelays: []time.Duration{time.Second, 2 * time.Second},
+		},
+		{
+			name:       "single permitted attempt does not wait",
+			statuses:   []int{http.StatusServiceUnavailable},
+			maxRetries: 1,
+		},
+		{
+			name:     "mutation does not wait",
+			statuses: []int{http.StatusServiceUnavailable},
+			mutate:   true,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ghClient, requests := newGraphQLRetryTestClient(t, ClientOptions{InitialDelay: time.Second, MaxRetries: tc.maxRetries}, tc.statuses...)
+			var delays []time.Duration
+			ghClient.(*client).graphQLSleep = func(ctx context.Context, d time.Duration) error {
+				if err := ctx.Err(); err != nil {
+					return err
+				}
+				delays = append(delays, d)
+				return nil
+			}
+
+			var err error
+			if tc.mutate {
+				err = ghClient.MutateWithGitHubAppsSupport(context.Background(), &struct{}{}, githubv4.Input(struct{}{}), nil, "")
+			} else {
+				err = ghClient.QueryWithGitHubAppsSupport(context.Background(), &struct{}{}, nil, "")
+			}
+			if tc.statuses[len(tc.statuses)-1] == http.StatusOK && err != nil {
+				t.Fatalf("expected the query to succeed: %v", err)
+			}
+			if diff := cmp.Diff(tc.expectedDelays, delays); diff != "" {
+				t.Errorf("unexpected retry delays (-want +got):\n%s", diff)
+			}
+			if got, want := len(requests()), len(tc.expectedDelays)+1; got != want {
+				t.Errorf("expected %d requests, got %d", want, got)
+			}
+		})
+	}
+}
+
+func TestGraphQLRetryGetsFreshRequestTimeout(t *testing.T) {
+	const requestTimeout = 1500 * time.Millisecond
+	const requestHold = 900 * time.Millisecond
+
+	requests := make(chan chan struct{}, 2)
+	var attempts int
+	var lock sync.Mutex
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		lock.Lock()
+		attempts++
+		attempt := attempts
+		lock.Unlock()
+		release := make(chan struct{})
+		requests <- release
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return
+		}
+		if attempt == 1 {
+			http.Error(w, "temporary failure", http.StatusServiceUnavailable)
+			return
+		}
+		fmt.Fprint(w, "{}")
+	}))
+	defer server.Close()
+
+	_, _, client, err := NewClientFromOptions(logrus.Fields{}, ClientOptions{
+		GraphqlEndpoint: server.URL,
+		Bases:           []string{server.URL},
+		GetToken:        func() []byte { return nil },
+		Censor:          func(b []byte) []byte { return b },
+		MaxRequestTime:  requestTimeout,
+		InitialDelay:    time.Millisecond,
+	})
+	if err != nil {
+		t.Fatalf("failed to construct github client: %v", err)
+	}
+	result := make(chan error, 1)
+	go func() { result <- client.QueryWithGitHubAppsSupport(context.Background(), &struct{}{}, nil, "") }()
+
+	// The server holds each request for less than MaxRequestTime, but the
+	// combined holds exceed it. A timeout spanning all attempts would fail.
+	for i := 0; i < 2; i++ {
+		select {
+		case release := <-requests:
+			timer := time.NewTimer(requestHold)
+			<-timer.C
+			close(release)
+		case err := <-result:
+			t.Fatalf("query ended before request %d completed: %v", i+1, err)
+		case <-time.After(5 * time.Second):
+			t.Fatalf("request %d did not reach the server", i+1)
+		}
+	}
+	if err := <-result; err != nil {
+		t.Fatalf("two individually bounded attempts should succeed: %v", err)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+	if attempts != 2 {
+		t.Errorf("expected 2 attempts, got %d", attempts)
+	}
+}
+
 func TestGraphQLRetriesTakeAThrottleToken(t *testing.T) {
 	client, requests := newGraphQLRetryTestClient(t, ClientOptions{InitialDelay: time.Millisecond}, http.StatusServiceUnavailable)
 	// Allow a single request, then nothing for an hour.

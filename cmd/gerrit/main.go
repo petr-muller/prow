@@ -161,8 +161,7 @@ func main() {
 	cfg := ca.Config
 
 	// Expose Prometheus metrics
-	prometheus.MustRegister(ca)
-	metrics.ExposeMetrics("gerrit", cfg().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("gerrit", cfg().PushGateway, o.instrumentationOptions.MetricsPort, ca)
 
 	prowJobClient, err := o.kubernetes.ProwJobClient(cfg().ProwJobNamespace, o.dryRun)
 	if err != nil {

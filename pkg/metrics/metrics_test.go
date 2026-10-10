@@ -23,8 +23,11 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	ctrlruntimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/prow/pkg/config"
@@ -64,6 +67,66 @@ func TestExposeMetrics(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("response status was not %d but %d", http.StatusOK, resp.StatusCode)
+	}
+}
+
+func TestExposeMetricsWithAdditionalCollector(t *testing.T) {
+	defaultMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_default"})
+	prometheus.MustRegister(defaultMetric)
+	t.Cleanup(func() { prometheus.Unregister(defaultMetric) })
+
+	customRegistry := prometheus.NewRegistry()
+	customRegistry.MustRegister(prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_custom"}))
+	additionalMetric := prometheus.NewGauge(prometheus.GaugeOpts{Name: "prow_metrics_test_additional"})
+
+	pushBody := make(chan string, 1)
+	pushServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			t.Errorf("failed reading pushed metrics: %v", err)
+		}
+		pushBody <- string(body)
+		w.WriteHeader(http.StatusAccepted)
+	}))
+	defer pushServer.Close()
+
+	fls := fakeListenAndServer{ctx: t.Context()}
+	ExposeMetricsWithRegistry("test", config.PushGateway{
+		Endpoint:     pushServer.URL,
+		Interval:     &metav1.Duration{Duration: time.Hour},
+		ServeMetrics: true,
+	}, flagutil.DefaultMetricsPort, customRegistry, fls.CreateServer, additionalMetric)
+
+	resp, err := http.Get(fls.server.URL + "/metrics")
+	if err != nil {
+		t.Fatalf("failed getting metrics: %v", err)
+	}
+	defer resp.Body.Close()
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("failed reading metrics: %v", err)
+	}
+	for _, name := range []string{"prow_metrics_test_custom", "prow_metrics_test_additional"} {
+		if !strings.Contains(string(body), name) {
+			t.Errorf("scrape missing %s", name)
+		}
+	}
+	if strings.Contains(string(body), "prow_metrics_test_default") {
+		t.Error("scrape unexpectedly includes the default registry")
+	}
+
+	select {
+	case body := <-pushBody:
+		for _, name := range []string{"prow_metrics_test_default", "prow_metrics_test_additional"} {
+			if !strings.Contains(body, name) {
+				t.Errorf("push missing %s", name)
+			}
+		}
+		if strings.Contains(body, "prow_metrics_test_custom") {
+			t.Error("push unexpectedly includes the custom scrape registry")
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for metrics push")
 	}
 }
 

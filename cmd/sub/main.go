@@ -25,7 +25,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
@@ -104,8 +103,7 @@ func main() {
 	defer interrupts.WaitForGracefulShutdown()
 
 	// Expose prometheus and pprof metrics
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("sub", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("sub", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort, configAgent)
 	pprof.Instrument(o.instrumentationOptions)
 
 	// If we are provided credentials for Git hosts, use them. These credentials

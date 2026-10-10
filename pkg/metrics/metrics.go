@@ -34,10 +34,23 @@ import (
 
 type CreateServer func(http.Handler) interrupts.ListenAndServer
 
-// ExposeMetricsWithRegistry chooses whether to serve or push metrics for the service with the registry
-func ExposeMetricsWithRegistry(component string, pushGateway config.PushGateway, port int, reg prometheus.Gatherer, createServer CreateServer) {
+// ExposeMetricsWithRegistry chooses whether to serve or push metrics for the service with the registry.
+// Additional collectors are registered once and included in both paths. They must not already be
+// registered in the default or supplied registry.
+func ExposeMetricsWithRegistry(component string, pushGateway config.PushGateway, port int, reg prometheus.Gatherer, createServer CreateServer, additionalCollectors ...prometheus.Collector) {
+	pushGatherer := prometheus.DefaultGatherer
+	if len(additionalCollectors) > 0 {
+		additionalRegistry := prometheus.NewRegistry()
+		additionalRegistry.MustRegister(additionalCollectors...)
+		pushGatherer = prometheus.Gatherers{pushGatherer, additionalRegistry}
+		if reg == nil {
+			reg = prometheus.DefaultGatherer
+		}
+		reg = prometheus.Gatherers{reg, additionalRegistry}
+	}
+
 	if pushGateway.Endpoint != "" {
-		pushMetrics(component, pushGateway.Endpoint, pushGateway.Interval.Duration)
+		pushMetrics(component, pushGateway.Endpoint, pushGateway.Interval.Duration, pushGatherer)
 		if !pushGateway.ServeMetrics {
 			return
 		}
@@ -76,16 +89,16 @@ func ExposeMetricsWithRegistry(component string, pushGateway config.PushGateway,
 	interrupts.ListenAndServe(server, 5*time.Second)
 }
 
-// ExposeMetrics chooses whether to serve or push metrics for the service
-func ExposeMetrics(component string, pushGateway config.PushGateway, port int) {
-	ExposeMetricsWithRegistry(component, pushGateway, port, nil, nil)
+// ExposeMetrics chooses whether to serve or push metrics for the service.
+func ExposeMetrics(component string, pushGateway config.PushGateway, port int, additionalCollectors ...prometheus.Collector) {
+	ExposeMetricsWithRegistry(component, pushGateway, port, nil, nil, additionalCollectors...)
 }
 
 // pushMetrics is meant to run in a goroutine and continuously push
 // metrics to the provided endpoint.
-func pushMetrics(component, endpoint string, interval time.Duration) {
+func pushMetrics(component, endpoint string, interval time.Duration, gatherer prometheus.Gatherer) {
 	interrupts.TickLiteral(func() {
-		if err := fromGatherer(component, hostnameGroupingKey(), endpoint, prometheus.DefaultGatherer); err != nil {
+		if err := fromGatherer(component, hostnameGroupingKey(), endpoint, gatherer); err != nil {
 			logrus.WithField("component", component).WithError(err).Error("Failed to push metrics.")
 		}
 	}, interval)

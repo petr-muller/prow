@@ -1191,3 +1191,154 @@ func TestCleanupKubernetesFinalizerOnTrimmedPod(t *testing.T) {
 		t.Errorf("patch clobbered the pod status: %s", diff)
 	}
 }
+
+func TestDisabledClustersWatcher(t *testing.T) {
+	testCases := []struct {
+		name        string
+		before      []string
+		after       []string
+		canceled    bool
+		unrelated   bool
+		wantRestart bool
+	}{
+		{
+			name:        "disable a cluster",
+			after:       []string{"build04"},
+			wantRestart: true,
+		},
+		{
+			name:        "enable a cluster",
+			before:      []string{"build04"},
+			wantRestart: true,
+		},
+		{
+			name:        "replace a disabled cluster",
+			before:      []string{"build04"},
+			after:       []string{"build05"},
+			wantRestart: true,
+		},
+		{
+			name:   "unchanged disabled clusters",
+			before: []string{"build04"},
+			after:  []string{"build04"},
+		},
+		{
+			name:   "order and duplicates do not change the set",
+			before: []string{"build02", "build04"},
+			after:  []string{"build04", "build02", "build04"},
+		},
+		{
+			name:  "nil and empty are equivalent",
+			after: []string{},
+		},
+		{
+			name:      "unrelated config update",
+			before:    []string{"build04"},
+			after:     []string{"build04"},
+			unrelated: true,
+		},
+		{
+			name:     "already shutting down",
+			before:   []string{"build04"},
+			canceled: true,
+		},
+	}
+
+	for _, tc := range testCases {
+		ctx, cancel := context.WithCancel(context.Background())
+		if tc.canceled {
+			cancel()
+		}
+
+		before := config.Config{
+			ProwConfig: config.ProwConfig{
+				DisabledClusters: tc.before,
+			},
+		}
+		after := config.Config{
+			ProwConfig: config.ProwConfig{
+				DisabledClusters: tc.after,
+			},
+		}
+
+		if tc.unrelated {
+			after.PodNamespace = "changed"
+		}
+
+		changes := make(chan config.Delta, 1)
+		changes <- config.Delta{Before: before, After: after}
+		close(changes)
+
+		restartCtx, restart := context.WithCancel(context.Background())
+		watcher := disabledClustersWatcher{
+			changes:   changes,
+			terminate: restart,
+		}
+		watcher.run(ctx)
+		gotRestart := restartCtx.Err() != nil
+		cancel()
+		restart()
+
+		if gotRestart != tc.wantRestart {
+			t.Errorf("%s: got restart %t, want %t", tc.name, gotRestart, tc.wantRestart)
+		}
+	}
+}
+
+func TestDisabledClustersWatcherShutdown(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	done := make(chan struct{})
+	watcher := disabledClustersWatcher{
+		changes:   make(chan config.Delta),
+		terminate: func() { t.Error("shutdown must not request another restart") },
+	}
+	go func() {
+		defer close(done)
+		watcher.run(ctx)
+	}()
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("watcher did not stop on cancellation")
+	}
+}
+
+type countingProwJobClient struct {
+	ctrlruntimeclient.Client
+	lists int
+}
+
+func (c *countingProwJobClient) List(ctx context.Context, list ctrlruntimeclient.ObjectList, opts ...ctrlruntimeclient.ListOption) error {
+	c.lists++
+	return c.Client.List(ctx, list, opts...)
+}
+
+func TestControllerRunOnce(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	scheme := runtime.NewScheme()
+	if err := prowv1.AddToScheme(scheme); err != nil {
+		t.Fatal(err)
+	}
+	client := &countingProwJobClient{Client: fakectrlruntimeclient.NewClientBuilder().WithScheme(scheme).Build()}
+	cfg := newFakeConfigAgent(newDefaultFakeSinkerConfig())
+	cfg.c.Sinker.ResyncPeriod = &metav1.Duration{Duration: time.Hour}
+	c := controller{
+		ctx:           context.Background(),
+		logger:        logrus.NewEntry(logrus.StandardLogger()),
+		prowJobClient: client,
+		config:        cfg.Config,
+		runOnce:       true,
+	}
+	if err := c.Start(ctx); err != nil {
+		t.Fatal(err)
+	}
+	if ctx.Err() != nil {
+		t.Fatal("run-once waited for cancellation instead of returning after cleanup")
+	}
+	if client.lists != 1 {
+		t.Errorf("cleanup list calls = %d, want 1", client.lists)
+	}
+}

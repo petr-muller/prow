@@ -116,7 +116,16 @@ func main() {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 	cfg := configAgent.Config
+	// Subscribe before initializing clients so changes during startup also
+	// trigger a restart.
+	configChanges := make(chan config.Delta, 1)
+	configAgent.Subscribe(configChanges)
 	o.kubernetes.SetDisabledClusters(sets.New[string](cfg().DisabledClusters...))
+	clusterWatcher := disabledClustersWatcher{
+		changes:   configChanges,
+		terminate: interrupts.Terminate,
+	}
+	interrupts.Run(clusterWatcher.run)
 
 	if o.config.JobConfigPath != "" {
 		go jobConfigMapMonitor(5*time.Minute, o.config.JobConfigPath)
@@ -215,6 +224,40 @@ func main() {
 		logrus.WithError(err).Fatal("failed to start manager")
 	}
 	logrus.Info("Manager ended gracefully")
+}
+
+type disabledClustersWatcher struct {
+	changes   <-chan config.Delta
+	terminate func()
+}
+
+// run restarts Sinker when a config reload changes the disabled-cluster set.
+// The next process start rebuilds cleanup clients for the current set.
+func (w *disabledClustersWatcher) run(ctx context.Context) {
+	for {
+		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case <-ctx.Done():
+			return
+		case change, ok := <-w.changes:
+			if !ok {
+				return
+			}
+			before := sets.New(change.Before.DisabledClusters...)
+			after := sets.New(change.After.DisabledClusters...)
+			if before.Equal(after) {
+				continue
+			}
+			logrus.WithFields(logrus.Fields{
+				"disabledClustersBefore": sets.List(before),
+				"disabledClustersAfter":  sets.List(after),
+			}).Info("Disabled clusters changed, exiting to trigger a restart")
+			w.terminate()
+			return
+		}
+	}
 }
 
 type controller struct {

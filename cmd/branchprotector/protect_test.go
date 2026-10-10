@@ -1826,7 +1826,7 @@ branch-protection:
 							fixup(&a)
 							fixup(&e)
 							if !reflect.DeepEqual(e, a) {
-								t.Errorf("actual != expected: %s", diff.Diff(a.Request, e.Request))
+								t.Errorf("actual != expected: %s", diff.Diff(a, e))
 							}
 							break
 						}

@@ -495,14 +495,14 @@ func (t *ghThrottler) Do(req *http.Request) (*http.Response, error) {
 }
 
 func (t *ghThrottler) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, vars map[string]interface{}, org string) error {
-	if err := t.Wait(ctx, extractOrgFromContext(ctx)); err != nil {
+	if err := t.Wait(ctx, org); err != nil {
 		return err
 	}
 	return t.graph.QueryWithGitHubAppsSupport(ctx, q, vars, org)
 }
 
 func (t *ghThrottler) MutateWithGitHubAppsSupport(ctx context.Context, m interface{}, input githubql.Input, vars map[string]interface{}, org string) error {
-	if err := t.Wait(ctx, extractOrgFromContext(ctx)); err != nil {
+	if err := t.Wait(ctx, org); err != nil {
 		return err
 	}
 	return t.graph.MutateWithGitHubAppsSupport(ctx, m, input, vars, org)

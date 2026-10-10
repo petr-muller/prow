@@ -5358,6 +5358,149 @@ func TestGraphQLRetryGetsFreshRequestTimeout(t *testing.T) {
 	}
 }
 
+func TestGraphQLThrottleUsesExplicitOrg(t *testing.T) {
+	for _, mutate := range []bool{false, true} {
+		method := "query"
+		if mutate {
+			method = "mutation"
+		}
+		for _, global := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/global=%t", method, global), func(t *testing.T) {
+				ghClient, requests := newGraphQLRetryTestClient(t, ClientOptions{}, http.StatusOK)
+				c := ghClient.(*client)
+				c.usesAppsAuth = true
+				for _, org := range []string{"org-A", "org-B"} {
+					if err := c.Throttle(1, 1, org); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { c.Throttle(0, 0, org) })
+				}
+				if global {
+					if err := c.Throttle(1, 1); err != nil {
+						t.Fatal(err)
+					}
+					t.Cleanup(func() { c.Throttle(0, 0) })
+				}
+				call := func(ctx context.Context, org string) error {
+					if mutate {
+						return c.MutateWithGitHubAppsSupport(ctx, &struct{}{}, githubv4.Input(struct{}{}), nil, org)
+					}
+					return c.QueryWithGitHubAppsSupport(ctx, &struct{}{}, nil, org)
+				}
+				requestCtx, requestCancel := context.WithTimeout(context.Background(), time.Second)
+				defer requestCancel()
+				ctx, cancel := context.WithCancel(context.Background())
+				cancel()
+				for _, org := range []string{"org-A", "org-B"} {
+					if err := call(requestCtx, org); err != nil {
+						t.Fatalf("first %s for %s failed: %v", method, org, err)
+					}
+					// A preexisting context organization must not override the argument.
+					if err := call(context.WithValue(ctx, githubOrgContextKey, "org-B"), org); !errors.Is(err, context.Canceled) {
+						t.Fatalf("exhausted %s should block until cancellation, got %v", org, err)
+					}
+				}
+				if n := len(requests()); n != 2 {
+					t.Fatalf("expected one request per organization, got %d", n)
+				}
+				for i, org := range []string{"org-A", "org-B"} {
+					if got := extractOrgFromContext(requests()[i].Context()); got != org {
+						t.Errorf("request %d organization = %q, want %q", i, got, org)
+					}
+				}
+			})
+		}
+	}
+}
+
+func TestGraphQLThrottleGlobalFallback(t *testing.T) {
+	for _, mutate := range []bool{false, true} {
+		for _, org := range []string{"", "unconfigured"} {
+			t.Run(fmt.Sprintf("mutate=%t/org=%q", mutate, org), func(t *testing.T) {
+				ghClient, requests := newGraphQLRetryTestClient(t, ClientOptions{}, http.StatusOK)
+				c := ghClient.(*client)
+				c.usesAppsAuth = true
+				if err := c.Throttle(1, 1); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { c.Throttle(0, 0) })
+				if err := c.Throttle(1, 1, "org-A"); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { c.Throttle(0, 0, "org-A") })
+				call := func(ctx context.Context, org string) error {
+					if mutate {
+						return c.MutateWithGitHubAppsSupport(ctx, &struct{}{}, githubv4.Input(struct{}{}), nil, org)
+					}
+					return c.QueryWithGitHubAppsSupport(ctx, &struct{}{}, nil, org)
+				}
+				requestCtx, requestCancel := context.WithTimeout(context.Background(), time.Second)
+				defer requestCancel()
+				ctx := context.WithValue(requestCtx, githubOrgContextKey, "org-A")
+				if err := call(ctx, org); err != nil {
+					t.Fatalf("first global request failed: %v", err)
+				}
+				ctx, cancel := context.WithCancel(ctx)
+				cancel()
+				if err := call(ctx, org); !errors.Is(err, context.Canceled) {
+					t.Fatalf("exhausted global budget should block until cancellation, got %v", err)
+				}
+				if err := call(context.WithValue(requestCtx, githubOrgContextKey, "org-A"), "org-A"); err != nil {
+					t.Fatalf("global fallback consumed org-A's token: %v", err)
+				}
+				if n := len(requests()); n != 2 {
+					t.Errorf("expected two requests, got %d", n)
+				}
+			})
+		}
+	}
+}
+
+func TestGraphQLRetriesTakeOrgThrottleTokens(t *testing.T) {
+	for _, burst := range []int{1, 2} {
+		t.Run(fmt.Sprintf("burst=%d", burst), func(t *testing.T) {
+			statuses := make([]int, burst+1)
+			for i := range burst {
+				statuses[i] = http.StatusServiceUnavailable
+			}
+			statuses[burst] = http.StatusOK
+			ghClient, requests := newGraphQLRetryTestClient(t, ClientOptions{InitialDelay: time.Millisecond}, statuses...)
+			c := ghClient.(*client)
+			c.usesAppsAuth = true
+			for _, org := range []string{"org-A", "org-B"} {
+				if err := c.Throttle(1, burst, org); err != nil {
+					t.Fatal(err)
+				}
+				t.Cleanup(func() { c.Throttle(0, 0, org) })
+			}
+			ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
+			defer cancel()
+			err := c.QueryWithGitHubAppsSupport(ctx, &struct{}{}, nil, "org-A")
+			if !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("retry should block on org-A's exhausted budget, got %v", err)
+			}
+			if n := len(requests()); n != burst {
+				t.Fatalf("expected %d attempts using org-A tokens, got %d", burst, n)
+			}
+			for i, req := range requests() {
+				if got := extractOrgFromContext(req.Context()); got != "org-A" {
+					t.Errorf("attempt %d organization = %q, want org-A", i, got)
+				}
+			}
+			otherCtx, otherCancel := context.WithTimeout(context.Background(), time.Second)
+			defer otherCancel()
+			for range burst {
+				if err := c.QueryWithGitHubAppsSupport(otherCtx, &struct{}{}, nil, "org-B"); err != nil {
+					t.Fatalf("org-A retries consumed org-B's budget: %v", err)
+				}
+			}
+			if err := c.QueryWithGitHubAppsSupport(ctx, &struct{}{}, nil, "org-B"); !errors.Is(err, context.DeadlineExceeded) {
+				t.Fatalf("org-B's budget should be exhausted after %d queries, got %v", burst, err)
+			}
+		})
+	}
+}
+
 func TestGraphQLRetriesTakeAThrottleToken(t *testing.T) {
 	client, requests := newGraphQLRetryTestClient(t, ClientOptions{InitialDelay: time.Millisecond}, http.StatusServiceUnavailable)
 	// Allow a single request, then nothing for an hour.

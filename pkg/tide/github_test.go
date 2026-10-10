@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -334,6 +335,181 @@ func TestSearch(t *testing.T) {
 				t.Errorf("expected %d queries, got %d", len(tc.cursors), i)
 			}
 		})
+	}
+}
+
+func TestSearchPageSizeCacheReuse(t *testing.T) {
+	for _, failure := range []error{
+		github.NewGraphQLServerError(http.StatusGatewayTimeout),
+		errors.New("Resource limits for this query exceeded."),
+	} {
+		t.Run(failure.Error(), func(t *testing.T) {
+			provider := &GitHubProvider{}
+			log := logrus.WithField("test", t.Name())
+			now := time.Now()
+			var sizes []int
+			calls := 0
+			query := func(_ context.Context, result interface{}, vars map[string]interface{}, org string) error {
+				calls++
+				size := int(vars["searchPageSize"].(githubql.Int))
+				sizes = append(sizes, size)
+				if calls == 1 {
+					return failure
+				}
+				if calls == 2 {
+					sq := result.(*searchQuery)
+					sq.Search.PageInfo.HasNextPage = true
+					sq.Search.PageInfo.EndCursor = "first-search-cursor"
+					sq.Search.Nodes = []PRNode{{PullRequest: PullRequest{Number: 123}}}
+				}
+				if calls == 3 {
+					cursor := vars["searchCursor"].(*githubql.String)
+					if cursor == nil || *cursor != "first-search-cursor" {
+						t.Errorf("expected next-page cursor, got %v", cursor)
+					}
+				} else if cursor := vars["searchCursor"].(*githubql.String); cursor != nil {
+					t.Errorf("new search retained cursor %q", *cursor)
+				}
+				return nil
+			}
+			first, err := provider.search(query, log, "is:pr label:ready", time.Time{}, now, "org")
+			if err != nil || len(first) != 1 {
+				t.Fatalf("first search: results=%v, error=%v", first, err)
+			}
+			for _, tc := range []struct {
+				org, q string
+			}{
+				{"org", "is:pr label:ready"},
+				{"other-org", "is:pr label:ready"},
+				{"org", "is:pr label:other"},
+			} {
+				// A new date window must still reuse the configured query's size.
+				prs, err := provider.search(query, log, tc.q, now, now.Add(time.Hour), tc.org)
+				if err != nil || len(prs) != 0 {
+					t.Fatalf("subsequent search retained results: results=%v, error=%v", prs, err)
+				}
+			}
+			if diff := cmp.Diff([]int{37, 18, 18, 18, 37, 37}, sizes); diff != "" {
+				t.Errorf("unexpected sizes (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestSearchPageSizeCacheExpiry(t *testing.T) {
+	provider := &GitHubProvider{}
+	key := searchPageSizeKey{org: "org", query: "is:pr"}
+	now := time.Now()
+	created := now.Add(-searchPageSizeCacheTTL)
+	provider.searchPageSizes.remember(key, 18, time.Time{}, created)
+	// Frequent successful reuse must not postpone retrying the default.
+	provider.searchPageSizes.remember(key, 9, now, now.Add(-time.Second))
+	if got, _ := provider.searchPageSizes.get(key, now.Add(-time.Second)); got != 9 {
+		t.Fatalf("size before expiry = %d, want 9", got)
+	}
+	query := func(_ context.Context, _ interface{}, vars map[string]interface{}, _ string) error {
+		if got := int(vars["searchPageSize"].(githubql.Int)); got != maxSearchPageSize {
+			t.Errorf("size after expiry = %d, want %d", got, maxSearchPageSize)
+		}
+		return nil
+	}
+	if _, err := provider.search(query, logrus.WithField("test", t.Name()), key.query, time.Time{}, now, key.org); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSearchPageSizeCacheSuccessAfterExpiry(t *testing.T) {
+	var cache searchPageSizeCache
+	key := searchPageSizeKey{org: "org", query: "is:pr"}
+	now := time.Now()
+	cache.remember(key, 18, time.Time{}, now)
+	expiry := now.Add(searchPageSizeCacheTTL)
+	size, inheritedExpiry := cache.get(key, expiry.Add(-time.Second))
+	if size != 18 || !inheritedExpiry.Equal(expiry) {
+		t.Fatalf("cached search: size=%d, expiry=%v; want 18, %v", size, inheritedExpiry, expiry)
+	}
+	// The search began before expiry, but a successful smaller page arrived
+	// afterward. It must not postpone the next search's default-size probe.
+	late := expiry.Add(time.Second)
+	cache.remember(key, 9, inheritedExpiry, late)
+	size, inheritedExpiry = cache.get(key, late)
+	if size != maxSearchPageSize || !inheritedExpiry.IsZero() {
+		t.Fatalf("expired search: size=%d, expiry=%v; want default, no expiry", size, inheritedExpiry)
+	}
+	// A search starting at default can seed a new period after recovery.
+	cache.remember(key, 18, inheritedExpiry, late)
+	// A late result from the old period cannot overwrite this new period.
+	cache.remember(key, 9, expiry, late.Add(time.Second))
+	if size, expiresAt := cache.get(key, late); size != 18 || !expiresAt.Equal(late.Add(searchPageSizeCacheTTL)) {
+		t.Errorf("new cache period: size=%d, expiry=%v", size, expiresAt)
+	}
+}
+
+func TestSearchPageSizeCacheCapacity(t *testing.T) {
+	var cache searchPageSizeCache
+	now := time.Now()
+	for i := 0; i <= searchPageSizeCacheCapacity; i++ {
+		cache.remember(searchPageSizeKey{query: strconv.Itoa(i)}, 18, time.Time{}, now.Add(time.Duration(i)*time.Second))
+	}
+	if got := len(cache.entries); got != searchPageSizeCacheCapacity {
+		t.Fatalf("cache size = %d, want %d", got, searchPageSizeCacheCapacity)
+	}
+	if got, _ := cache.get(searchPageSizeKey{query: "0"}, now); got != maxSearchPageSize {
+		t.Errorf("oldest entry was not evicted: size = %d", got)
+	}
+	if got, _ := cache.get(searchPageSizeKey{query: "1"}, now); got != 18 {
+		t.Errorf("next oldest entry should remain: size = %d", got)
+	}
+	cache.remember(searchPageSizeKey{query: "new"}, 9, time.Time{}, now.Add(searchPageSizeCacheTTL+time.Hour))
+	if got := len(cache.entries); got != 1 {
+		t.Errorf("expired entries not removed: cache size = %d", got)
+	}
+}
+
+func TestSearchPageSizeCacheIgnoresFailedPages(t *testing.T) {
+	provider := &GitHubProvider{}
+	now := time.Now()
+	query := func(_ context.Context, _ interface{}, _ map[string]interface{}, _ string) error {
+		return github.NewGraphQLServerError(http.StatusGatewayTimeout)
+	}
+	if _, err := provider.search(query, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, now, "org"); err == nil {
+		t.Fatal("expected failed search")
+	}
+	if got, _ := provider.searchPageSizes.get(searchPageSizeKey{org: "org", query: "is:pr"}, now); got != maxSearchPageSize {
+		t.Errorf("failed pages were remembered: size = %d", got)
+	}
+}
+
+func TestSearchPageSizeCacheConcurrent(t *testing.T) {
+	provider := &GitHubProvider{}
+	log := logrus.WithField("test", t.Name())
+	now := time.Now()
+	var wg sync.WaitGroup
+	for i := 0; i < 64; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			for j := 0; j < 10; j++ {
+				query := func(_ context.Context, result interface{}, vars map[string]interface{}, _ string) error {
+					if cursor := vars["searchCursor"].(*githubql.String); cursor != nil {
+						t.Errorf("concurrent search retained cursor %q", *cursor)
+					}
+					if size := int(vars["searchPageSize"].(githubql.Int)); size > 18 {
+						return github.NewGraphQLServerError(http.StatusGatewayTimeout)
+					}
+					result.(*searchQuery).Search.Nodes = []PRNode{{PullRequest: PullRequest{Number: githubql.Int(i + 1)}}}
+					return nil
+				}
+				prs, err := provider.search(query, log, "is:pr", time.Time{}, now, "org")
+				if err != nil || len(prs) != 1 || prs[0].Number != githubql.Int(i+1) {
+					t.Errorf("concurrent search: results=%v, error=%v", prs, err)
+				}
+			}
+		}(i)
+	}
+	wg.Wait()
+	if got, _ := provider.searchPageSizes.get(searchPageSizeKey{org: "org", query: "is:pr"}, now); got != 18 {
+		t.Errorf("concurrent recovery size = %d, want 18", got)
 	}
 }
 

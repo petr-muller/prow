@@ -63,6 +63,8 @@ type GitHubProvider struct {
 
 	*mergeChecker
 	logger *logrus.Entry
+
+	searchPageSizes searchPageSizeCache
 }
 
 func newGitHubProvider(
@@ -266,7 +268,79 @@ const (
 	// minSearchPageSize is the smallest page size search will shrink to when
 	// GitHub keeps timing out or exceeding resource limits while resolving a page.
 	minSearchPageSize = 5
+	// Remember at most 256 organization/query pairs for 30 minutes. Reads and
+	// successful reuse do not extend expiry, so active searches periodically
+	// retry the default size after transient GitHub problems. At capacity,
+	// evict the entry that expires first. Nothing is persisted.
+	searchPageSizeCacheCapacity = 256
+	searchPageSizeCacheTTL      = 30 * time.Minute
 )
+
+type searchPageSizeKey struct {
+	org, query string
+}
+
+type searchPageSizeEntry struct {
+	size      int
+	expiresAt time.Time
+}
+
+// searchPageSizeCache retains only sizes, never pagination cursors or results.
+// Its zero value is ready for use, including by concurrent search calls.
+type searchPageSizeCache struct {
+	mu      sync.Mutex
+	entries map[searchPageSizeKey]searchPageSizeEntry
+}
+
+func (c *searchPageSizeCache) get(key searchPageSizeKey, now time.Time) (int, time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if entry, ok := c.entries[key]; ok {
+		if now.Before(entry.expiresAt) {
+			return entry.size, entry.expiresAt
+		}
+		delete(c.entries, key)
+	}
+	return maxSearchPageSize, time.Time{}
+}
+
+func (c *searchPageSizeCache) remember(key searchPageSizeKey, size int, expiresAt, now time.Time) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	// A search that reused a cached size must not renew it when a successful
+	// page arrives after expiry. Only searches starting at the default size
+	// (with no inherited expiry) can begin a new cache period.
+	if !expiresAt.IsZero() && !now.Before(expiresAt) {
+		return
+	}
+	if entry, ok := c.entries[key]; ok && now.Before(entry.expiresAt) {
+		entry.size = size
+		c.entries[key] = entry
+		return
+	}
+	for k, entry := range c.entries {
+		if !now.Before(entry.expiresAt) {
+			delete(c.entries, k)
+		}
+	}
+	if len(c.entries) >= searchPageSizeCacheCapacity {
+		var oldest searchPageSizeKey
+		var expiresAt time.Time
+		for k, entry := range c.entries {
+			if expiresAt.IsZero() || entry.expiresAt.Before(expiresAt) {
+				oldest, expiresAt = k, entry.expiresAt
+			}
+		}
+		delete(c.entries, oldest)
+	}
+	if c.entries == nil {
+		c.entries = make(map[searchPageSizeKey]searchPageSizeEntry)
+	}
+	if expiresAt.IsZero() {
+		expiresAt = now.Add(searchPageSizeCacheTTL)
+	}
+	c.entries[key] = searchPageSizeEntry{size: size, expiresAt: expiresAt}
+}
 
 // isGatewayTimeout reports whether err indicates that GitHub gave up resolving
 // the query (502 Bad Gateway / 504 Gateway Timeout). These are typically caused
@@ -293,7 +367,9 @@ func (gi *GitHubProvider) search(query querier, log *logrus.Entry, q string, sta
 	})
 	requestStart := time.Now()
 	var cursor *githubql.String
-	pageSize := maxSearchPageSize
+	// q is the configured query, before adding this search's date window.
+	cacheKey := searchPageSizeKey{org: org, query: q}
+	pageSize, cacheExpiry := gi.searchPageSizes.get(cacheKey, requestStart)
 	vars := map[string]interface{}{
 		"query":          githubql.String(datedQuery(q, start, end)),
 		"searchCursor":   cursor,
@@ -331,6 +407,7 @@ func (gi *GitHubProvider) search(query querier, log *logrus.Entry, q string, sta
 			}
 			return ret, err
 		}
+		gi.searchPageSizes.remember(cacheKey, pageSize, cacheExpiry, time.Now())
 		totalCost += int(sq.RateLimit.Cost)
 		remaining = int(sq.RateLimit.Remaining)
 		for _, n := range sq.Search.Nodes {

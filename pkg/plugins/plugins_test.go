@@ -20,6 +20,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 
 	"github.com/google/go-cmp/cmp"
@@ -345,6 +346,109 @@ plugins:
 			}
 
 		})
+	}
+}
+
+func TestLoadMilestoneApplierReload(t *testing.T) {
+	t.Parallel()
+
+	tempDir := t.TempDir()
+	mainPath := filepath.Join(tempDir, "plugins.yaml")
+	supplementalPath := filepath.Join(tempDir, "a_pluginconfig.yaml")
+	conflictingPath := filepath.Join(tempDir, "b_pluginconfig.yaml")
+	writeConfig := func(path, content string) {
+		t.Helper()
+		if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+			t.Fatalf("failed to write config %s: %v", path, err)
+		}
+	}
+	agent := &ConfigAgent{}
+	load := func() error {
+		return agent.Load(mainPath, []string{tempDir}, "_pluginconfig.yaml", false, false)
+	}
+
+	writeConfig(mainPath, `
+plugins:
+  org/main:
+  - wip
+milestone_applier:
+  org/main:
+    main: v1.0
+`)
+	writeConfig(supplementalPath, `
+milestone_applier:
+  org/extra:
+    release: v2.0
+`)
+	if err := load(); err != nil {
+		t.Fatalf("failed to load initial config: %v", err)
+	}
+	wantMappings := map[string]BranchToMilestone{
+		"org/main":  {"main": "v1.0"},
+		"org/extra": {"release": "v2.0"},
+	}
+	if diff := cmp.Diff(wantMappings, agent.Config().MilestoneApplier); diff != "" {
+		t.Fatalf("initial milestone mappings differ (-want +got): %s", diff)
+	}
+	previousConfig := agent.Config()
+	previousContents, err := yaml.Marshal(previousConfig)
+	if err != nil {
+		t.Fatalf("failed to snapshot published config: %v", err)
+	}
+
+	writeConfig(mainPath, `
+plugins:
+  org/main:
+  - lgtm
+milestone_applier:
+  org/main:
+    main: v1.1
+`)
+	writeConfig(supplementalPath, `
+milestone_applier:
+  org/extra:
+    release: v2.1
+`)
+	writeConfig(conflictingPath, `
+milestone_applier:
+  org/extra:
+    stable: v3.0
+`)
+	err = load()
+	if err == nil {
+		t.Fatal("expected duplicate repository config to be rejected even with disjoint branches")
+	}
+	for _, want := range []string{conflictingPath, "milestone_applier.org/extra"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("load error %q does not identify %q", err, want)
+		}
+	}
+	if agent.Config() != previousConfig {
+		t.Error("failed load replaced the published configuration")
+	}
+	currentContents, err := yaml.Marshal(agent.Config())
+	if err != nil {
+		t.Fatalf("failed to snapshot config after rejected load: %v", err)
+	}
+	if diff := cmp.Diff(string(previousContents), string(currentContents)); diff != "" {
+		t.Errorf("failed load changed the published configuration (-before +after): %s", diff)
+	}
+
+	if err := os.Remove(conflictingPath); err != nil {
+		t.Fatalf("failed to remove conflicting config: %v", err)
+	}
+	if err := load(); err != nil {
+		t.Fatalf("failed to load after removing conflict: %v", err)
+	}
+	wantMappings = map[string]BranchToMilestone{
+		"org/main":  {"main": "v1.1"},
+		"org/extra": {"release": "v2.1"},
+	}
+	if diff := cmp.Diff(wantMappings, agent.Config().MilestoneApplier); diff != "" {
+		t.Errorf("recovered milestone mappings differ (-want +got): %s", diff)
+	}
+	if diff := cmp.Diff(Plugins{"org/main": {Plugins: []string{"lgtm"}}}, agent.Config().Plugins); diff != "" {
+		t.Errorf("recovered plugins differ (-want +got): %s", diff)
 	}
 }
 

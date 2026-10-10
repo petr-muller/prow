@@ -203,6 +203,7 @@ func (p *protector) configureBranches() {
 
 		if err := p.client.UpdateBranchProtection(u.Org, u.Repo, u.Branch, *u.Request); err != nil {
 			p.errors.add(fmt.Errorf("update %s/%s=%s protection to %v failed: %w", u.Org, u.Repo, u.Branch, *u.Request, err))
+			continue
 		}
 
 		if u.Separate != nil {

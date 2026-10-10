@@ -302,6 +302,69 @@ func TestConfigureBranches(t *testing.T) {
 	}
 }
 
+type updateFailingClient struct {
+	fakeClient
+	updateError    error
+	signatureCalls []string
+}
+
+func (c *updateFailingClient) UpdateBranchProtection(org, repo, branch string, config github.BranchProtectionRequest) error {
+	if branch == "failed-update" {
+		return c.updateError
+	}
+	return c.fakeClient.UpdateBranchProtection(org, repo, branch, config)
+}
+
+func (c *updateFailingClient) EnableCommitSignProtection(org, repo, branch string) error {
+	c.signatureCalls = append(c.signatureCalls, "enable "+org+"/"+repo+"="+branch)
+	return c.fakeClient.EnableCommitSignProtection(org, repo, branch)
+}
+
+func (c *updateFailingClient) DisableCommitSignProtection(org, repo, branch string) error {
+	c.signatureCalls = append(c.signatureCalls, "disable "+org+"/"+repo+"="+branch)
+	return c.fakeClient.DisableCommitSignProtection(org, repo, branch)
+}
+
+func TestConfigureBranchesSkipsSignaturesAfterUpdateFailure(t *testing.T) {
+	for _, requireSigned := range []bool{true, false} {
+		t.Run(fmt.Sprintf("require_signed_commits=%t", requireSigned), func(t *testing.T) {
+			updateError := errors.New("main protection update failed")
+			fc := &updateFailingClient{updateError: updateError}
+			p := protector{
+				client:  fc,
+				updates: make(chan requirements, 2),
+				done:    make(chan []error, 1),
+			}
+			request := github.BranchProtectionRequest{}
+			for _, branch := range []string{"failed-update", "next"} {
+				p.updates <- requirements{
+					Org: "org", Repo: "repo", Branch: branch, Request: &request,
+					Separate: &separateRequests{RequireSignedCommits: &requireSigned},
+				}
+			}
+			close(p.updates)
+			p.configureBranches()
+			errs := <-p.done
+			if len(errs) != 1 {
+				t.Fatalf("expected one main update error, got %v", errs)
+			}
+			if !errors.Is(errs[0], updateError) || !strings.HasPrefix(errs[0].Error(), "update org/repo=failed-update protection to ") {
+				t.Errorf("expected retained main update error with branch context, got %v", errs[0])
+			}
+			operation := "disable"
+			if requireSigned {
+				operation = "enable"
+			}
+			if diff := cmp.Diff([]string{operation + " org/repo=next"}, fc.signatureCalls); diff != "" {
+				t.Errorf("unexpected signature calls (-want +got):\n%s", diff)
+			}
+			if diff := cmp.Diff(map[string]github.BranchProtectionRequest{"org/repo=next": request}, fc.updated); diff != "" {
+				t.Errorf("unexpected main updates (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func split(branch string) (string, string, string) {
 	parts := strings.Split(branch, "=")
 	b := parts[1]

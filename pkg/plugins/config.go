@@ -2392,34 +2392,25 @@ func (c *Configuration) mergeFrom(other *Configuration) error {
 }
 
 func (c *Configuration) mergeExternalPluginsFrom(other map[string][]ExternalPlugin) error {
-	if c.ExternalPlugins == nil && other != nil {
-		c.ExternalPlugins = make(map[string][]ExternalPlugin)
+	return mergeConfigMapFrom(&c.ExternalPlugins, other, "external-plugins")
+}
+
+func (c *Configuration) mergeMilestoneApplierFrom(other map[string]BranchToMilestone) error {
+	return mergeConfigMapFrom(&c.MilestoneApplier, other, "milestone_applier")
+}
+
+func mergeConfigMapFrom[V any](destination *map[string]V, other map[string]V, field string) error {
+	if *destination == nil && other != nil {
+		*destination = make(map[string]V)
 	}
 
 	var errs []error
 	for orgOrRepo, config := range other {
-		if _, ok := c.ExternalPlugins[orgOrRepo]; ok {
-			errs = append(errs, fmt.Errorf("found duplicate config for external-plugins.%s", orgOrRepo))
+		if _, ok := (*destination)[orgOrRepo]; ok {
+			errs = append(errs, fmt.Errorf("found duplicate config for %s.%s", field, orgOrRepo))
 			continue
 		}
-		c.ExternalPlugins[orgOrRepo] = config
-	}
-
-	return utilerrors.NewAggregate(errs)
-}
-
-func (c *Configuration) mergeMilestoneApplierFrom(other map[string]BranchToMilestone) error {
-	if c.MilestoneApplier == nil && other != nil {
-		c.MilestoneApplier = make(map[string]BranchToMilestone)
-	}
-
-	var errs []error
-	for orgOrRepo, branchToMilestone := range other {
-		if _, ok := c.MilestoneApplier[orgOrRepo]; ok {
-			errs = append(errs, fmt.Errorf("found duplicate config for milestone_applier.%s", orgOrRepo))
-			continue
-		}
-		c.MilestoneApplier[orgOrRepo] = branchToMilestone
+		(*destination)[orgOrRepo] = config
 	}
 
 	return utilerrors.NewAggregate(errs)

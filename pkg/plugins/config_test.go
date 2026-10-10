@@ -2408,6 +2408,111 @@ func TestMergeFrom(t *testing.T) {
 	}
 }
 
+func TestMergeExternalPluginsFrom(t *testing.T) {
+	t.Parallel()
+	testMergeConfigMapFrom(t, "external-plugins", []ExternalPlugin{{Name: "existing"}}, []ExternalPlugin{{Name: "incoming"}},
+		func(destination *map[string][]ExternalPlugin, other map[string][]ExternalPlugin) error {
+			c := Configuration{ExternalPlugins: *destination}
+			err := c.mergeExternalPluginsFrom(other)
+			*destination = c.ExternalPlugins
+			return err
+		})
+}
+
+func TestMergeMilestoneApplierFrom(t *testing.T) {
+	t.Parallel()
+	testMergeConfigMapFrom(t, "milestone_applier", BranchToMilestone{"main": "v1"}, BranchToMilestone{"release": "v2"},
+		func(destination *map[string]BranchToMilestone, other map[string]BranchToMilestone) error {
+			c := Configuration{MilestoneApplier: *destination}
+			err := c.mergeMilestoneApplierFrom(other)
+			*destination = c.MilestoneApplier
+			return err
+		})
+}
+
+func testMergeConfigMapFrom[V any](t *testing.T, field string, existing, incoming V, merge func(*map[string]V, map[string]V) error) {
+	t.Helper()
+	var zero V
+	testCases := []struct {
+		name        string
+		destination map[string]V
+		other       map[string]V
+		expected    map[string]V
+		duplicates  []string
+	}{
+		{name: "nil maps"},
+		{name: "nil destination and empty source", other: map[string]V{}, expected: map[string]V{}},
+		{name: "empty destination and nil source", destination: map[string]V{}, expected: map[string]V{}},
+		{name: "empty maps", destination: map[string]V{}, other: map[string]V{}, expected: map[string]V{}},
+		{name: "populated destination and nil source", destination: map[string]V{"org/repo": existing}, expected: map[string]V{"org/repo": existing}},
+		{name: "populated destination and empty source", destination: map[string]V{"org/repo": existing}, other: map[string]V{}, expected: map[string]V{"org/repo": existing}},
+		{name: "nil destination and populated source", other: map[string]V{"org/repo": incoming}, expected: map[string]V{"org/repo": incoming}},
+		{name: "empty destination and populated source", destination: map[string]V{}, other: map[string]V{"org/repo": incoming}, expected: map[string]V{"org/repo": incoming}},
+		{
+			name:        "nonconflicting keys",
+			destination: map[string]V{"org/repo": existing},
+			other:       map[string]V{"org/other": incoming},
+			expected:    map[string]V{"org/repo": existing, "org/other": incoming},
+		},
+		{
+			name:        "reject whole duplicate keys and insert nonconflicting keys",
+			destination: map[string]V{"org/repo": existing, "org/zero": zero},
+			other:       map[string]V{"org/repo": incoming, "org/zero": incoming, "org/new": incoming},
+			expected:    map[string]V{"org/repo": existing, "org/zero": zero, "org/new": incoming},
+			duplicates:  []string{"org/repo", "org/zero"},
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := merge(&tc.destination, tc.other)
+			if diff := cmp.Diff(tc.expected, tc.destination); diff != "" {
+				t.Errorf("merged map differs (-want +got):\n%s", diff)
+			}
+			if len(tc.duplicates) == 0 {
+				if err != nil {
+					t.Fatalf("unexpected error: %v", err)
+				}
+				return
+			}
+			aggregate, ok := err.(interface{ Errors() []error })
+			if !ok {
+				t.Fatalf("expected aggregated duplicate errors, got %v", err)
+			}
+			var got, want []string
+			for _, duplicate := range tc.duplicates {
+				want = append(want, fmt.Sprintf("found duplicate config for %s.%s", field, duplicate))
+			}
+			for _, duplicateErr := range aggregate.Errors() {
+				got = append(got, duplicateErr.Error())
+			}
+			if diff := cmp.Diff(want, got, cmpopts.SortSlices(func(a, b string) bool { return a < b })); diff != "" {
+				t.Errorf("duplicate errors differ (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestMergeFromMapErrorPrefixes(t *testing.T) {
+	t.Parallel()
+	testCases := []struct {
+		name   string
+		config Configuration
+	}{
+		{name: "external-plugins", config: Configuration{ExternalPlugins: map[string][]ExternalPlugin{"org/repo": nil}}},
+		{name: "milestone_applier", config: Configuration{MilestoneApplier: map[string]BranchToMilestone{"org/repo": nil}}},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			other := tc.config
+			err := tc.config.mergeFrom(&other)
+			want := fmt.Sprintf("failed to merge .%s from supplemental config: found duplicate config for %s.org/repo", tc.name, tc.name)
+			if err == nil || err.Error() != want {
+				t.Fatalf("expected error %q, got %v", want, err)
+			}
+		})
+	}
+}
+
 func TestValidatePluginsDupes(t *testing.T) {
 	testCases := []struct {
 		name           string

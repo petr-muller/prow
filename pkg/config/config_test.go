@@ -3742,8 +3742,150 @@ func TestReadJobConfigRejectsWalkErrors(t *testing.T) {
 		return walkFn(filepath.Join(root, "vanished.yaml"), nil, walkError)
 	}
 
-	if _, err := readJobConfig(jobConfigDir, walk); !errors.Is(err, walkError) {
+	jc, err := readJobConfig(jobConfigDir, walk)
+	if !errors.Is(err, walkError) {
 		t.Fatalf("expected walk error, got %v", err)
+	}
+	if diff := cmp.Diff(JobConfig{}, jc); diff != "" {
+		t.Errorf("failed walk returned a partial config (-want +got):\n%s", diff)
+	}
+}
+
+func TestAgentInitialConfigWalkRetries(t *testing.T) {
+	jobConfigDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(jobConfigDir, "jobs.yaml"), []byte(`periodics:
+- name: complete-config
+`), 0600); err != nil {
+		t.Fatalf("write job config: %v", err)
+	}
+	walkError := errors.New("checkout changed during walk")
+	tests := []struct {
+		name            string
+		failures        int
+		wantAttempts    int
+		wantDelays      []time.Duration
+		wantError       bool
+		returnWalkError bool
+	}{
+		{
+			name:         "transient callback failure",
+			failures:     2,
+			wantAttempts: 3,
+			wantDelays:   []time.Duration{time.Second, 2 * time.Second},
+		},
+		{
+			name:            "transient returned walk failure",
+			failures:        1,
+			wantAttempts:    2,
+			wantDelays:      []time.Duration{time.Second},
+			returnWalkError: true,
+		},
+		{
+			name:         "persistent callback failure",
+			failures:     5,
+			wantAttempts: 5,
+			wantDelays:   []time.Duration{time.Second, 2 * time.Second, 4 * time.Second, 8 * time.Second},
+			wantError:    true,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			ca := &Agent{}
+			attempts := 0
+			load := func() (*Config, error) {
+				attempts++
+				jc, err := readJobConfig(jobConfigDir, func(root string, walkFn filepath.WalkFunc) error {
+					if err := filepath.Walk(root, walkFn); err != nil {
+						return err
+					}
+					if attempts <= tc.failures {
+						if tc.returnWalkError {
+							return walkError
+						}
+						return walkFn(filepath.Join(root, "vanished.yaml"), nil, walkError)
+					}
+					return nil
+				})
+				return &Config{JobConfig: jc}, err
+			}
+			var delays []time.Duration
+			err := ca.loadInitialConfig(load, func(delay time.Duration) {
+				if ca.Config() != nil {
+					t.Error("published a configuration before a successful load")
+				}
+				delays = append(delays, delay)
+			})
+			if attempts != tc.wantAttempts {
+				t.Errorf("load attempts: got %d, want %d", attempts, tc.wantAttempts)
+			}
+			if diff := cmp.Diff(tc.wantDelays, delays); diff != "" {
+				t.Errorf("retry delays (-want +got):\n%s", diff)
+			}
+			if tc.wantError {
+				if !errors.Is(err, walkError) || !strings.Contains(err.Error(), "initial configuration load failed after 5 attempts") {
+					t.Errorf("expected diagnosable exhausted-retry error, got %v", err)
+				}
+				if ca.Config() != nil {
+					t.Error("published a config despite exhausting retries")
+				}
+			} else {
+				if err != nil {
+					t.Fatalf("initial config load: %v", err)
+				}
+				if ca.Config() == nil || len(ca.Config().Periodics) != 1 || ca.Config().Periodics[0].Name != "complete-config" {
+					t.Fatalf("expected complete configuration, got %#v", ca.Config())
+				}
+			}
+		})
+	}
+}
+
+func TestAgentInitialConfigDoesNotRetryValidationErrors(t *testing.T) {
+	ca := &Agent{}
+	validationError := errors.New("invalid configuration")
+	attempts := 0
+	err := ca.loadInitialConfig(func() (*Config, error) {
+		attempts++
+		return nil, validationError
+	}, func(time.Duration) {
+		t.Error("slept before retrying a validation error")
+	})
+	if !errors.Is(err, validationError) || attempts != 1 {
+		t.Errorf("expected validation error after one attempt, got %v after %d", err, attempts)
+	}
+}
+
+func TestAgentReloadRetainsConfigOnWalkError(t *testing.T) {
+	jobConfigDir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(jobConfigDir, "jobs.yaml"), []byte(`periodics:
+- name: partially-loaded-config
+`), 0600); err != nil {
+		t.Fatalf("write job config: %v", err)
+	}
+	previous := &Config{}
+	ca := &Agent{c: previous}
+	deltas := make(chan Delta, 1)
+	ca.Subscribe(deltas)
+	walkError := errors.New("checkout changed during reload")
+	err := ca.loadConfig(func() (*Config, error) {
+		jc, err := readJobConfig(jobConfigDir, func(root string, walkFn filepath.WalkFunc) error {
+			if err := filepath.Walk(root, walkFn); err != nil {
+				return err
+			}
+			return walkFn(filepath.Join(root, "vanished.yaml"), nil, walkError)
+		})
+		return &Config{JobConfig: jc}, err
+	})
+	if !errors.Is(err, walkError) {
+		t.Errorf("expected reload walk error, got %v", err)
+	}
+	if ca.Config() != previous {
+		t.Error("failed reload replaced the last-known-good configuration")
+	}
+	select {
+	case <-deltas:
+		t.Error("failed reload published a configuration delta")
+	default:
 	}
 }
 

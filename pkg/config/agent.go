@@ -18,6 +18,7 @@ package config
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -297,16 +298,16 @@ func watchConfigs(ca *Agent, prowConfig, jobConfig string, supplementalProwConfi
 	return nil
 }
 
-// StartWatch will begin watching the config files at the provided paths. If the
-// first load fails, Start will return the error and abort. Future load failures
-// will log the failure message but continue attempting to load.
+// StartWatch will begin watching the config files at the provided paths. Initial
+// job-config directory-walk failures are retried as documented by Start. Future
+// load failures will log the failure message but continue attempting to load.
 // This function will replace Start in a future release.
 func (ca *Agent) StartWatch(prowConfig, jobConfig string, supplementalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals ...func(*Config) error) error {
-	c, err := Load(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
-	if err != nil {
+	if err := ca.loadInitialConfig(func() (*Config, error) {
+		return Load(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
+	}, time.Sleep); err != nil {
 		return err
 	}
-	ca.Set(c)
 	watchConfigs(ca, prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
 	return nil
 }
@@ -335,19 +336,22 @@ func lastConfigModTime(prowConfig, jobConfig string) (time.Time, error) {
 	return recentModTime, nil
 }
 
-// Start will begin polling the config file at the path. If the first load
-// fails, Start will return the error and abort. Future load failures will log
+// Start will begin polling the config file at the path. Initial job-config
+// directory walks are attempted up to five times, with delays of 1, 2, 4,
+// and 8 seconds (15 seconds total delay). Other initial load failures return
+// immediately. Future load failures retain the active configuration and log
 // the failure message but continue attempting to load.
 func (ca *Agent) Start(prowConfig, jobConfig string, additionalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals ...func(*Config) error) error {
 	lastModTime, err := lastConfigModTime(prowConfig, jobConfig)
 	if err != nil {
 		lastModTime = time.Time{}
 	}
-	c, err := Load(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
-	if err != nil {
+	load := func() (*Config, error) {
+		return Load(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
+	}
+	if err := ca.loadInitialConfig(load, time.Sleep); err != nil {
 		return err
 	}
-	ca.Set(c)
 	go func() {
 		// Rarely, if two changes happen in the same second, mtime will
 		// be the same for the second change, and an mtime-based check would
@@ -365,17 +369,48 @@ func (ca *Agent) Start(prowConfig, jobConfig string, additionalProwConfigDirs []
 				}
 				lastModTime = recentModTime
 			}
-			if c, err := Load(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
+			if err := ca.loadConfig(load); err != nil {
 				logrus.WithField("prowConfig", prowConfig).
 					WithField("jobConfig", jobConfig).
 					WithError(err).Error("Error loading config.")
 			} else {
 				skips = 0
-				ca.Set(c)
 			}
 		}
 	}()
 	return nil
+}
+
+// loadConfig only publishes a complete, successfully loaded configuration.
+func (ca *Agent) loadConfig(load func() (*Config, error)) error {
+	c, err := load()
+	if err != nil {
+		return err
+	}
+	ca.Set(c)
+	return nil
+}
+
+func (ca *Agent) loadInitialConfig(load func() (*Config, error), sleep func(time.Duration)) error {
+	const attempts = 5
+	delay := time.Second
+	for attempt := 1; ; attempt++ {
+		err := ca.loadConfig(load)
+		if err == nil {
+			return nil
+		}
+		var walkError *jobConfigWalkError
+		if !errors.As(err, &walkError) {
+			return err
+		}
+		if attempt == attempts {
+			return fmt.Errorf("initial configuration load failed after %d attempts: %w", attempts, err)
+		}
+		logrus.WithError(err).WithField("attempt", attempt).WithField("retryAfter", delay).
+			Warn("Initial job-config directory walk failed; retrying configuration load.")
+		sleep(delay)
+		delay *= 2
+	}
 }
 
 // Subscribe registers the channel for messages on config reload.

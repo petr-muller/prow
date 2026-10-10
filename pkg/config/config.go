@@ -1701,6 +1701,15 @@ func ReadJobConfig(jobConfig string, yamlOpts ...yaml.JSONOpt) (JobConfig, error
 	return readJobConfig(jobConfig, filepath.Walk, yamlOpts...)
 }
 
+// jobConfigWalkError identifies incomplete directory walks that may succeed
+// after a git-sync or ConfigMap update finishes.
+type jobConfigWalkError struct {
+	err error
+}
+
+func (e *jobConfigWalkError) Error() string { return e.err.Error() }
+func (e *jobConfigWalkError) Unwrap() error { return e.err }
+
 func readJobConfig(jobConfig string, walk func(string, filepath.WalkFunc) error, yamlOpts ...yaml.JSONOpt) (JobConfig, error) {
 	stat, err := os.Stat(jobConfig)
 	if err != nil {
@@ -1728,8 +1737,10 @@ func readJobConfig(jobConfig string, walk func(string, filepath.WalkFunc) error,
 	allStart := time.Now()
 	jc := JobConfig{}
 	var errs []error
+	walkFailed := false
 	err = walk(jobConfig, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
+			walkFailed = true
 			// Continue to find any other errors, but reject the partial result after the walk
 			// to avoid losing arbitrary part of the config, e.g. if this is a dir
 			errs = append(errs, fmt.Errorf("walking path %q: %w", path, err))
@@ -1779,8 +1790,12 @@ func readJobConfig(jobConfig string, walk func(string, filepath.WalkFunc) error,
 		}
 		return nil
 	})
+	walkFailed = walkFailed || err != nil
 	err = utilerrors.NewAggregate(append(errs, err))
 	if err != nil {
+		if walkFailed {
+			return JobConfig{}, &jobConfigWalkError{err: err}
+		}
 		return JobConfig{}, err
 	}
 	logrus.WithField("count", jobConfigCount).WithField("duration", time.Since(allStart)).Traceln("jobConfigs loaded successfully")

@@ -24,7 +24,6 @@ import (
 
 	cloudbuild "cloud.google.com/go/cloudbuild/apiv1/v2"
 	"cloud.google.com/go/cloudbuild/apiv1/v2/cloudbuildpb"
-	"google.golang.org/api/iterator"
 	"google.golang.org/api/option"
 	"k8s.io/apimachinery/pkg/util/wait"
 
@@ -134,20 +133,11 @@ func (c *Client) ListBuildsByTag(ctx context.Context, project string, tags []str
 		PageSize:  pageSize,
 		Filter:    strings.Join(tagsFilters, " AND "),
 	})
-	// ListBuilds already fetches all, just need to do pagination.
-	pager := iterator.NewPager(iter, pageSize, "")
-	for {
-		var buildsInPage []*cloudbuildpb.Build
-		nextPageToken, err := pager.NextPage(&buildsInPage)
+	for build, err := range iter.All() {
 		if err != nil {
 			return nil, err
 		}
-		if buildsInPage != nil {
-			res = append(res, buildsInPage...)
-		}
-		if nextPageToken == "" {
-			break
-		}
+		res = append(res, build)
 	}
 	return res, nil
 }

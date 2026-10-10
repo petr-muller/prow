@@ -215,7 +215,11 @@ func main() {
 	}
 
 	if enabledControllersSet.Has(plank.ControllerName) {
-		if err := plank.Add(mgr, buildClusters, knownClusters, cfg, opener, o.totURL, o.selector); err != nil {
+		configuredClusters, err := o.kubernetes.ConfiguredClusters()
+		if err != nil {
+			logrus.WithError(err).Fatal("Failed to read configured cluster identities.")
+		}
+		if err := plank.Add(mgr, buildClusters, knownClusters, configuredClusters, cfg, opener, o.totURL, o.selector); err != nil {
 			logrus.WithError(err).Fatal("Failed to add plank to manager")
 		}
 	}

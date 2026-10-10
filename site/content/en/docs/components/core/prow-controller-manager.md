@@ -54,11 +54,33 @@ changes also do not trigger this restart. This behavior does not mean that all P
 components automatically reload their cluster clients.
 
 Configuration propagation, job assignment, and PCM shutdown are not coordinated.
-During the transition, jobs can still be assigned to a cluster for which PCM has no
-build client and receive a terminal missing-client error. Restarting restores PCM's
-ability to reconcile jobs on enabled clusters, but does not retry jobs already marked
-errored. Operators must rerun affected jobs after the cluster configuration has propagated
-and PCM has restarted; this mechanism does not guarantee a failure-free transition.
+For a configured cluster that is enabled in PCM's current configuration but has no
+usable build client, Plank retries reconciliation every ten seconds for up to five
+minutes from its first observation of the missing client. This applies to triggered
+jobs, pending jobs (including pod cleanup), and aborted jobs awaiting pod deletion.
+The first observation is persisted in the ProwJob annotation
+`prow.k8s.io/missing-build-client-since`, so restarting PCM does not renew the window.
+A successful reconciliation with a usable client clears the annotation. If the client
+is still absent when the window expires, an incomplete job is completed as errored
+with an explicit recovery-window-expired description. An invalid or future recovery
+timestamp is terminal rather than granting an unlimited wait.
+
+Configured cluster identities are read from kubeconfig at startup without filtering
+`disabled_clusters`; current enablement is checked against PCM's loaded configuration.
+Unknown aliases and deliberately disabled clusters with missing clients remain terminal.
+Retries wait before allocating a build ID or creating a pod. Once the client is available,
+normal reconciliation looks for an existing pod first, including one created before a
+ProwJob status update failed.
+
+This policy does not replace clients, caches, or watches at runtime. Recovery still
+requires the existing restart mechanism and a working supervisor. New kubeconfig
+identities are recognized after restart; the policy covers absent clients, not API
+errors from existing clients. Existing pod timeouts still apply after recovery. Slow
+restarts, configuration propagation delays, and jobs reaching PCM while it still sees
+their cluster as disabled can still cause terminal failures. Restarting does not retry
+jobs already marked errored. Operators must rerun affected jobs after configuration
+has propagated and PCM has restarted; this mechanism does not guarantee a failure-free
+transition.
 
 [Plank]: /docs/components/deprecated/plank/
 [Sinker]: /docs/components/core/sinker/

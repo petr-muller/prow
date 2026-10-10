@@ -20,6 +20,8 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"k8s.io/apimachinery/pkg/util/sets"
 )
 
 func TestExperimentalKubernetesOptions_Validate(t *testing.T) {
@@ -167,5 +169,63 @@ users:
 	}
 	if o.prowJobClientset != nil {
 		t.Errorf("expected prowJobClientset to be nil, was %v", o.prowJobClientset)
+	}
+}
+
+func TestConfiguredClustersIncludesDisabledContexts(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "kubeconfig")
+	data := `apiVersion: v1
+kind: Config
+current-context: infra
+clusters:
+- name: cluster
+  cluster:
+    server: https://example.invalid
+contexts:
+- name: infra
+  context:
+    cluster: cluster
+    user: user
+- name: build
+  context:
+    cluster: cluster
+    user: user
+users:
+- name: user
+  user: {}
+`
+	if err := os.WriteFile(path, []byte(data), 0600); err != nil {
+		t.Fatal(err)
+	}
+	o := &KubernetesOptions{kubeconfig: path}
+	o.SetDisabledClusters(sets.New("build"))
+	known, err := o.KnownClusters(false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := known["build"]; ok {
+		t.Fatal("disabled build cluster has a resolved config")
+	}
+	configured, err := o.ConfiguredClusters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !configured.HasAll("build", "infra", "default") || configured.Has("unknown") {
+		t.Fatalf("incorrect configured identities: %v", configured)
+	}
+	// Reading identities must not mutate the startup snapshot or construct clients.
+	if _, ok := known["build"]; ok {
+		t.Fatal("identity lookup mutated resolved configs")
+	}
+	if _, ok := o.kubernetesClientsByContext["build"]; ok {
+		t.Fatal("identity lookup created disabled client")
+	}
+	configured.Delete("build")
+	again, err := o.ConfiguredClusters()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !again.Has("build") {
+		t.Fatal("returned identities share mutable state")
 	}
 }

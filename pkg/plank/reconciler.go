@@ -101,18 +101,20 @@ func Add(
 	mgr controllerruntime.Manager,
 	buildClusters map[string]cluster.Cluster,
 	knownClusters map[string]rest.Config,
+	configuredClusters sets.Set[string],
 	cfg config.Getter,
 	opener io.Opener,
 	totURL string,
 	additionalSelector string,
 ) error {
-	return add(mgr, buildClusters, knownClusters, cfg, opener, totURL, additionalSelector, nil, nil, 10, "")
+	return add(mgr, buildClusters, knownClusters, configuredClusters, cfg, opener, totURL, additionalSelector, nil, nil, 10, "")
 }
 
 func add(
 	mgr controllerruntime.Manager,
 	buildClusters map[string]cluster.Cluster,
 	knownClusters map[string]rest.Config,
+	configuredClusters sets.Set[string],
 	cfg config.Getter,
 	opener io.Opener,
 	totURL string,
@@ -146,6 +148,7 @@ func add(
 		WithOptions(controller.Options{MaxConcurrentReconciles: numWorkers})
 
 	r := newReconciler(ctx, mgr.GetClient(), overwriteReconcile, cfg, opener, totURL)
+	r.configuredClusters = configuredClusters.Clone()
 	for buildClusterName, buildCluster := range buildClusters {
 		r.log.WithFields(logrus.Fields{
 			"buildCluster": buildClusterName,
@@ -218,6 +221,7 @@ func newReconciler(ctx context.Context, pjClient ctrlruntimeclient.Client, overw
 type reconciler struct {
 	pjClient           ctrlruntimeclient.Client
 	buildClients       map[string]buildClient
+	configuredClusters sets.Set[string]
 	overwriteReconcile reconcile.Func
 	log                *logrus.Entry
 	config             config.Getter
@@ -371,6 +375,39 @@ func (r *reconciler) defaultReconcile(ctx context.Context, request reconcile.Req
 	originalPJ := pj.DeepCopy()
 
 	res, err := r.serializeIfNeeded(ctx, pj)
+	var missing *missingBuildClientError
+	if errors.As(err, &missing) {
+		// Persist the first observation so shutdown/restart cannot renew the budget.
+		pj = originalPJ.DeepCopy()
+		started, parseErr := time.Parse(time.RFC3339Nano, pj.Annotations[missingBuildClientSinceAnnotation])
+		if pj.Annotations[missingBuildClientSinceAnnotation] == "" {
+			started = r.clock.Now()
+			if pj.Annotations == nil {
+				pj.Annotations = map[string]string{}
+			}
+			pj.Annotations[missingBuildClientSinceAnnotation] = started.Format(time.RFC3339Nano)
+			if patchErr := r.pjClient.Patch(ctx, pj, ctrlruntimeclient.MergeFrom(originalPJ)); patchErr != nil {
+				return reconcile.Result{}, fmt.Errorf("record missing build client: %w", patchErr)
+			}
+		}
+		remaining := missingBuildClientRecoveryWindow - r.clock.Now().Sub(started)
+		if parseErr != nil && originalPJ.Annotations[missingBuildClientSinceAnnotation] != "" {
+			err = TerminalError(fmt.Errorf("invalid missing-client recovery timestamp for cluster %q", missing.cluster))
+		} else if remaining <= 0 || started.After(r.clock.Now()) {
+			err = TerminalError(fmt.Errorf("no build client for configured, enabled cluster %q: %s recovery window expired", missing.cluster, missingBuildClientRecoveryWindow))
+		} else {
+			return reconcile.Result{RequeueAfter: min(missingBuildClientRetryInterval, remaining)}, nil
+		}
+	}
+	client, clientAvailable := r.buildClients[pj.ClusterAlias()]
+	if err == nil && clientAvailable && client.Client != nil && originalPJ.Annotations[missingBuildClientSinceAnnotation] != "" {
+		// Only patch metadata: reconciliation may already have patched job status.
+		base := pj.DeepCopy()
+		delete(pj.Annotations, missingBuildClientSinceAnnotation)
+		if patchErr := r.pjClient.Patch(ctx, pj, ctrlruntimeclient.MergeFrom(base)); patchErr != nil {
+			return reconcile.Result{}, fmt.Errorf("clear missing build client recovery timestamp: %w", patchErr)
+		}
+	}
 	if IsTerminalError(err) {
 		// Unfixable cases like missing build clusters, do not return an error to prevent requeuing
 		log := r.log.WithError(err).WithFields(pjutil.ProwJobFields(pj))
@@ -382,6 +419,7 @@ func (r *reconciler) defaultReconcile(ctx context.Context, request reconcile.Req
 			if err := r.pjClient.Patch(ctx, pj, ctrlruntimeclient.MergeFrom(originalPJ)); err != nil {
 				// If we fail to complete and mark the job as errorer we will try again on the next sync loop.
 				log.Errorf("Error marking job with terminal failure as errored: %v.", err)
+				return reconcile.Result{}, err
 			} else {
 				log.Info("Marked job with terminal failure as errored.")
 			}
@@ -504,9 +542,9 @@ func (r *reconciler) syncPendingJob(ctx context.Context, pj *prowv1.ProwJob) (*r
 				WithFields(pjutil.ProwJobFields(pj)).
 				Info("Pod has stopped unexpectedly, deleting & next sync loop will restart pod")
 
-			client, ok := r.buildClients[pj.ClusterAlias()]
-			if !ok {
-				return nil, TerminalError(fmt.Errorf("pod %s which was stopped unexpectedly (%s): unknown cluster alias %q", pod.Name, podUnexpectedStopCause, pj.ClusterAlias()))
+			client, err := r.buildClientFor(pj)
+			if err != nil {
+				return nil, err
 			}
 			if finalizers := sets.New(pod.Finalizers...); finalizers.Has(kubernetesreporterapi.FinalizerName) {
 				// We want the end user to not see this, so we have to remove the finalizer, otherwise the pod hangs
@@ -784,13 +822,40 @@ func (r *reconciler) syncTriggeredJob(ctx context.Context, pj *prowv1.ProwJob) (
 	return nil, nil
 }
 
+// This budget applies only to absent clients, not API errors from existing clients.
+const (
+	missingBuildClientRecoveryWindow  = 5 * time.Minute
+	missingBuildClientRetryInterval   = 10 * time.Second
+	missingBuildClientSinceAnnotation = "prow.k8s.io/missing-build-client-since"
+)
+
+type missingBuildClientError struct{ cluster string }
+
+func (e *missingBuildClientError) Error() string {
+	return fmt.Sprintf("no build client for configured, enabled cluster %q", e.cluster)
+}
+
+func (r *reconciler) buildClientFor(pj *prowv1.ProwJob) (buildClient, error) {
+	alias := pj.ClusterAlias()
+	if client, ok := r.buildClients[alias]; ok && client.Client != nil {
+		return client, nil
+	}
+	if !r.configuredClusters.Has(alias) {
+		return buildClient{}, TerminalError(fmt.Errorf("unknown cluster alias %q: no build client", alias))
+	}
+	if sets.New(r.config().DisabledClusters...).Has(alias) {
+		return buildClient{}, TerminalError(fmt.Errorf("cluster %q is disabled: no build client", alias))
+	}
+	return buildClient{}, &missingBuildClientError{cluster: alias}
+}
+
 // syncAbortedJob syncs jobs that got aborted because their result isn't needed anymore,
 // for example because of a new push or because a pull request got closed.
 func (r *reconciler) syncAbortedJob(ctx context.Context, pj *prowv1.ProwJob) error {
 
-	buildClient, ok := r.buildClients[pj.ClusterAlias()]
-	if !ok {
-		return TerminalError(fmt.Errorf("no build client available for cluster %s", pj.ClusterAlias()))
+	buildClient, err := r.buildClientFor(pj)
+	if err != nil {
+		return err
 	}
 
 	// Just optimistically delete and swallow the potential 404
@@ -809,9 +874,9 @@ func (r *reconciler) syncAbortedJob(ctx context.Context, pj *prowv1.ProwJob) err
 
 // pod Gets pod for a pj, returns pod, whether pod exist, and error.
 func (r *reconciler) pod(ctx context.Context, pj *prowv1.ProwJob) (*corev1.Pod, bool, error) {
-	buildClient, buildClientExists := r.buildClients[pj.ClusterAlias()]
-	if !buildClientExists {
-		return nil, false, TerminalError(fmt.Errorf("no build client found for cluster %q", pj.ClusterAlias()))
+	buildClient, err := r.buildClientFor(pj)
+	if err != nil {
+		return nil, false, err
 	}
 
 	pod := &corev1.Pod{}
@@ -831,9 +896,9 @@ func (r *reconciler) pod(ctx context.Context, pj *prowv1.ProwJob) (*corev1.Pod, 
 }
 
 func (r *reconciler) deletePod(ctx context.Context, pj *prowv1.ProwJob) error {
-	buildClient, buildClientExists := r.buildClients[pj.ClusterAlias()]
-	if !buildClientExists {
-		return TerminalError(fmt.Errorf("no build client found for cluster %q", pj.ClusterAlias()))
+	buildClient, err := r.buildClientFor(pj)
+	if err != nil {
+		return err
 	}
 
 	pod := &corev1.Pod{
@@ -852,6 +917,10 @@ func (r *reconciler) deletePod(ctx context.Context, pj *prowv1.ProwJob) error {
 }
 
 func (r *reconciler) startPod(ctx context.Context, pj *prowv1.ProwJob) (string, string, error) {
+	client, err := r.buildClientFor(pj)
+	if err != nil {
+		return "", "", err
+	}
 	buildID, err := r.getBuildID(pj.Spec.Job)
 	if err != nil {
 		return "", "", fmt.Errorf("error getting build ID: %w", err)
@@ -867,10 +936,6 @@ func (r *reconciler) startPod(ctx context.Context, pj *prowv1.ProwJob) (string, 
 	pod.ObjectMeta.Labels[kube.PlankVersionLabel] = version.Version
 	podName := types.NamespacedName{Namespace: pod.Namespace, Name: pod.Name}
 
-	client, ok := r.buildClients[pj.ClusterAlias()]
-	if !ok {
-		return "", "", TerminalError(fmt.Errorf("unknown cluster alias %q", pj.ClusterAlias()))
-	}
 	err = client.Create(ctx, pod)
 	r.log.WithFields(pjutil.ProwJobFields(pj)).Debug("Create Pod.")
 	if err != nil {

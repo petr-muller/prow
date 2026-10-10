@@ -550,6 +550,19 @@ func (o *KubernetesOptions) BuildClusterUncachedRuntimeClients(dryRun bool) (map
 	return clients, utilerrors.NewAggregate(errs)
 }
 
+// ConfiguredClusters reads cluster identities without filtering disabled clusters.
+// Call during startup, before controllers run. The returned set is independent of
+// the resolved client/config maps; kubeconfig changes still require a restart.
+func (o *KubernetesOptions) ConfiguredClusters() (sets.Set[string], error) {
+	configs, err := kube.LoadClusterConfigs(kube.NewConfig(kube.ConfigFile(o.kubeconfig),
+		kube.ConfigDir(o.kubeconfigDir), kube.ConfigProjectedTokenFile(o.projectedTokenFile),
+		kube.NoInClusterConfig(o.noInClusterConfig), kube.ConfigSuffix(o.kubeconfigSuffix)))
+	if err != nil {
+		return nil, err
+	}
+	return sets.KeySet(configs), nil
+}
+
 func (o *KubernetesOptions) KnownClusters(dryRun bool) (map[string]rest.Config, error) {
 	if err := o.resolve(dryRun); err != nil {
 		return nil, err

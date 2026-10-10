@@ -87,6 +87,30 @@ The GitHub client library automatically tracks which requests were served from c
 
 > **Note:** GitHub Enterprise deployments use different API endpoint URLs. See [Deploying with GitHub Enterprise](/docs/getting-started-deploy/#deploying-with-github-enterprise) for complete configuration details.
 
+## Request Timeouts and Retries
+
+The GitHub client applies retry policies separately to REST requests and GraphQL queries. The `--github-client.max-retries` flag counts **total attempts**, including the first attempt, despite its name. Its default is eight attempts. Setting it to `1` disables GraphQL query retries; `0` selects the library default rather than disabling retries.
+
+GraphQL queries retry HTTP **502, 503, and 504** responses, with at most three total attempts (the first attempt plus two retries), or fewer if `--github-client.max-retries` is lower. Other failures, including transport errors and GraphQL errors in successful HTTP responses, are returned without automatic query retries. Callers using `WithCallerHandledGatewayTimeouts` handle 502 and 504 themselves; 503 remains eligible for automatic retries.
+
+GraphQL query backoff starts at `InitialDelay`, configured by `--github-client.initial-delay`, and doubles after each wait. With the default two-second delay, a query can wait two seconds before its second attempt and four seconds before its third. Every attempt passes through the client throttler, including retries, and may wait for a throttle token.
+
+GraphQL mutations are attempted once because a failed response does not establish whether the write succeeded. This policy applies specifically to GraphQL mutations. REST requests, including writes, use the REST retry loop, which handles transport failures, server errors, limited 404 retries, and rate-limit responses.
+
+The `--github-client.request-timeout` flag limits **each HTTP attempt**, rather than the complete operation. Retry backoff and throttling waits occur outside that timeout, so total operation time can exceed it. For GraphQL, a caller's outer context can cancel throttle and backoff waits and limit the complete query; the client also stops retrying if the next backoff would exceed that context's deadline.
+
+Component flag defaults and library defaults differ for the request timeout:
+
+| Component flag | Component flag default | Library option | Library default |
+| --- | --- | --- | --- |
+| `--github-client.request-timeout` | 2 minutes | `MaxRequestTime` | 5 minutes |
+| `--github-client.max-retries` | 8 total attempts | `MaxRetries` | 8 total attempts |
+| `--github-client.max-404-retries` | 2 retries (REST only) | `Max404Retries` | 2 retries (REST only) |
+| `--github-client.initial-delay` | 2 seconds | `InitialDelay` | 2 seconds |
+| `--github-client.backoff-timeout` | 2 minutes | `MaxSleepTime` | 2 minutes |
+
+The backoff timeout controls REST rate-limit waits based on `Retry-After` or the token-budget reset time, including an extra second added by the client. The client rejects waits at or above this limit. It does not cap exponential backoff, GraphQL query backoff, or total operation time.
+
 ## See Also
 
 - [Deploying Prow](/docs/getting-started-deploy/) - Complete deployment guide including GitHub App setup

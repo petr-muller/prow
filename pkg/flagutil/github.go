@@ -143,11 +143,11 @@ func (o *GitHubOptions) addFlags(fs *flag.FlagSet, paramFuncs ...FlagParameter) 
 		fs.Var(&o.OrgThrottlers, "github-throttle-org", "Throttler settings for a specific org in org:hourlyTokens:burst format. Can be passed multiple times. Only valid when using github apps auth.")
 	}
 
-	fs.DurationVar(&o.maxRequestTime, "github-client.request-timeout", github.DefaultMaxSleepTime, "Timeout for any single request to the GitHub API.")
-	fs.IntVar(&o.maxRetries, "github-client.max-retries", github.DefaultMaxRetries, "Maximum number of retries that will be used for a failing request to the GitHub API.")
+	fs.DurationVar(&o.maxRequestTime, "github-client.request-timeout", github.DefaultMaxSleepTime, "Timeout per HTTP attempt to the GitHub API. Retry backoff and throttling waits can extend total operation time. For GraphQL queries, a caller context can impose an overall deadline.")
+	fs.IntVar(&o.maxRetries, "github-client.max-retries", github.DefaultMaxRetries, "Maximum total attempts for a failing request to the GitHub API, including the first attempt. GraphQL queries are capped at three attempts; 1 disables query retries. GraphQL mutations are not retried.")
 	fs.IntVar(&o.max404Retries, "github-client.max-404-retries", github.DefaultMax404Retries, "Maximum number of retries that will be used for a 404-ing request to the GitHub API.")
-	fs.DurationVar(&o.maxSleepTime, "github-client.backoff-timeout", github.DefaultMaxSleepTime, "Largest allowable Retry-After time for requests to the GitHub API.")
-	fs.DurationVar(&o.initialDelay, "github-client.initial-delay", github.DefaultInitialDelay, "Initial delay before retries begin for requests to the GitHub API.")
+	fs.DurationVar(&o.maxSleepTime, "github-client.backoff-timeout", github.DefaultMaxSleepTime, "Upper limit on REST rate-limit waits, including Retry-After and token-budget resets. Does not cap exponential retry backoff or total operation time.")
+	fs.DurationVar(&o.initialDelay, "github-client.initial-delay", github.DefaultInitialDelay, "Initial retry backoff for requests to the GitHub API; doubles after each exponential backoff wait.")
 	fs.StringVar(&o.SigningKeyPath, "git-signing-key-path", "", "Path to an SSH private key for signing git commits. When set, all commits made by the git client are signed using SSH.")
 }
 

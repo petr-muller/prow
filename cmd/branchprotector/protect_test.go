@@ -93,6 +93,7 @@ type fakeClient struct {
 	signatureOperations    []string
 	enableSignatureErrors  map[string]error
 	disableSignatureErrors map[string]error
+	operations             []string
 }
 
 func (c fakeClient) GetRepo(org string, repo string) (github.FullRepo, error) {
@@ -146,6 +147,7 @@ func (c *fakeClient) GetBranchProtection(org, repo, branch string) (*github.Bran
 }
 
 func (c *fakeClient) UpdateBranchProtection(org, repo, branch string, config github.BranchProtectionRequest) error {
+	c.operations = append(c.operations, "update "+org+"/"+repo+"="+branch)
 	if branch == "error" {
 		return errors.New("failed to update branch protection")
 	}
@@ -158,6 +160,7 @@ func (c *fakeClient) UpdateBranchProtection(org, repo, branch string, config git
 }
 
 func (c *fakeClient) RemoveBranchProtection(org, repo, branch string) error {
+	c.operations = append(c.operations, "remove "+org+"/"+repo+"="+branch)
 	if branch == "error" {
 		return errors.New("failed to remove branch protection")
 	}
@@ -172,6 +175,7 @@ func (c *fakeClient) RemoveBranchProtection(org, repo, branch string) error {
 func (c *fakeClient) EnableCommitSignProtection(org, repo, branch string) error {
 	ctx := org + "/" + repo + "=" + branch
 	c.signatureOperations = append(c.signatureOperations, "enable "+ctx)
+	c.operations = append(c.operations, "enable "+ctx)
 	if err := c.enableSignatureErrors[ctx]; err != nil {
 		return err
 	}
@@ -188,6 +192,7 @@ func (c *fakeClient) EnableCommitSignProtection(org, repo, branch string) error 
 func (c *fakeClient) DisableCommitSignProtection(org, repo, branch string) error {
 	ctx := org + "/" + repo + "=" + branch
 	c.signatureOperations = append(c.signatureOperations, "disable "+ctx)
+	c.operations = append(c.operations, "disable "+ctx)
 	if err := c.disableSignatureErrors[ctx]; err != nil {
 		return err
 	}
@@ -235,13 +240,36 @@ func TestConfigureBranches(t *testing.T) {
 		enableSignatureErrors  map[string]error
 		disableSignatureErrors map[string]error
 		retainedErrors         []error
+		operations             []string
 	}{
+		{
+			name: "signature-only-enable-keeps-main-protection",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "master", Separate: &separateRequests{RequireSignedCommits: &yes}},
+			},
+			signatureOperations:  []string{"enable one/1=master"},
+			signedCommitsEnabled: map[string]bool{"one/1=master": true},
+			operations:           []string{"enable one/1=master"},
+		},
+		{
+			name: "signature-only-disable-keeps-main-protection",
+			updates: []requirements{
+				{Org: "one", Repo: "1", Branch: "master", Separate: &separateRequests{RequireSignedCommits: &no}},
+			},
+			signatureOperations:  []string{"disable one/1=master"},
+			signedCommitsEnabled: map[string]bool{"one/1=master": false},
+			operations:           []string{"disable one/1=master"},
+		},
+		{
+			name:    "neither-component-changed",
+			updates: []requirements{{Org: "one", Repo: "1", Branch: "master"}},
+		},
 		{
 			name: "remove-protection",
 			updates: []requirements{
-				{Org: "one", Repo: "1", Branch: "delete", Request: nil},
-				{Org: "one", Repo: "1", Branch: "remove", Request: nil},
-				{Org: "two", Repo: "2", Branch: "remove", Request: nil},
+				{Org: "one", Repo: "1", Branch: "delete", Remove: true},
+				{Org: "one", Repo: "1", Branch: "remove", Remove: true},
+				{Org: "two", Repo: "2", Branch: "remove", Remove: true},
 			},
 			deletes: map[string]bool{
 				"one/1=delete": true,
@@ -252,7 +280,7 @@ func TestConfigureBranches(t *testing.T) {
 		{
 			name: "error-remove-protection",
 			updates: []requirements{
-				{Org: "one", Repo: "1", Branch: "error", Request: nil},
+				{Org: "one", Repo: "1", Branch: "error", Remove: true},
 			},
 			errors: 1,
 		},
@@ -285,6 +313,7 @@ func TestConfigureBranches(t *testing.T) {
 			sets:                 map[string]github.BranchProtectionRequest{"one/1=master": prot},
 			signatureOperations:  []string{"enable one/1=master"},
 			signedCommitsEnabled: map[string]bool{"one/1=master": true},
+			operations:           []string{"update one/1=master", "enable one/1=master"},
 		},
 		{
 			name: "disable-signed-commits",
@@ -312,8 +341,8 @@ func TestConfigureBranches(t *testing.T) {
 		{
 			name: "remove-protection-with-signature-settings",
 			updates: []requirements{
-				{Org: "one", Repo: "1", Branch: "enabled", Request: nil, Separate: &separateRequests{RequireSignedCommits: &yes}},
-				{Org: "one", Repo: "1", Branch: "disabled", Request: nil, Separate: &separateRequests{RequireSignedCommits: &no}},
+				{Org: "one", Repo: "1", Branch: "enabled", Remove: true, Separate: &separateRequests{RequireSignedCommits: &yes}},
+				{Org: "one", Repo: "1", Branch: "disabled", Remove: true, Separate: &separateRequests{RequireSignedCommits: &no}},
 			},
 			deletes: map[string]bool{"one/1=enabled": true, "one/1=disabled": true},
 		},
@@ -348,8 +377,8 @@ func TestConfigureBranches(t *testing.T) {
 			updates: []requirements{
 				{Org: "update", Repo: "1", Branch: "master", Request: &prot},
 				{Org: "update", Repo: "2", Branch: "error", Request: &prot},
-				{Org: "remove", Repo: "3", Branch: "master", Request: nil},
-				{Org: "remove", Repo: "4", Branch: "error", Request: nil},
+				{Org: "remove", Repo: "3", Branch: "master", Remove: true},
+				{Org: "remove", Repo: "4", Branch: "error", Remove: true},
 			},
 			errors: 2, // four and five
 			deletes: map[string]bool{
@@ -391,6 +420,11 @@ func TestConfigureBranches(t *testing.T) {
 		}
 		if diff := cmp.Diff(tc.signedCommitsEnabled, fc.signedCommitsEnabled); diff != "" {
 			t.Errorf("%s: unexpected signature settings (-want +got):\n%s", tc.name, diff)
+		}
+		if tc.operations != nil {
+			if diff := cmp.Diff(tc.operations, fc.operations); diff != "" {
+				t.Errorf("%s: unexpected operation order (-want +got):\n%s", tc.name, diff)
+			}
 		}
 		for _, expected := range tc.retainedErrors {
 			found := false
@@ -482,7 +516,7 @@ func TestProtect(t *testing.T) {
 	yes := true
 	no := false
 
-	cases := []struct {
+	type protectCase struct {
 		name                   string
 		branches               []string
 		startUnprotected       bool
@@ -496,9 +530,12 @@ func TestProtect(t *testing.T) {
 		skipVerifyRestrictions bool
 		enableAppsRestrictions bool
 		errors                 int
+		execute                bool
+		operations             []string
 
 		enabled func(org, repo string) bool
-	}{
+	}
+	cases := []protectCase{
 		{
 			name: "nothing",
 		},
@@ -569,10 +606,10 @@ branch-protection:
 					},
 				},
 				{
-					Org:     "that",
-					Repo:    "no",
-					Branch:  "master",
-					Request: nil,
+					Org:    "that",
+					Repo:   "no",
+					Branch: "master",
+					Remove: true,
 				},
 			},
 			branchProtections: map[string]github.BranchProtection{"that/no=master": {}},
@@ -686,10 +723,10 @@ branch-protection:
 					},
 				},
 				{
-					Org:     "org",
-					Repo:    "skip",
-					Branch:  "master",
-					Request: nil,
+					Org:    "org",
+					Repo:   "skip",
+					Branch: "master",
+					Remove: true,
 				},
 			},
 			branchProtections: map[string]github.BranchProtection{"org/skip=master": {}},
@@ -1045,6 +1082,7 @@ branch-protection:
 					Org:    "parent",
 					Repo:   "child",
 					Branch: "unprotected",
+					Remove: true,
 				},
 			},
 			branchProtections: map[string]github.BranchProtection{"parent/child=unprotected": {}},
@@ -1750,6 +1788,86 @@ branch-protection:
 		},
 	}
 
+	// Exercise planning and execution together, including the absence of calls.
+	for _, tc := range []struct {
+		name       string
+		policy     string
+		current    *github.BranchProtection
+		expected   []requirements
+		operations []string
+	}{
+		{
+			name:       "main-only-change-with-unmanaged-signatures",
+			policy:     "  enforce_admins: true\n",
+			current:    &github.BranchProtection{},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Request: &github.BranchProtectionRequest{EnforceAdmins: &yes}}},
+			operations: []string{"update org/repo=master"},
+		},
+		{
+			name:       "main-only-change-reapplies-configured-signatures",
+			policy:     "  enforce_admins: true\n  require_signed_commits: true\n",
+			current:    &github.BranchProtection{RequiredSignatures: github.RequiredSignatures{Enabled: true}},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Request: &github.BranchProtectionRequest{EnforceAdmins: &yes}, Separate: &separateRequests{RequireSignedCommits: &yes}}},
+			operations: []string{"update org/repo=master", "enable org/repo=master"},
+		},
+		{
+			name:       "main-only-change-reapplies-disabled-signatures",
+			policy:     "  enforce_admins: true\n  require_signed_commits: false\n",
+			current:    &github.BranchProtection{},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Request: &github.BranchProtectionRequest{EnforceAdmins: &yes}, Separate: &separateRequests{RequireSignedCommits: &no}}},
+			operations: []string{"update org/repo=master", "disable org/repo=master"},
+		},
+		{
+			name:       "signature-only-enable",
+			policy:     "  require_signed_commits: true\n",
+			current:    &github.BranchProtection{},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Separate: &separateRequests{RequireSignedCommits: &yes}}},
+			operations: []string{"enable org/repo=master"},
+		},
+		{
+			name:       "signature-only-disable",
+			policy:     "  require_signed_commits: false\n",
+			current:    &github.BranchProtection{RequiredSignatures: github.RequiredSignatures{Enabled: true}},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Separate: &separateRequests{RequireSignedCommits: &no}}},
+			operations: []string{"disable org/repo=master"},
+		},
+		{
+			name:       "both-components-change",
+			policy:     "  enforce_admins: true\n  require_signed_commits: true\n",
+			current:    &github.BranchProtection{},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Request: &github.BranchProtectionRequest{EnforceAdmins: &yes}, Separate: &separateRequests{RequireSignedCommits: &yes}}},
+			operations: []string{"update org/repo=master", "enable org/repo=master"},
+		},
+		{
+			name:    "neither-component-changes",
+			policy:  "  require_signed_commits: true\n",
+			current: &github.BranchProtection{RequiredSignatures: github.RequiredSignatures{Enabled: true}},
+		},
+		{
+			name:       "creation-before-enabling-signatures",
+			policy:     "  require_signed_commits: true\n",
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Request: &github.BranchProtectionRequest{EnforceAdmins: &no}, Separate: &separateRequests{RequireSignedCommits: &yes}}},
+			operations: []string{"update org/repo=master", "enable org/repo=master"},
+		},
+		{
+			name:       "removal-with-signature-settings",
+			policy:     "  protect: false\n  require_signed_commits: true\n  allow_disabled_policies: true\n",
+			current:    &github.BranchProtection{},
+			expected:   []requirements{{Org: "org", Repo: "repo", Branch: "master", Remove: true}},
+			operations: []string{"remove org/repo=master"},
+		},
+	} {
+		protections := map[string]github.BranchProtection{}
+		if tc.current != nil {
+			protections["org/repo=master"] = *tc.current
+		}
+		cases = append(cases, protectCase{
+			name: tc.name, branches: []string{"org/repo=master"}, startUnprotected: tc.current == nil,
+			config:   "branch-protection:\n  protect: true\n" + tc.policy + "  orgs:\n    org:\n",
+			expected: tc.expected, branchProtections: protections, execute: true, operations: tc.operations,
+		})
+	}
+
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			repos := map[string]map[string]bool{}
@@ -1836,6 +1954,22 @@ branch-protection:
 					}
 				}
 			}
+			if tc.execute {
+				p.updates = make(chan requirements, len(actual))
+				p.done = make(chan []error, 1)
+				for _, update := range actual {
+					p.updates <- update
+				}
+				close(p.updates)
+				p.configureBranches()
+				if errs := <-p.done; len(errs) != 0 {
+					t.Fatalf("unexpected execution errors: %v", errs)
+				}
+				if diff := cmp.Diff(tc.operations, fc.operations); diff != "" {
+					t.Errorf("unexpected API calls (-want +got):\n%s", diff)
+				}
+			}
+
 		})
 	}
 }

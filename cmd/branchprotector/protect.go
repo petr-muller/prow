@@ -87,7 +87,9 @@ type requirements struct {
 	Org    string
 	Repo   string
 	Branch string
-	// Request is the main branch protection PUT payload.
+	// Remove explicitly requests deletion of the main branch protection.
+	Remove bool
+	// Request is the main branch protection PUT payload; nil keeps it unchanged.
 	Request *github.BranchProtectionRequest
 	// Separate holds settings managed via dedicated GitHub API endpoints
 	// rather than the main branch protection PUT.
@@ -194,16 +196,18 @@ type protector struct {
 
 func (p *protector) configureBranches() {
 	for u := range p.updates {
-		if u.Request == nil {
+		if u.Remove {
 			if err := p.client.RemoveBranchProtection(u.Org, u.Repo, u.Branch); err != nil {
 				p.errors.add(fmt.Errorf("remove %s/%s=%s protection failed: %w", u.Org, u.Repo, u.Branch, err))
 			}
 			continue
 		}
 
-		if err := p.client.UpdateBranchProtection(u.Org, u.Repo, u.Branch, *u.Request); err != nil {
-			p.errors.add(fmt.Errorf("update %s/%s=%s protection to %v failed: %w", u.Org, u.Repo, u.Branch, *u.Request, err))
-			continue
+		if u.Request != nil {
+			if err := p.client.UpdateBranchProtection(u.Org, u.Repo, u.Branch, *u.Request); err != nil {
+				p.errors.add(fmt.Errorf("update %s/%s=%s protection to %v failed: %w", u.Org, u.Repo, u.Branch, *u.Request, err))
+				continue
+			}
 		}
 
 		if u.Separate != nil {
@@ -535,21 +539,35 @@ func (p *protector) UpdateBranch(orgName, repo string, branchName string, branch
 	}
 
 	var sep *separateRequests
-	if bp.RequireSignedCommits != nil {
+	if *bp.Protect && bp.RequireSignedCommits != nil {
 		sep = &separateRequests{
 			RequireSignedCommits: bp.RequireSignedCommits,
 		}
 	}
 
-	if equalBranchProtections(currentBP, req) && equalSeparateRequests(currentBP, sep) {
+	mainMatches := equalBranchProtections(currentBP, req)
+	separateMatches := equalSeparateRequests(currentBP, sep)
+	if mainMatches && separateMatches {
 		logrus.Debugf("%s/%s=%s: current branch protection matches policy, skipping", orgName, repo, branchName)
 		return nil
 	}
 
+	remove := !*bp.Protect
+	if mainMatches {
+		req = nil
+	}
+	if remove {
+		sep = nil
+	}
+	// GitHub documents signatures through separate POST/DELETE endpoints, but
+	// does not guarantee that the main PUT preserves them. Reapply a configured
+	// signature policy after a main update, even when its current value matches.
+	// https://docs.github.com/en/rest/branches/branch-protection#update-branch-protection
 	p.updates <- requirements{
 		Org:      orgName,
 		Repo:     repo,
 		Branch:   branchName,
+		Remove:   remove,
 		Request:  req,
 		Separate: sep,
 	}

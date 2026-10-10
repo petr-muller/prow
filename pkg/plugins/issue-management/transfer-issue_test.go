@@ -123,7 +123,7 @@ Thanks!`,
 	for _, tc := range ts {
 		t.Run(tc.name, func(t *testing.T) {
 			fc := fakegithub.NewFakeClient()
-			c := &testClient{fc: fc}
+			c := &testClient{FakeClient: fc}
 			if tc.tcFunc != nil {
 				tc.tcFunc(c)
 			}
@@ -166,7 +166,7 @@ func (rt testRoundTripper) RoundTrip(r *http.Request) (*http.Response, error) {
 }
 
 type testClient struct {
-	fc         *fakegithub.FakeClient
+	*fakegithub.FakeClient
 	repoNodeID string
 }
 
@@ -175,31 +175,11 @@ func (t *testClient) GetRepo(org, name string) (github.FullRepo, error) {
 	if lastChar := r[len(r)-1]; unicode.IsSpace(lastChar) {
 		return github.FullRepo{}, fmt.Errorf("failed creating new request: parse \"%s/repos/%s/%s\\r\": net/url: invalid control character in URL", github.DefaultAPIEndpoint, org, name)
 	}
-	repo, err := t.fc.GetRepo(org, name)
+	repo, err := t.FakeClient.GetRepo(org, name)
 	if len(t.repoNodeID) != 0 {
 		repo.NodeID = t.repoNodeID
 	}
 	return repo, err
-}
-
-func (t *testClient) CreateComment(org, repo string, number int, comment string) error {
-	return t.fc.CreateComment(org, repo, number, comment)
-}
-
-func (t *testClient) IsMember(org, user string) (bool, error) {
-	return t.fc.IsMember(org, user)
-}
-
-func (t *testClient) GetIssue(org, repo string, number int) (*github.Issue, error) {
-	return t.fc.GetIssue(org, repo, number)
-}
-
-func (t *testClient) GetPullRequest(org, repo string, number int) (*github.PullRequest, error) {
-	return t.fc.GetPullRequest(org, repo, number)
-}
-
-func (t *testClient) UpdatePullRequest(org, repo string, number int, title, body *string, open *bool, branch *string, canModify *bool) error {
-	return t.fc.UpdatePullRequest(org, repo, number, title, body, open, branch, canModify)
 }
 
 func (t *testClient) MutateWithGitHubAppsSupport(ctx context.Context, m any, input githubv4.Input, vars map[string]any, org string) error {

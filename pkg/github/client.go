@@ -3987,14 +3987,19 @@ func (c *client) QueryWithGitHubAppsSupport(ctx context.Context, q interface{}, 
 	// c.maxRetries counts attempts, like it does for REST requests.
 	maxRetries := min(graphQLMaxRetries, c.maxRetries-1)
 	backoff := c.initialDelay
+	var lastServerErr error
 	for retries := 0; ; retries++ {
 		// Like REST requests, every attempt goes through the throttler and is
 		// bounded by its own request timeout.
 		err := c.gqlc.QueryWithGitHubAppsSupport(ctx, q, vars, org)
 		var serverErr graphQLServerError
 		if !errors.As(err, &serverErr) {
+			if lastServerErr != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				return fmt.Errorf("GraphQL query interrupted after %d attempts: %w (last server error: %w)", retries+1, err, lastServerErr)
+			}
 			return err
 		}
+		lastServerErr = err
 		if isGatewayTimeoutStatus(serverErr.StatusCode) && CallerHandlesGatewayTimeouts(ctx) {
 			return err
 		}

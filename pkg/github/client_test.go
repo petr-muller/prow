@@ -5253,8 +5253,85 @@ func TestGraphQLRetriesTakeAThrottleToken(t *testing.T) {
 	if !errors.Is(err, context.DeadlineExceeded) {
 		t.Errorf("expected the retry to block on the throttler until the context ended, got %v", err)
 	}
+	var serverErr graphQLServerError
+	if !errors.As(err, &serverErr) || serverErr.StatusCode != http.StatusServiceUnavailable {
+		t.Errorf("expected the error to retain the previous 503, got %v", err)
+	}
 	if n := len(requests()); n != 1 {
 		t.Errorf("expected 1 request, got %d", n)
+	}
+}
+
+func TestGraphQLRetriesInterruptedDuringRequest(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		priorStatuses []int
+		deadline      bool
+	}{
+		{name: "503 then cancellation", priorStatuses: []int{http.StatusServiceUnavailable}},
+		{name: "503 then deadline", priorStatuses: []int{http.StatusServiceUnavailable}, deadline: true},
+		{name: "latest server error is retained", priorStatuses: []int{http.StatusServiceUnavailable, http.StatusBadGateway}},
+		{name: "first attempt cancellation"},
+		{name: "first attempt deadline", deadline: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var ctx context.Context
+			var cancel context.CancelFunc
+			if tc.deadline {
+				ctx, cancel = context.WithTimeout(context.Background(), 200*time.Millisecond)
+			} else {
+				ctx, cancel = context.WithCancel(context.Background())
+			}
+			defer cancel()
+
+			requests := 0
+			transport := testRoundTripper{func(r *http.Request) (*http.Response, error) {
+				requests++
+				if requests <= len(tc.priorStatuses) {
+					status := tc.priorStatuses[requests-1]
+					return &http.Response{
+						StatusCode: status,
+						Status:     fmt.Sprintf("%d %s", status, http.StatusText(status)),
+						Body:       io.NopCloser(strings.NewReader("<html>")),
+					}, nil
+				}
+				if !tc.deadline {
+					cancel()
+				}
+				<-r.Context().Done()
+				return nil, r.Context().Err()
+			}}
+			options := ClientOptions{
+				InitialDelay:     time.Millisecond,
+				Censor:           func(b []byte) []byte { return b },
+				GetToken:         func() []byte { return nil },
+				Bases:            []string{"https://api.github.com"},
+				BaseRoundTripper: transport,
+			}
+			_, _, client, err := NewClientFromOptions(logrus.Fields{}, options)
+			if err != nil {
+				t.Fatalf("failed to construct github client: %v", err)
+			}
+
+			err = client.QueryWithGitHubAppsSupport(ctx, &struct{}{}, nil, "")
+			wantContextErr := context.Canceled
+			if tc.deadline {
+				wantContextErr = context.DeadlineExceeded
+			}
+			if !errors.Is(err, wantContextErr) {
+				t.Errorf("expected %v, got %v", wantContextErr, err)
+			}
+			var serverErr graphQLServerError
+			if got := errors.As(err, &serverErr); got != (len(tc.priorStatuses) > 0) {
+				t.Errorf("expected previous server error: %t, got %v", len(tc.priorStatuses) > 0, err)
+			} else if got && serverErr.StatusCode != tc.priorStatuses[len(tc.priorStatuses)-1] {
+				t.Errorf("expected previous %d, got %v", tc.priorStatuses[len(tc.priorStatuses)-1], serverErr)
+			}
+			wantRequests := len(tc.priorStatuses) + 1
+			if requests != wantRequests {
+				t.Errorf("expected %d requests, got %d", wantRequests, requests)
+			}
+		})
 	}
 }
 

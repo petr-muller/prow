@@ -1,0 +1,175 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>kubernetes-sigs/prow#983</title><style>
+:root { --bg:#fff; --fg:#1f2328; --muted:#59636e; --border:#d1d9e0; --code-bg:#f6f8fa;
+  --link:#0969da; --red:#cf222e; --amber:#9a6700; --green:#1a7f37; --blue:#0969da; --gray:#59636e; }
+@media (prefers-color-scheme: dark) { :root { --bg:#0d1117; --fg:#e6edf3; --muted:#9198a1;
+  --border:#3d444d; --code-bg:#151b23; --link:#4493f8; --red:#f85149; --amber:#d29922;
+  --green:#3fb950; --blue:#4493f8; --gray:#9198a1; } }
+* { box-sizing: border-box; }
+body { margin:0; background:var(--bg); color:var(--fg);
+  font:16px/1.6 system-ui,-apple-system,"Segoe UI",sans-serif; }
+main { max-width:52rem; margin:0 auto; padding:2rem 1rem 4rem; }
+h1 { font-size:1.6rem; margin:0 0 .25rem; line-height:1.3; }
+h2 { font-size:1.25rem; margin:2.25rem 0 .75rem; padding-bottom:.3rem; border-bottom:1px solid var(--border); }
+h3 { font-size:1.05rem; margin:1.5rem 0 .5rem; }
+h4 { font-size:1rem; margin:1.25rem 0 .5rem; }
+a { color:var(--link); }
+code, pre { font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace; font-size:.875em; }
+code { background:var(--code-bg); padding:.1em .35em; border-radius:4px; }
+pre { background:var(--code-bg); padding:.75rem 1rem; border-radius:6px; overflow-x:auto; line-height:1.45; }
+pre code { background:none; padding:0; }
+blockquote { margin:0; padding:0 1rem; color:var(--muted); border-left:3px solid var(--border); }
+ul, ol { padding-left:1.5rem; }
+.meta { color:var(--muted); font-size:.9rem; margin:.25rem 0 1rem; }
+.meta code { font-size:.85em; }
+.badges { display:flex; flex-wrap:wrap; gap:.5rem; margin:.75rem 0; }
+.badge, .tag { display:inline-block; border:1px solid currentColor; border-radius:999px;
+  padding:.05rem .6rem; font-size:.8rem; font-weight:600; white-space:nowrap; }
+.tag { margin-right:.4rem; vertical-align:.1em; }
+.c-red { color:var(--red); } .c-amber { color:var(--amber); } .c-green { color:var(--green); }
+.c-blue { color:var(--blue); } .c-gray { color:var(--gray); }
+details { margin:1rem 0; } summary { cursor:pointer; color:var(--muted); font-size:.9rem; }
+</style></head><body><main>
+<h1>github: retry GraphQL queries above the transport</h1>
+<div class="meta"><a href="https://github.com/kubernetes-sigs/prow/pull/983">kubernetes-sigs/prow#983</a> · base <code>main</code> · head_sha <code>1cf0a9f75fe6</code> · reviewed_at <code>2026-10-05T22:44:41Z</code></div>
+<div class="badges"><span class="badge c-red">verdict: request-changes</span><span class="badge c-green">gate: merge</span></div>
+<details><summary>Full metadata</summary><pre><code>pr: kubernetes-sigs/prow#983
+title: &quot;github: retry GraphQL queries above the transport&quot;
+head_sha: 1cf0a9f75fe63839e61f7f5cb1ce7f1258f5269b
+base: main
+reviewed_at: 2026-10-05T22:44:41Z
+verdict: request-changes
+gate:
+  decision: merge
+  gated_at: 2026-10-06T17:41:08Z
+  gated_head_sha: 1cf0a9f75fe63839e61f7f5cb1ce7f1258f5269b
+  reviewed_head_sha: 1cf0a9f75fe63839e61f7f5cb1ce7f1258f5269b</code></pre></details>
+<h2>Gate</h2>
+<p><strong>Decision: merge.</strong></p>
+<p>Impact reassessment after tracing Tide's callers: the saved error-preservation finding describes real diagnostic information loss, but its blocking severity was overstated. The PR explicitly promises preservation when a deadline prevents backoff or cancellation interrupts backoff; both paths are implemented. Preserving a preceding 5xx when a later attempt is interrupted would be an additional diagnostic improvement. The original review record is retained below; this gate supersedes its merge recommendation.</p>
+<h3>Findings disposition</h3>
+<ul>
+<li><strong>Borderline — acceptably dispositioned as nonblocking:</strong> the original <code>REVIEW.md</code> finding at <code>pkg/github/client.go:3973-3974</code> remains unchanged in code. A later throttle/request interruption returns its own error without the preceding 5xx. No existing caller was found that needs that earlier status to recover: Tide disables automatic 502/504 retries while pages can shrink, uses normal retries only at the minimum page size, and refuses to shrink when its context has expired (<code>pkg/tide/github.go:218-223</code>). Preserve the previous error as an optional diagnostic improvement.
+</li>
+<li><strong>Borderline — nonblocking scope feedback:</strong> @mimowo's 2026-10-02 comment suggests separating cleanup from the reduction in retries. No subsequent commits separate them; the reduction is explained in the PR description. This suggestion does not independently block merge.
+</li>
+<li>The saved backoff-test and test-helper nits do not concern substantive merge risk.
+</li></ul>
+<h3>Gating list</h3>
+<p>None. The earlier do-not-merge decision rested on an unsupported severity classification, rather than a demonstrated functional regression.</p>
+<h3>Independent merge risk</h3>
+<ul>
+<li>Exported APIs are additive; existing signatures, flags, and config schemas are unchanged. No coordinated rollout or migration is required.
+</li>
+<li>All <code>pkg/github</code> GraphQL query consumers receive fewer default attempts, configured retry caps/backoff, throttle accounting per attempt, and separate request timeouts. Callers without a tighter context deadline can wait up to three request timeouts plus backoff and throttle waits. These default behavior changes are documented in the PR description and warrant operator-facing release notes.
+</li>
+<li>GraphQL mutations, including issue-management pin/unpin/transfer operations, are sent once. This avoids replaying an uncertain write and surfaces transient failures sooner.
+</li>
+<li>Error prefixes change; downstream callers comparing complete error strings may need to adapt. Tide uses the typed helper.
+</li>
+<li>Compatibility was assessed directly from the production diff, client construction, flags, and callers; no specialized compatibility skill applied.
+</li></ul>
+<h2>Verdict</h2>
+<p>Request changes: preserve the last 5xx if a later retry is interrupted. The current loop retains that status when cancellation happens during backoff, but loses it when the next attempt ends in throttling or request cancellation. The maintainability review found the change localized and deployment risk manageable, with no configuration migration required.</p>
+<h2>What this PR does</h2>
+<ul>
+<li>Moves GraphQL retries from the HTTP transport to the query method so each attempt passes through throttling and gets its own request timeout.
+</li>
+<li>Retries transient 502/503/504 query failures with bounded exponential backoff and honors the configured total-attempt cap.
+</li>
+<li>Keeps mutations single-shot and exposes typed GraphQL server errors for Tide's page-shrinking recovery.
+</li>
+<li>Adds coverage for retry limits, cancellation, Apps auth headers, and Tide's behavior when pages keep timing out.
+</li></ul>
+<h2>Findings</h2>
+<h3><span class="tag c-red">blocking</span>Preserve the last 5xx when a retry attempt is interrupted</h3>
+<ul>
+<li>where: <code>pkg/github/client.go:3971-3974</code>
+</li>
+<li>concern: After a query returns a typed 5xx, a later attempt can end with a context error while waiting for a throttle token or during the HTTP request. This branch then returns only that later error, so callers lose the earlier server status; retain and wrap the last 5xx, and test both <code>errors.Is</code> for the context error and <code>errors.As</code> for the server error.
+</li>
+<li>excerpt:<pre><code>err := c.gqlc.QueryWithGitHubAppsSupport(ctx, q, vars, org)
+var serverErr graphQLServerError
+if !errors.As(err, &amp;serverErr) {
+    return err
+}</code></pre>
+</li></ul>
+<h3><span class="tag c-gray">nit</span>Assert the exponential backoff sequence</h3>
+<ul>
+<li>where: <code>pkg/github/client_test.go:4978-4988</code>
+</li>
+<li>concern: Retry tests assert request counts and error results but do not assert that the delay doubles from <code>InitialDelay</code>. A deterministic delay assertion would protect this documented retry behavior from regressions.
+</li>
+<li>excerpt:<pre><code>func TestGraphQLRetries(t *testing.T) {
+    testCases := []struct {
+        name                  string
+        statuses              []int
+        mutate                bool
+        callerHandlesTimeouts bool
+        maxRetries            int
+        expectedRequests      int</code></pre>
+</li></ul>
+<h3><span class="tag c-gray">nit</span>Keep the test-only server error helper's API surface in view</h3>
+<ul>
+<li>where: <code>pkg/github/client.go:855-858</code>
+</li>
+<li>concern: This exported constructor exists to let external-package tests create the internal typed error. That follows the existing <code>NewUnprocessableEntity</code> pattern; if more test-only constructors are added, consider a narrower test seam.
+</li>
+<li>excerpt:<pre><code>// NewGraphQLServerError returns the error the GraphQL client returns for a
+// transient server error with the given status code, for tests.
+func NewGraphQLServerError(statusCode int) error {</code></pre>
+</li></ul>
+<h2>Checked</h2>
+<ul>
+<li>Query attempts pass through throttling and use the configured per-request timeout; retry counts are capped and mutations are not retried.
+</li>
+<li>Context interruption during backoff preserves the last 5xx; this review found that interruption during a later attempt does not.
+</li>
+<li>Tide recognizes typed 502/504 errors and keeps its same-cursor page-shrinking behavior.
+</li>
+<li>Apps-auth GraphQL attempts retain the token and add each preview <code>Accept</code> value once.
+</li>
+<li>No config schema, CLI flag, or deployment manifest changes; custom <code>--github-client.max-retries</code> values now also cap GraphQL attempts.
+</li></ul>
+<h2>Open questions</h2>
+<p>None.</p>
+<h2>Followups</h2>
+<p>Recorded 2026-10-10T14:07:39Z. 5 accepted; 1 skipped.</p>
+<p>Post-merge followups for PR #983, merged as <code>192ff979d39c13c029661317682ecb6635c5f1c9</code>. Candidates were checked against upstream main <code>e012f2883b7981ab636b0abf3009f0f7064658b1</code>. Each handoff starts from current upstream main and should first check whether the work has already landed.</p>
+<p>The diagnostic concern was previously downgraded to optional after caller analysis; its acceptance here does not restore the original blocking classification. The exported test-error helper follows an existing package pattern and did not warrant a separate concrete followup. Page-shrink metrics were skipped.</p>
+<h3>Retain the earlier 5xx for diagnosis</h3>
+<ul>
+<li>category: diagnostics
+</li>
+<li>necessity: could
+<pre><code>In kubernetes-sigs/prow, following PR #983 — &quot;github: retry GraphQL queries above the transport&quot; (merge commit 192ff979d39c13c029661317682ecb6635c5f1c9), start from current upstream main, not the review branch. Improve diagnostics in client.QueryWithGitHubAppsSupport in pkg/github/client.go. Retain the most recent typed GraphQL 5xx when a later attempt is interrupted during throttling or the HTTP request, returning an error that preserves both the interruption and earlier server error. This is optional diagnostic work; the review&#x27;s original blocking classification was withdrawn. Add focused tests for a 503 followed by cancellation/deadline expiry, including the throttle-wait scenario: errors.Is must find the context error and errors.As must find the previous server error. Successful retries must return nil, and first-attempt interruptions must have no fictitious server error. Preserve Tide&#x27;s context-first error classification. Keep retry counts, mutation semantics, page shrinking, and public signatures unchanged; avoid changing unrelated error paths.</code></pre>
+</li></ul>
+<h3>Test the retry timing contract</h3>
+<ul>
+<li>category: tests
+</li>
+<li>necessity: could
+<pre><code>In kubernetes-sigs/prow, following PR #983 — &quot;github: retry GraphQL queries above the transport&quot; (merge commit 192ff979d39c13c029661317682ecb6635c5f1c9), start from current upstream main, not the review branch. Add focused timing coverage in pkg/github/client_test.go and, only if needed, a narrow unexported seam in pkg/github/client.go. Deterministically verify query delays are InitialDelay then 2*InitialDelay; single permitted attempts and mutations must not wait for retry backoff. Verify through NewClientFromOptions and its actual HTTP client that each attempt receives a fresh MaxRequestTime: two attempts individually below the timeout can succeed even if their combined duration exceeds it. Use request synchronization and generous timing margins rather than millisecond elapsed-time assertions. Preserve cancellable production waits and existing retry behavior. Do not redesign the package-wide timeClient abstraction, add public testing APIs, or modify REST retry policy.</code></pre>
+</li></ul>
+<h3>Honor organization-specific GraphQL throttling</h3>
+<ul>
+<li>category: correctness
+</li>
+<li>necessity: should
+<pre><code>In kubernetes-sigs/prow, following PR #983 — &quot;github: retry GraphQL queries above the transport&quot; (merge commit 192ff979d39c13c029661317682ecb6635c5f1c9), start from current upstream main, not the review branch. Fix organization selection in ghThrottler.QueryWithGitHubAppsSupport and ghThrottler.MutateWithGitHubAppsSupport in pkg/github/client.go. These methods read githubOrgContextKey before the underlying wrapper sets it, so normal calls with a supplied org use the global bucket or bypass an org-only throttler. Select the bucket using the explicit org argument. Add tests showing that exhausted org-A tokens block org-A queries/mutations without consuming org-B&#x27;s independent budget, each query retry consumes the correct org&#x27;s token, and unconfigured/empty organizations retain global fallback. Preserve cancellation, Apps installation-token selection, public signatures, and REST behavior. Do not change throttle rates, flags, or refill policy.</code></pre>
+</li></ul>
+<h3>Reuse a recently successful search page size</h3>
+<ul>
+<li>category: performance
+</li>
+<li>necessity: could
+<pre><code>In kubernetes-sigs/prow, following PR #983 — &quot;github: retry GraphQL queries above the transport&quot; (merge commit 192ff979d39c13c029661317682ecb6635c5f1c9), start from current upstream main, not the review branch. Reduce repeated expensive gateway/resource-limit failures in GitHubProvider.search in pkg/tide/github.go. Add a concurrency-safe, bounded, expiring cache of the last successful page size keyed by organization and stable configured query, excluding changing date filters and cursors. Subsequent searches should start at that recently successful size; expiry must allow retrying the default so transient problems do not permanently reduce it. Document expiry/capacity policy. Tests must cover reuse after 37-to-18 recovery, isolation between queries/orgs, expiry restoring default, and safe concurrent access without retaining cursors/results. Preserve minimum/maximum sizes, filtering, deadlines, and sync publication semantics. Do not persist the cache or introduce broad scheduling changes.</code></pre>
+</li></ul>
+<h3>Document GraphQL retry and timeout semantics</h3>
+<ul>
+<li>category: docs
+</li>
+<li>necessity: should
+<pre><code>In kubernetes-sigs/prow, following PR #983 — &quot;github: retry GraphQL queries above the transport&quot; (merge commit 192ff979d39c13c029661317682ecb6635c5f1c9), start from current upstream main, not the review branch. Document current retry behavior in site/content/en/docs/github-api-access.md and correct relevant help text in pkg/flagutil/github.go. Derive defaults and limits from current code. Explain that github-client.max-retries counts total attempts, GraphQL queries are additionally capped at three attempts, and 1 disables query retries. Explain that request-timeout applies per HTTP attempt while backoff/throttle waits extend total operation time unless an outer context limits it. Cover InitialDelay doubling, per-attempt throttling, the 502/503/504 status set, and single-shot GraphQL mutations. Distinguish library defaults from component flag defaults if listing values, and do not imply REST writes share the single-shot policy. Verify against client/flag code. Change documentation/help wording only, not flag names, defaults, schemas, or runtime behavior.</code></pre>
+</li></ul>
+</main></body></html>

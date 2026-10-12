@@ -42,6 +42,94 @@ import (
 	"sigs.k8s.io/prow/pkg/github"
 )
 
+func TestSearchPRText(t *testing.T) {
+	for _, controller := range []string{"sync", "status"} {
+		t.Run(controller, func(t *testing.T) {
+			includePRText := controller == "sync"
+			var calls int
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				calls++
+				var req struct {
+					Query     string `json:"query"`
+					Variables struct {
+						IncludePRText *bool `json:"includePRText"`
+					} `json:"variables"`
+				}
+				if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+					t.Errorf("failed to decode GraphQL request: %v", err)
+					w.WriteHeader(http.StatusBadRequest)
+					return
+				}
+				if req.Variables.IncludePRText == nil || *req.Variables.IncludePRText != includePRText {
+					t.Errorf("includePRText = %v, want %t", req.Variables.IncludePRText, includePRText)
+				}
+				for _, field := range []string{"$includePRText:Boolean!", "body @include(if: $includePRText)", "title @include(if: $includePRText)", "milestone{title}", "commits(last: 4)"} {
+					if !strings.Contains(req.Query, field) {
+						t.Errorf("query is missing %s: %s", field, req.Query)
+					}
+				}
+				pr := map[string]interface{}{
+					"number": 1, "headRefOid": "head", "baseRef": map[string]string{"name": "main"},
+					"repository": map[string]interface{}{"name": "repo", "owner": map[string]string{"login": "org"}},
+					"milestone":  map[string]string{"title": "v1"},
+					"commits": map[string]interface{}{"nodes": []interface{}{map[string]interface{}{
+						"commit": map[string]interface{}{"oid": "head", "status": map[string]interface{}{
+							"contexts": []interface{}{map[string]string{"context": "test", "state": "SUCCESS"}},
+						}},
+					}}},
+				}
+				if req.Variables.IncludePRText != nil && *req.Variables.IncludePRText {
+					pr["body"], pr["title"] = "PR body", "PR title"
+				}
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]interface{}{"data": map[string]interface{}{
+					"search": map[string]interface{}{"pageInfo": map[string]interface{}{"hasNextPage": false}, "nodes": []interface{}{pr}},
+				}})
+			}))
+			defer server.Close()
+			ghc := newTestGitHubClient(t, server)
+			cfg := func() *config.Config {
+				return &config.Config{ProwConfig: config.ProwConfig{Tide: config.Tide{
+					TideGitHubConfig: config.TideGitHubConfig{Queries: config.TideQueries{{Repos: []string{"org/repo"}}}},
+				}}}
+			}
+			logger := logrus.WithField("test", t.Name())
+			provider := &GitHubProvider{ghc: ghc, cfg: cfg, logger: logger}
+			var prs []CodeReviewCommon
+			if includePRText {
+				result, err := provider.Query()
+				if err != nil {
+					t.Fatalf("search failed: %v", err)
+				}
+				for _, pr := range result {
+					prs = append(prs, pr)
+				}
+			} else {
+				sc := &statusController{ghc: ghc, ghProvider: provider, config: cfg, logger: logger}
+				prs = sc.search()
+			}
+			if calls != 1 || len(prs) != 1 {
+				t.Fatalf("got %d requests and %d PRs, want 1 each", calls, len(prs))
+			}
+			pr := prs[0]
+			wantBody, wantTitle := "", ""
+			if includePRText {
+				wantBody, wantTitle = "PR body", "PR title"
+			}
+			if pr.Body != wantBody || pr.Title != wantTitle {
+				t.Errorf("got body %q and title %q, want %q and %q", pr.Body, pr.Title, wantBody, wantTitle)
+			}
+			if pr.GitHub.Milestone == nil || pr.GitHub.Milestone.Title != "v1" {
+				t.Errorf("milestone title was lost: %+v", pr.GitHub.Milestone)
+			}
+			contexts := pr.GitHub.Commits.Nodes[0].Commit.Status.Contexts
+			if len(contexts) != 1 || contexts[0].Context != "test" || contexts[0].State != githubql.StatusStateSuccess {
+				t.Errorf("commit status contexts changed: %+v", contexts)
+			}
+		})
+	}
+}
+
 func TestSearch(t *testing.T) {
 	const q = "random search string"
 	now := time.Now()
@@ -303,6 +391,7 @@ func TestSearch(t *testing.T) {
 					"query":          githubql.String(tc.q),
 					"searchCursor":   tc.cursors[i],
 					"searchPageSize": githubql.Int(pageSize),
+					"includePRText":  githubql.Boolean(true),
 				}
 				if !equality.Semantic.DeepEqual(expected, actual) {
 					t.Errorf("call %d vars do not match:\n%s", i, diff.Diff(expected, actual))
@@ -314,7 +403,7 @@ func TestSearch(t *testing.T) {
 				*ret = sq
 				return err
 			}
-			prs, err := client.search(querier, logrus.WithField("test", tc.name), q, tc.start, tc.end, "")
+			prs, err := client.search(querier, logrus.WithField("test", tc.name), q, tc.start, tc.end, "", true)
 			switch {
 			case err != nil:
 				if !tc.err {
@@ -991,7 +1080,7 @@ func TestSearchShrinksPageOnGraphQLResourceLimit(t *testing.T) {
 	defer server.Close()
 	ghc := newTestGitHubClient(t, server)
 
-	prs, err := (&GitHubProvider{}).search(ghc.QueryWithGitHubAppsSupport, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, time.Now(), "")
+	prs, err := (&GitHubProvider{}).search(ghc.QueryWithGitHubAppsSupport, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, time.Now(), "", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1062,7 +1151,7 @@ func TestSearchShrinksPageAgainstGitHubServer(t *testing.T) {
 	defer server.Close()
 	ghc := newTestGitHubClient(t, server)
 
-	prs, err := (&GitHubProvider{}).search(ghc.QueryWithGitHubAppsSupport, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, time.Now(), "")
+	prs, err := (&GitHubProvider{}).search(ghc.QueryWithGitHubAppsSupport, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, time.Now(), "", true)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -1102,7 +1191,7 @@ func TestSearchGivesUpAgainstFailingGitHubServer(t *testing.T) {
 	defer server.Close()
 	ghc := newTestGitHubClient(t, server)
 
-	_, err := (&GitHubProvider{}).search(ghc.QueryWithGitHubAppsSupport, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, time.Now(), "")
+	_, err := (&GitHubProvider{}).search(ghc.QueryWithGitHubAppsSupport, logrus.WithField("test", t.Name()), "is:pr", time.Time{}, time.Now(), "", true)
 	if !isGatewayTimeout(err) {
 		t.Errorf("expected a gateway timeout error, got %v", err)
 	}

@@ -2097,8 +2097,10 @@ type PullRequest struct {
 	Commits   Commits `graphql:"commits(last: 4)"`
 	Labels    Labels  `graphql:"labels(first: 100)"`
 	Milestone *Milestone
-	Body      githubql.String
-	Title     githubql.String
+	// Only the sync controller needs PR text for merge commit templates.
+	// Explicit aliases let the GraphQL client decode fields with directives.
+	Body      githubql.String `graphql:"body:body @include(if: $includePRText)"`
+	Title     githubql.String `graphql:"title:title @include(if: $includePRText)"`
 	UpdatedAt githubql.DateTime
 }
 

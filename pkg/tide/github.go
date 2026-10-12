@@ -127,7 +127,7 @@ func (gi *GitHubProvider) Query() (map[string]CodeReviewCommon, error) {
 			org, q, i := org, q, i
 			g.Go(func() error {
 				start := time.Now()
-				results, err := gi.search(gi.ghc.QueryWithGitHubAppsSupport, gi.logger, q, time.Time{}, time.Now(), org)
+				results, err := gi.search(gi.ghc.QueryWithGitHubAppsSupport, gi.logger, q, time.Time{}, time.Now(), org, true)
 				duration := time.Since(start)
 				result := queryResult(err, len(results))
 				queryID := strconv.Itoa(i)
@@ -283,7 +283,7 @@ func isSearchResourceLimit(err error) bool {
 	return err != nil && strings.Contains(err.Error(), "Resource limits for this query exceeded")
 }
 
-func (gi *GitHubProvider) search(query querier, log *logrus.Entry, q string, start, end time.Time, org string) ([]PullRequest, error) {
+func (gi *GitHubProvider) search(query querier, log *logrus.Entry, q string, start, end time.Time, org string, includePRText bool) ([]PullRequest, error) {
 	start = floor(start)
 	end = floor(end)
 	log = log.WithFields(logrus.Fields{
@@ -298,6 +298,7 @@ func (gi *GitHubProvider) search(query querier, log *logrus.Entry, q string, sta
 		"query":          githubql.String(datedQuery(q, start, end)),
 		"searchCursor":   cursor,
 		"searchPageSize": githubql.Int(pageSize),
+		"includePRText":  githubql.Boolean(includePRText),
 	}
 
 	var totalCost, remaining int

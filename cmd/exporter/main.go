@@ -104,7 +104,7 @@ func main() {
 	)
 	pjLister := informerFactory.Prow().V1().ProwJobs().Lister()
 
-	go informerFactory.Start(interrupts.Context().Done())
+	informerFactory.StartWithContext(interrupts.Context())
 
 	registry := mustRegister("exporter", pjLister)
 	registry.MustRegister(configAgent)

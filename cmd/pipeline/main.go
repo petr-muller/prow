@@ -82,7 +82,7 @@ type pipelineConfig struct {
 }
 
 // newPipelineConfig returns a client and informer capable of mutating and monitoring the specified config.
-func newPipelineConfig(cfg rest.Config, stop <-chan struct{}) (*pipelineConfig, error) {
+func newPipelineConfig(ctx context.Context, cfg rest.Config) (*pipelineConfig, error) {
 	bc, err := pipelineset.NewForConfig(&cfg)
 	if err != nil {
 		return nil, err
@@ -90,14 +90,14 @@ func newPipelineConfig(cfg rest.Config, stop <-chan struct{}) (*pipelineConfig, 
 
 	// Ensure the pipeline CRD is deployed
 	// TODO(fejta): probably a better way to do this
-	if _, err := bc.TektonV1().PipelineRuns("").List(context.TODO(), metav1.ListOptions{Limit: 1}); err != nil {
+	if _, err := bc.TektonV1().PipelineRuns("").List(ctx, metav1.ListOptions{Limit: 1}); err != nil {
 		return nil, err
 	}
 
 	// Assume watches receive updates, but resync every 30m in case something wonky happens
 	bif := pipelineinfo.NewSharedInformerFactory(bc, 30*time.Minute)
 	bif.Tekton().V1().PipelineRuns().Lister()
-	go bif.Start(stop)
+	bif.StartWithContext(ctx)
 	return &pipelineConfig{
 		client:   bc,
 		informer: bif.Tekton().V1().PipelineRuns(),
@@ -166,12 +166,12 @@ func main() {
 	}
 	pjif := prowjobinfo.NewSharedInformerFactory(pjc, 30*time.Minute)
 	pjif.Prow().V1().ProwJobs().Lister()
-	go pjif.Start(interrupts.Context().Done())
+	pjif.StartWithContext(interrupts.Context())
 
 	pipelineConfigs := map[string]pipelineConfig{}
 	for context, cfg := range configs {
 		var bc *pipelineConfig
-		bc, err = newPipelineConfig(cfg, interrupts.Context().Done())
+		bc, err = newPipelineConfig(interrupts.Context(), cfg)
 		if apierrors.IsNotFound(err) {
 			logrus.WithError(err).Infof("Ignoring cluster context %s: tekton pipeline CRD not deployed", context)
 			continue

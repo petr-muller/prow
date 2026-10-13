@@ -10720,10 +10720,10 @@ spec:
                   Type is the type of job and informs how
                   the jobs is triggered
                 enum:
-                - presubmit
-                - postsubmit
-                - periodic
                 - batch
+                - periodic
+                - postsubmit
+                - presubmit
                 type: string
             required:
             - job

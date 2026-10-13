@@ -35,6 +35,7 @@ import (
 )
 
 // ProwJobType specifies how the job is triggered.
+// +k8s:enum
 type ProwJobType string
 
 // Various job types.
@@ -142,7 +143,6 @@ type ProwJob struct {
 type ProwJobSpec struct {
 	// Type is the type of job and informs how
 	// the jobs is triggered
-	// +kubebuilder:validation:Enum=presubmit;postsubmit;periodic;batch
 	// +kubebuilder:validation:Required
 	Type ProwJobType `json:"type,omitempty"`
 	// Agent determines which controller fulfills

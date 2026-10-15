@@ -37,6 +37,18 @@ var configStaticJobDefinitions = prometheus.NewDesc(
 	[]string{"type"}, nil,
 )
 
+var configLoadAttempts = prometheus.NewDesc(
+	"prow_config_load_attempts_total",
+	"Number of configuration Load attempts by outcome.",
+	[]string{"outcome"}, nil,
+)
+
+var configLastSuccessfulLoad = prometheus.NewDesc(
+	"prow_config_last_successful_load_timestamp_seconds",
+	"Unix timestamp of the last accepted configuration Load; zero before the first success.",
+	nil, nil,
+)
+
 // Delta represents the before and after states of a Config change detected by the Agent.
 type Delta struct {
 	Before, After Config
@@ -46,14 +58,17 @@ type Delta struct {
 type DeltaChan = <-chan Delta
 
 // Agent watches a path and automatically loads the config stored
-// therein. Register an Agent as a prometheus.Collector to expose its static job
-// definition counts.
+// therein. Register an Agent as a prometheus.Collector to expose its load
+// outcomes and static job definition counts.
 type Agent struct {
 	mut sync.RWMutex // do not export Lock, etc methods
 	c   *Config
 	// Single-slot buffers let Set coalesce updates for slow subscribers.
-	subscriptions  []chan Delta
-	jobDefinitions jobDefinitionCounts
+	subscriptions   []chan Delta
+	jobDefinitions  jobDefinitionCounts
+	loadSuccesses   uint64
+	loadFailures    uint64
+	lastLoadSuccess time.Time
 }
 
 type jobDefinitionCounts struct {
@@ -65,15 +80,27 @@ type jobDefinitionCounts struct {
 // Describe implements prometheus.Collector.
 func (ca *Agent) Describe(ch chan<- *prometheus.Desc) {
 	ch <- configStaticJobDefinitions
+	ch <- configLoadAttempts
+	ch <- configLastSuccessfulLoad
 }
 
-// Collect implements prometheus.Collector. Counts are cached when a config is
-// accepted; no metrics are emitted before the first config is accepted.
+// Collect implements prometheus.Collector. Job counts are emitted only after
+// accepting a config. The timestamp is zero before the first successful Load.
 func (ca *Agent) Collect(ch chan<- prometheus.Metric) {
 	ca.mut.RLock()
 	counts := ca.jobDefinitions
 	loaded := ca.c != nil
+	successes := ca.loadSuccesses
+	failures := ca.loadFailures
+	lastSuccess := ca.lastLoadSuccess
 	ca.mut.RUnlock()
+	ch <- prometheus.MustNewConstMetric(configLoadAttempts, prometheus.CounterValue, float64(successes), "success")
+	ch <- prometheus.MustNewConstMetric(configLoadAttempts, prometheus.CounterValue, float64(failures), "failure")
+	var timestamp float64
+	if !lastSuccess.IsZero() {
+		timestamp = float64(lastSuccess.UnixNano()) / float64(time.Second)
+	}
+	ch <- prometheus.MustNewConstMetric(configLastSuccessfulLoad, prometheus.GaugeValue, timestamp)
 	if !loaded {
 		return
 	}
@@ -238,20 +265,13 @@ func ListCMsAndDirs(path string) (cms sets.Set[string], dirs sets.Set[string], e
 
 func watchConfigs(ca *Agent, prowConfig, jobConfig string, supplementalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals ...func(*Config) error) error {
 	cmEventFunc := func() error {
-		c, err := Load(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
-		if err != nil {
-			return err
-		}
-		ca.Set(c)
-		return nil
+		return ca.loadAndSet(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
 	}
 	// We may need to add more directories to be watched
 	dirsEventFunc := func(w *fsnotify.Watcher) error {
-		c, err := Load(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
-		if err != nil {
+		if err := ca.loadAndSet(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
 			return err
 		}
-		ca.Set(c)
 		// TODO(AlexNPavel): Is there a chance that a ConfigMap mounted directory may appear without making a new pod? If yes, handle that.
 		_, dirs, err := ListCMsAndDirs(jobConfig)
 		if err != nil {
@@ -338,11 +358,9 @@ func watchConfigs(ca *Agent, prowConfig, jobConfig string, supplementalProwConfi
 // will log the failure message but continue attempting to load.
 // This function will replace Start in a future release.
 func (ca *Agent) StartWatch(prowConfig, jobConfig string, supplementalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals ...func(*Config) error) error {
-	c, err := Load(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
-	if err != nil {
+	if err := ca.loadAndSet(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
 		return err
 	}
-	ca.Set(c)
 	watchConfigs(ca, prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
 	return nil
 }
@@ -379,11 +397,9 @@ func (ca *Agent) Start(prowConfig, jobConfig string, additionalProwConfigDirs []
 	if err != nil {
 		lastModTime = time.Time{}
 	}
-	c, err := Load(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
-	if err != nil {
+	if err := ca.loadAndSet(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
 		return err
 	}
-	ca.Set(c)
 	go func() {
 		// Rarely, if two changes happen in the same second, mtime will
 		// be the same for the second change, and an mtime-based check would
@@ -401,16 +417,31 @@ func (ca *Agent) Start(prowConfig, jobConfig string, additionalProwConfigDirs []
 				}
 				lastModTime = recentModTime
 			}
-			if c, err := Load(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
+			if err := ca.loadAndSet(prowConfig, jobConfig, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
 				logrus.WithField("prowConfig", prowConfig).
 					WithField("jobConfig", jobConfig).
 					WithError(err).Error("Error loading config.")
 			} else {
 				skips = 0
-				ca.Set(c)
 			}
 		}
 	}()
+	return nil
+}
+
+// loadAndSet records one outcome per Load invocation. A successful load updates
+// the accepted snapshot and its timestamp under the same lock.
+func (ca *Agent) loadAndSet(prowConfig, jobConfig string, supplementalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals ...func(*Config) error) error {
+	c, err := Load(prowConfig, jobConfig, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
+	ca.mut.Lock()
+	defer ca.mut.Unlock()
+	if err != nil {
+		ca.loadFailures++
+		return err
+	}
+	ca.setLocked(c)
+	ca.loadSuccesses++
+	ca.lastLoadSuccess = time.Now()
 	return nil
 }
 
@@ -439,6 +470,10 @@ func (ca *Agent) Config() *Config {
 func (ca *Agent) Set(c *Config) {
 	ca.mut.Lock()
 	defer ca.mut.Unlock()
+	ca.setLocked(c)
+}
+
+func (ca *Agent) setLocked(c *Config) {
 	var oldConfig Config
 	if ca.c != nil {
 		oldConfig = *ca.c

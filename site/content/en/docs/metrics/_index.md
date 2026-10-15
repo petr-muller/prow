@@ -14,6 +14,8 @@ available.
 | Component                 | Type      	| Metric                    	    | Labels                	    		| Description                                               	                |
 |---------------------------|---------------|---------------------------------------|-------------------------------------------|-------------------------------------------------------------------------------|
 | Config Agent              | Gauge         | `prow_config_static_job_definition`   | type                                      | Number of static job definitions in the accepted configuration, by job type. |
+|                           | Counter       | `prow_config_load_attempts_total`     | outcome                                   | Configuration Load attempts, with `success` or `failure` outcome. |
+|                           | Gauge         | `prow_config_last_successful_load_timestamp_seconds` | | Unix timestamp of the last successfully loaded and accepted configuration; zero before the first success. |
 | Tide                      | Gauge         | `pooledprs`               	    | org, repo, branch     	    		| The number of PRs in each Tide pool.                      	                |
 |                           | Gauge         | `updatetime`              	    | org, repo, branch     	    		| The last time each Tide pool was synced.                  	                |
 |                           | Gauge         | `syncdur`                 	    |                       	    		| The Tide sync controller loop duration.                   	                |
@@ -80,6 +82,22 @@ configuration are excluded.
 Use the scrape target labels to identify the component and instance. Each replica
 reports its own counts, so summing across replicas counts the same definitions
 multiple times.
+
+## Configuration load outcomes
+
+`prow_config_load_attempts_total` counts each actual configuration load, including
+initial loads and polling or watcher reloads. Its `outcome` label is either
+`success` or `failure`. Unchanged-file polls, watcher errors, and direct calls to
+the agent's setters do not count as load attempts. A failed load leaves the
+previous accepted configuration and its static job definition counts intact.
+
+`prow_config_last_successful_load_timestamp_seconds` is the Unix timestamp of
+the last successfully loaded and accepted configuration, or zero before the
+first success. An old timestamp alone does not indicate failure when the
+configuration is unchanged. Use load outcomes together with the inventory
+counts to distinguish rejected updates from stable configuration. An initial
+load failure can exit startup before the component serves metrics, so its
+failure sample may not be available.
 
 ## Pushgateway and Proxy
 

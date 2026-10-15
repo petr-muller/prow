@@ -42,7 +42,6 @@ import (
 
 	"github.com/NYTimes/gziphandler"
 	"github.com/gorilla/sessions"
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"golang.org/x/oauth2"
 	coreapi "k8s.io/api/core/v1"
@@ -213,11 +212,6 @@ var (
 
 type authCfgGetter func(*prowapi.ProwJobSpec) *prowapi.RerunAuthConfig
 
-func init() {
-	prometheus.MustRegister(httpRequestDuration)
-	prometheus.MustRegister(httpResponseSize)
-}
-
 var simplifier = simplifypath.NewSimplifier(l("", // shadow element mimicking the root
 	l(""),
 	l("badge.svg"),
@@ -302,8 +296,7 @@ func main() {
 	} else {
 		logrus.Info("No plugins configuration was provided to deck. You must provide one to reuse /test checks for rerun")
 	}
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("deck", cfg().PushGateway, o.instrumentation.MetricsPort)
+	metrics.ExposeMetrics("deck", cfg().PushGateway, o.instrumentation.MetricsPort, configAgent, httpRequestDuration, httpResponseSize)
 
 	// signal to the world that we are healthy
 	// this needs to be in a separate port as we don't start the

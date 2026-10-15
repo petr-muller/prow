@@ -122,8 +122,7 @@ func main() {
 		go jobConfigMapMonitor(5*time.Minute, o.config.JobConfigPath)
 	}
 
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("sinker", cfg().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("sinker", cfg().PushGateway, o.instrumentationOptions.MetricsPort, configAgent, sinkerMetrics.podsCreated, sinkerMetrics.timeUsed, sinkerMetrics.podsRemoved, sinkerMetrics.podRemovalErrors, sinkerMetrics.prowJobsCreated, sinkerMetrics.prowJobsCleaned, sinkerMetrics.prowJobsCleaningErrors, sinkerMetrics.jobConfigMapSize)
 
 	ctrlruntimelog.SetLogger(zap.New(zap.JSONEncoder()))
 
@@ -321,17 +320,6 @@ var (
 		}),
 	}
 )
-
-func init() {
-	prometheus.MustRegister(sinkerMetrics.podsCreated)
-	prometheus.MustRegister(sinkerMetrics.timeUsed)
-	prometheus.MustRegister(sinkerMetrics.podsRemoved)
-	prometheus.MustRegister(sinkerMetrics.podRemovalErrors)
-	prometheus.MustRegister(sinkerMetrics.prowJobsCreated)
-	prometheus.MustRegister(sinkerMetrics.prowJobsCleaned)
-	prometheus.MustRegister(sinkerMetrics.prowJobsCleaningErrors)
-	prometheus.MustRegister(sinkerMetrics.jobConfigMapSize)
-}
 
 func (m *sinkerReconciliationMetrics) getTimeUsed() time.Duration {
 	return m.finishedAt.Sub(m.startAt)

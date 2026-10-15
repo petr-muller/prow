@@ -22,7 +22,6 @@ import (
 	"flag"
 	"os"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -319,8 +318,7 @@ func main() {
 	}
 
 	// Push metrics to the configured prometheus pushgateway endpoint or serve them
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("crier", cfg().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("crier", cfg().PushGateway, o.instrumentationOptions.MetricsPort, configAgent)
 
 	interrupts.Run(func(ctx context.Context) {
 		if err := mgr.Start(ctx); err != nil {

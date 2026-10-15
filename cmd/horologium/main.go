@@ -25,7 +25,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
@@ -137,8 +136,7 @@ func main() {
 	cr := cron.New()
 	cr.Start()
 
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("horologium", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("horologium", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort, configAgent)
 
 	tickInterval := defaultTickInterval
 	if configAgent.Config().Horologium.TickInterval != nil {

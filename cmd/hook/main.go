@@ -23,7 +23,6 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/prow/pkg/pjutil/pprof"
@@ -241,8 +240,7 @@ func main() {
 	defer interrupts.WaitForGracefulShutdown()
 
 	// Expose prometheus metrics
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("hook", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("hook", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort, configAgent)
 	pprof.Instrument(o.instrumentationOptions)
 
 	server := &hook.Server{

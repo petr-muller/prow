@@ -107,13 +107,10 @@ func main() {
 	go informerFactory.Start(interrupts.Context().Done())
 
 	registry := mustRegister("exporter", pjLister)
-	registry.MustRegister(configAgent)
-	// Pushgateway collection uses the default registry.
-	prometheus.MustRegister(configAgent)
 	registry.MustRegister(prowjobs.NewProwJobLifecycleHistogramVec(informerFactory.Prow().V1().ProwJobs().Informer()))
 
 	// Expose prometheus metrics
-	metrics.ExposeMetricsWithRegistry("exporter", cfg().PushGateway, o.instrumentationOptions.MetricsPort, registry, nil)
+	metrics.ExposeMetricsWithRegistry("exporter", cfg().PushGateway, o.instrumentationOptions.MetricsPort, registry, nil, configAgent)
 
 	logrus.Info("exporter is running ...")
 	health.ServeReady()

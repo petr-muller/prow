@@ -70,15 +70,6 @@ var (
 	})
 )
 
-func init() {
-	prometheus.MustRegister(diskFree)
-	prometheus.MustRegister(diskUsed)
-	prometheus.MustRegister(diskTotal)
-	prometheus.MustRegister(diskInodeFree)
-	prometheus.MustRegister(diskInodeUsed)
-	prometheus.MustRegister(diskInodeTotal)
-}
-
 type options struct {
 	cookiefilePath    string
 	tokenPathOverride string
@@ -161,8 +152,7 @@ func main() {
 	cfg := ca.Config
 
 	// Expose Prometheus metrics
-	prometheus.MustRegister(ca)
-	metrics.ExposeMetrics("gerrit", cfg().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("gerrit", cfg().PushGateway, o.instrumentationOptions.MetricsPort, ca, diskFree, diskUsed, diskTotal, diskInodeFree, diskInodeUsed, diskInodeTotal)
 
 	prowJobClient, err := o.kubernetes.ProwJobClient(cfg().ProwJobNamespace, o.dryRun)
 	if err != nil {

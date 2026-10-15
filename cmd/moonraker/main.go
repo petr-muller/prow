@@ -75,15 +75,6 @@ var (
 	})
 )
 
-func init() {
-	prometheus.MustRegister(diskFree)
-	prometheus.MustRegister(diskUsed)
-	prometheus.MustRegister(diskTotal)
-	prometheus.MustRegister(diskInodeFree)
-	prometheus.MustRegister(diskInodeUsed)
-	prometheus.MustRegister(diskInodeTotal)
-}
-
 type options struct {
 	github         prowflagutil.GitHubOptions
 	port           int
@@ -144,8 +135,7 @@ func main() {
 		logrus.WithError(err).Fatal("Error starting config agent.")
 	}
 
-	prometheus.MustRegister(configAgent)
-	metrics.ExposeMetrics("moonraker", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort)
+	metrics.ExposeMetrics("moonraker", configAgent.Config().PushGateway, o.instrumentationOptions.MetricsPort, configAgent, diskFree, diskUsed, diskTotal, diskInodeFree, diskInodeUsed, diskInodeTotal)
 
 	persist := o.config.InRepoConfigCacheDirBase != ""
 

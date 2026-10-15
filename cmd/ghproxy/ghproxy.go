@@ -70,15 +70,6 @@ var (
 	})
 )
 
-func init() {
-	prometheus.MustRegister(diskFree)
-	prometheus.MustRegister(diskUsed)
-	prometheus.MustRegister(diskTotal)
-	prometheus.MustRegister(diskInodeFree)
-	prometheus.MustRegister(diskInodeUsed)
-	prometheus.MustRegister(diskInodeTotal)
-}
-
 // GitHub reverse proxy HTTP cache RoundTripper stack:
 //  v -   <Client(s)>
 //  v ^ reverse proxy
@@ -209,7 +200,7 @@ func main() {
 			Duration: o.pushGatewayInterval,
 		},
 		ServeMetrics: o.serveMetrics,
-	}, o.instrumentationOptions.MetricsPort)
+	}, o.instrumentationOptions.MetricsPort, diskFree, diskUsed, diskTotal, diskInodeFree, diskInodeUsed, diskInodeTotal)
 
 	proxy := proxy(o, http.DefaultTransport, time.Hour)
 	server := &http.Server{Addr: ":" + strconv.Itoa(o.port), Handler: proxy}

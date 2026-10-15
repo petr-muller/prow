@@ -108,6 +108,8 @@ used to limit cluster external requests to GET requests since Prometheus doesn't
 provide any form of authentication. The pushgateway and proxy deployment are
 defined in [`pushgateway.yaml`](https://github.com/kubernetes/k8s.io/blob/main/kubernetes/gke-prow/prow/pushgateway.yaml).
 
+HTTP scraping and Pushgateway pushing gather the same metric families, including command-owned collectors and controller-runtime metrics. Exporter custom-registry metrics also participate in pushing.
+
 ## Kubernetes Prow Metrics
 
 Prometheus metrics from the Kubernetes Prow instance are used to create the

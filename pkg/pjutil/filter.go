@@ -297,7 +297,7 @@ func NewTestManualRequiredFilter() *TestManualRequiredFilter {
 }
 
 func (tmrf *TestManualRequiredFilter) ShouldRun(ps config.Presubmit) (bool, bool, bool) {
-	if ps.Optional || !ps.NeedsExplicitTrigger() || ps.RunIfChanged != "" || ps.SkipIfOnlyChanged != "" {
+	if !ps.ContextRequired() || !ps.NeedsExplicitTrigger() || ps.RunIfChanged != "" || ps.SkipIfOnlyChanged != "" {
 		return false, false, false
 	}
 	return true, true, false

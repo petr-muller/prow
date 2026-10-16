@@ -822,6 +822,13 @@ func TestPresubmitFilter(t *testing.T) {
 					RerunCommand: "/test manual",
 				},
 				{
+					JobBase:      config.JobBase{Name: "manual-skip-report"},
+					Optional:     false,
+					Reporter:     config.Reporter{Context: "manual-skip-report", SkipReport: true},
+					Trigger:      `(?m)^/test (?:.*? )?manual-skip-report(?: .*?)?$`,
+					RerunCommand: "/test manual-skip-report",
+				},
+				{
 					JobBase:      config.JobBase{Name: "manual-optional"},
 					Optional:     true,
 					Reporter:     config.Reporter{Context: "manual-optional"},
@@ -854,6 +861,7 @@ func TestPresubmitFilter(t *testing.T) {
 			},
 			expected: [][]bool{
 				{true, true, false},
+				{false, false, false},
 				{false, false, false},
 				{false, false, false},
 				{false, false, false},

@@ -626,6 +626,28 @@ func TestHandleGenericComment(t *testing.T) {
 			PruneHelp:     true,
 		},
 		{
+			name:   "Test-Manual-Required does not trigger a manual job that skips reporting",
+			Author: "trusted-member",
+			Body:   "/test-manual-required",
+			State:  "open",
+			IsPR:   true,
+			Presubmits: map[string][]config.Presubmit{
+				"org/repo": {
+					{
+						JobBase:  config.JobBase{Name: "jab"},
+						Optional: false,
+						Reporter: config.Reporter{
+							Context:    "pull-jab",
+							SkipReport: true,
+						},
+						Trigger:      `(?m)^/test (?:.*? )?jab(?: .*?)?$`,
+						RerunCommand: `/test jab`,
+					},
+				},
+			},
+			PruneHelp: true,
+		},
+		{
 			name:   "Test-Manual-Required doesn't trigger missing optional job",
 			Author: "trusted-member",
 			Body:   "/test-manual-required",

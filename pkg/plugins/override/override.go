@@ -632,6 +632,13 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 
 	done := sets.Set[string]{}
 	contextsWithCreatedJobs := sets.Set[string]{}
+	// Check runs matching Prow jobs need the same synthetic result and reporting
+	// protection as commit statuses, including when crier has not reported yet.
+	for _, checkrun := range checkrunContexts {
+		if checkrun.State != "SUCCESS" && overrides.Has(checkrun.Context) && presubmitForContext(presubmits, checkrun.Context) != nil {
+			statuses = append(statuses, github.Status{Context: checkrun.Context})
+		}
+	}
 
 	defer func() {
 		if len(done) == 0 {

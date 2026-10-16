@@ -367,6 +367,15 @@ func (c *fakeClient) List(_ context.Context, opts metav1.ListOptions) (*prowapi.
 	return &prowapi.ProwJobList{Items: items}, nil
 }
 
+func (c *fakeClient) Get(_ context.Context, name string, _ metav1.GetOptions) (*prowapi.ProwJob, error) {
+	for _, pj := range c.prowJobs {
+		if pj.Name == name {
+			return pj.DeepCopy(), nil
+		}
+	}
+	return nil, fmt.Errorf("prowjob %s not found", name)
+}
+
 func (c *fakeClient) Update(_ context.Context, pj *prowapi.ProwJob, _ metav1.UpdateOptions) (*prowapi.ProwJob, error) {
 	for i, existing := range c.prowJobs {
 		if existing.Name == pj.Name {

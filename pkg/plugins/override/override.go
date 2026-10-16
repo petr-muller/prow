@@ -28,6 +28,7 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/client-go/util/retry"
 
 	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 	"sigs.k8s.io/prow/pkg/config"
@@ -75,6 +76,7 @@ type githubClient interface {
 
 type prowJobClient interface {
 	Create(context.Context, *prowapi.ProwJob, metav1.CreateOptions) (*prowapi.ProwJob, error)
+	Get(context.Context, string, metav1.GetOptions) (*prowapi.ProwJob, error)
 	List(context.Context, metav1.ListOptions) (*prowapi.ProwJobList, error)
 	Update(context.Context, *prowapi.ProwJob, metav1.UpdateOptions) (*prowapi.ProwJob, error)
 }
@@ -155,6 +157,10 @@ func (c client) List(ctx context.Context, opts metav1.ListOptions) (*prowapi.Pro
 	return c.prowJobClient.List(ctx, opts)
 }
 
+func (c client) Get(ctx context.Context, name string, opts metav1.GetOptions) (*prowapi.ProwJob, error) {
+	return c.prowJobClient.Get(ctx, name, opts)
+}
+
 func (c client) Update(ctx context.Context, pj *prowapi.ProwJob, o metav1.UpdateOptions) (*prowapi.ProwJob, error) {
 	return c.prowJobClient.Update(ctx, pj, o)
 }
@@ -179,18 +185,16 @@ func presubmitForContext(presubmits []config.Presubmit, context string) *config.
 	return nil
 }
 
-func listPresubmitJobs(oc overrideClient, log *logrus.Entry, org, repo string, number int) []prowapi.ProwJob {
+func listPresubmitJobs(oc overrideClient, org, repo string, number int) ([]prowapi.ProwJob, error) {
 	selector, err := pjutil.PresubmitSelectorForPR(org, repo, number)
 	if err != nil {
-		log.WithError(err).Warn("Cannot construct prowjob selector to abort jobs for override")
-		return nil
+		return nil, fmt.Errorf("construct prowjob selector: %w", err)
 	}
 	jobs, err := oc.List(context.Background(), metav1.ListOptions{LabelSelector: selector.String()})
 	if err != nil {
-		log.WithError(err).Warn("Cannot list prowjobs to abort for override")
-		return nil
+		return nil, fmt.Errorf("list prowjobs: %w", err)
 	}
-	return jobs.Items
+	return jobs.Items, nil
 }
 
 // abortActiveJob silences reporting on ProwJobs named jobName and aborts any that are
@@ -199,16 +203,48 @@ func listPresubmitJobs(oc overrideClient, log *logrus.Entry, org, repo string, n
 // Jenkins) reacts to the aborted state by deleting the pod/build and then
 // completing the ProwJob. Completing here would skip that handover and leak the
 // running workload.
-func abortActiveJob(oc overrideClient, log *logrus.Entry, jobs []prowapi.ProwJob, jobName string) {
+func abortActiveJob(oc overrideClient, jobs []prowapi.ProwJob, jobName string) error {
 	for _, job := range jobs {
 		if job.Spec.Job != jobName || job.Complete() {
 			continue
 		}
-		job.Spec.Report = false
-		if err := pjutil.AbortJob(context.Background(), oc, &job, abortedByOverrideDescription); err != nil && !apierrors.IsConflict(err) {
-			log.WithError(err).WithFields(pjutil.ProwJobFields(&job)).Warn("Failed to abort prowjob for override")
+		uid := job.UID
+		refresh := false
+		if err := retry.RetryOnConflict(retry.DefaultRetry, func() error {
+			if refresh {
+				current, err := oc.Get(context.Background(), job.Name, metav1.GetOptions{})
+				if apierrors.IsNotFound(err) {
+					return nil
+				}
+				if err != nil {
+					return err
+				}
+				// The original job may have completed or been replaced while we
+				// retried. Leave the controller's result and completion intact.
+				if current.UID != uid {
+					return nil
+				}
+				job = *current
+			}
+			refresh = true
+			job.Spec.Report = false
+			var err error
+			if job.Complete() {
+				// Completion raced with the abort. Silence future reports, but
+				// preserve the controller's terminal state and completion time.
+				_, err = oc.Update(context.Background(), &job, metav1.UpdateOptions{})
+			} else {
+				err = pjutil.AbortJob(context.Background(), oc, &job, abortedByOverrideDescription)
+			}
+			if apierrors.IsNotFound(err) {
+				return nil
+			}
+			return err
+		}); err != nil {
+			return fmt.Errorf("abort prowjob %s: %w", job.Name, err)
 		}
 	}
+	return nil
 }
 
 func (c client) LoadRepoOwners(org, repo, base string) (repoowners.RepoOwner, error) {
@@ -662,10 +698,19 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 			}
 			contextsWithCreatedJobs.Insert(status.Context)
 			if !jobsListed {
-				jobsToAbort = listPresubmitJobs(oc, log, org, repo, number)
+				jobsToAbort, err = listPresubmitJobs(oc, org, repo, number)
+				if err != nil {
+					resp := fmt.Sprintf("Cannot list prowjobs to abort for override of %s; the override may be overwritten", status.Context)
+					log.WithError(err).Warn(resp)
+					return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
+				}
 				jobsListed = true
 			}
-			abortActiveJob(oc, log, jobsToAbort, pre.Name)
+			if err := abortActiveJob(oc, jobsToAbort, pre.Name); err != nil {
+				resp := fmt.Sprintf("Failed to abort prowjobs for override of %s; the override may be overwritten", status.Context)
+				log.WithError(err).Warn(resp)
+				return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
+			}
 		}
 		status.State = github.StatusSuccess
 		status.Description = config.ContextDescriptionWithBaseSha(descFn(user), baseSHA)

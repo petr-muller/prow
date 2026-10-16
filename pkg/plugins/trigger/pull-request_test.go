@@ -598,6 +598,11 @@ func TestAbortAllJobs(t *testing.T) {
 			expectedAbortedProwJob: true,
 		},
 		{
+			name:                   "Reporting job gets aborted without silencing reports",
+			pj:                     pj(func(pj *prowapi.ProwJob) { pj.Spec.Report = true }),
+			expectedAbortedProwJob: true,
+		},
+		{
 			name:                   "Wrong org, ignored",
 			pj:                     pj(func(pj *prowapi.ProwJob) { pj.Labels[kube.OrgLabel] = "wrong" }),
 			expectedAbortedProwJob: false,
@@ -656,6 +661,12 @@ func TestAbortAllJobs(t *testing.T) {
 
 			if isAborted := (pj.Status.State == prowapi.AbortedState && pj.Status.Description == abortedDescription); isAborted != tc.expectedAbortedProwJob {
 				t.Errorf("IsAborted: %t, but expected aborted: %t", isAborted, tc.expectedAbortedProwJob)
+			}
+			if pj.Spec.Report != tc.pj.Spec.Report {
+				t.Errorf("Report changed: got %t, want %t", pj.Spec.Report, tc.pj.Spec.Report)
+			}
+			if diff := cmp.Diff(tc.pj.Status.CompletionTime, pj.Status.CompletionTime); diff != "" {
+				t.Errorf("CompletionTime changed (-want +got):\n%s", diff)
 			}
 		})
 	}

@@ -21,16 +21,19 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
+	"strconv"
 	"strings"
 
 	jsonpatch "github.com/evanphx/json-patch"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	klabels "k8s.io/apimachinery/pkg/labels"
 	ktypes "k8s.io/apimachinery/pkg/types"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 
 	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 	reporter "sigs.k8s.io/prow/pkg/crier/reporters/github"
+	"sigs.k8s.io/prow/pkg/kube"
 )
 
 // patchClient a minimalistic prow client required by the aborter
@@ -41,6 +44,40 @@ type patchClient interface {
 // prowClient a minimalistic prow client required by the aborter
 type prowClient interface {
 	Patch(ctx context.Context, name string, pt ktypes.PatchType, data []byte, o metav1.PatchOptions, subresources ...string) (result *prowapi.ProwJob, err error)
+}
+
+// PresubmitSelectorForPR selects presubmit ProwJobs for a pull request across all revisions.
+func PresubmitSelectorForPR(org, repo string, number int) (klabels.Selector, error) {
+	selector := klabels.SelectorFromSet(klabels.Set{
+		kube.OrgLabel:         org,
+		kube.RepoLabel:        repo,
+		kube.PullLabel:        strconv.Itoa(number),
+		kube.ProwJobTypeLabel: string(prowapi.PresubmitJob),
+	})
+	if selector.Empty() {
+		return nil, fmt.Errorf("got back empty selector")
+	}
+	return selector, nil
+}
+
+type updateClient interface {
+	Update(context.Context, *prowapi.ProwJob, metav1.UpdateOptions) (*prowapi.ProwJob, error)
+}
+
+// AbortJob aborts an incomplete ProwJob, preserving its reporting configuration.
+// It leaves CompletionTime unset so the responsible controller can tear down the
+// workload before completing the job. Callers decide which jobs to abort and how
+// to handle update errors, including conflicts.
+func AbortJob(ctx context.Context, client updateClient, job *prowapi.ProwJob, description string) error {
+	if job.Complete() {
+		return nil
+	}
+	job.Status.State = prowapi.AbortedState
+	job.Status.Description = description
+	// Use Update because the responsible agent owns Status.State: a concurrent
+	// change must cause a conflict rather than be overwritten by a patch.
+	_, err := client.Update(ctx, job, metav1.UpdateOptions{})
+	return err
 }
 
 // digestRefs digests a Refs to the fields we care about

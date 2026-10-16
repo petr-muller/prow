@@ -22,20 +22,17 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"strconv"
 	"strings"
 
 	"github.com/sirupsen/logrus"
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	klabels "k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/util/sets"
 
 	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 	"sigs.k8s.io/prow/pkg/config"
 	"sigs.k8s.io/prow/pkg/git/v2"
 	"sigs.k8s.io/prow/pkg/github"
-	"sigs.k8s.io/prow/pkg/kube"
 	"sigs.k8s.io/prow/pkg/pjutil"
 	"sigs.k8s.io/prow/pkg/pluginhelp"
 	"sigs.k8s.io/prow/pkg/plugins"
@@ -182,20 +179,6 @@ func presubmitForContext(presubmits []config.Presubmit, context string) *config.
 	return nil
 }
 
-func prowJobSelectorForPR(org, repo string, number int) (klabels.Selector, error) {
-	set := klabels.Set{
-		kube.OrgLabel:         org,
-		kube.RepoLabel:        repo,
-		kube.PullLabel:        strconv.Itoa(number),
-		kube.ProwJobTypeLabel: string(prowapi.PresubmitJob),
-	}
-	selector := klabels.SelectorFromSet(set)
-	if selector.Empty() {
-		return nil, fmt.Errorf("got back empty selector")
-	}
-	return selector, nil
-}
-
 // abortActiveJob silences reporting on ProwJobs named jobName and aborts any that are
 // still running so Plank can tear down the workload without crier clobbering
 // the override status. It sets AbortedState but does not SetComplete: Plank (or
@@ -203,7 +186,7 @@ func prowJobSelectorForPR(org, repo string, number int) (klabels.Selector, error
 // completing the ProwJob. Completing here would skip that handover and leak the
 // running workload.
 func abortActiveJob(oc overrideClient, log *logrus.Entry, org, repo string, number int, jobName string) {
-	selector, err := prowJobSelectorForPR(org, repo, number)
+	selector, err := pjutil.PresubmitSelectorForPR(org, repo, number)
 	if err != nil {
 		log.WithError(err).Warn("Cannot construct prowjob selector to abort jobs for override")
 		return
@@ -218,9 +201,7 @@ func abortActiveJob(oc overrideClient, log *logrus.Entry, org, repo string, numb
 			continue
 		}
 		job.Spec.Report = false
-		job.Status.State = prowapi.AbortedState
-		job.Status.Description = abortedByOverrideDescription
-		if _, err := oc.Update(context.Background(), &job, metav1.UpdateOptions{}); err != nil && !apierrors.IsConflict(err) {
+		if err := pjutil.AbortJob(context.Background(), oc, &job, abortedByOverrideDescription); err != nil && !apierrors.IsConflict(err) {
 			log.WithError(err).WithFields(pjutil.ProwJobFields(&job)).Warn("Failed to abort prowjob for override")
 		}
 	}

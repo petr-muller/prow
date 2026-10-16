@@ -179,24 +179,28 @@ func presubmitForContext(presubmits []config.Presubmit, context string) *config.
 	return nil
 }
 
+func listPresubmitJobs(oc overrideClient, log *logrus.Entry, org, repo string, number int) []prowapi.ProwJob {
+	selector, err := pjutil.PresubmitSelectorForPR(org, repo, number)
+	if err != nil {
+		log.WithError(err).Warn("Cannot construct prowjob selector to abort jobs for override")
+		return nil
+	}
+	jobs, err := oc.List(context.Background(), metav1.ListOptions{LabelSelector: selector.String()})
+	if err != nil {
+		log.WithError(err).Warn("Cannot list prowjobs to abort for override")
+		return nil
+	}
+	return jobs.Items
+}
+
 // abortActiveJob silences reporting on ProwJobs named jobName and aborts any that are
 // still running so Plank can tear down the workload without crier clobbering
 // the override status. It sets AbortedState but does not SetComplete: Plank (or
 // Jenkins) reacts to the aborted state by deleting the pod/build and then
 // completing the ProwJob. Completing here would skip that handover and leak the
 // running workload.
-func abortActiveJob(oc overrideClient, log *logrus.Entry, org, repo string, number int, jobName string) {
-	selector, err := pjutil.PresubmitSelectorForPR(org, repo, number)
-	if err != nil {
-		log.WithError(err).Warn("Cannot construct prowjob selector to abort jobs for override")
-		return
-	}
-	jobs, err := oc.List(context.Background(), metav1.ListOptions{LabelSelector: selector.String()})
-	if err != nil {
-		log.WithError(err).Warn("Cannot list prowjobs to abort for override")
-		return
-	}
-	for _, job := range jobs.Items {
+func abortActiveJob(oc overrideClient, log *logrus.Entry, jobs []prowapi.ProwJob, jobName string) {
+	for _, job := range jobs {
 		if job.Spec.Job != jobName || job.Complete() {
 			continue
 		}
@@ -630,6 +634,8 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 		oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, msg))
 	}()
 
+	var jobsToAbort []prowapi.ProwJob
+	jobsListed := false
 	for _, status := range statuses {
 		pre := presubmitForContext(presubmits, status.Context)
 		if status.State == github.StatusSuccess || !(overrides.Has(status.Context) || pre != nil && overrides.Has(pre.Name)) || contextsWithCreatedJobs.Has(status.Context) {
@@ -655,7 +661,11 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 				return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
 			}
 			contextsWithCreatedJobs.Insert(status.Context)
-			abortActiveJob(oc, log, org, repo, number, pre.Name)
+			if !jobsListed {
+				jobsToAbort = listPresubmitJobs(oc, log, org, repo, number)
+				jobsListed = true
+			}
+			abortActiveJob(oc, log, jobsToAbort, pre.Name)
 		}
 		status.State = github.StatusSuccess
 		status.Description = config.ContextDescriptionWithBaseSha(descFn(user), baseSHA)

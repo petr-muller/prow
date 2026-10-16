@@ -2428,3 +2428,122 @@ func TestAbortJobsOnOverride(t *testing.T) {
 		})
 	}
 }
+
+// recordingOverrideClient captures the ordering of side effects across contexts.
+type recordingOverrideClient struct {
+	*fakeClient
+	operations []string
+}
+
+func (c *recordingOverrideClient) Create(ctx context.Context, pj *prowapi.ProwJob, opts metav1.CreateOptions) (*prowapi.ProwJob, error) {
+	c.operations = append(c.operations, "create:"+pj.Spec.Job+":"+pj.Spec.Context)
+	return c.fakeClient.Create(ctx, pj, opts)
+}
+
+func (c *recordingOverrideClient) List(ctx context.Context, opts metav1.ListOptions) (*prowapi.ProwJobList, error) {
+	c.operations = append(c.operations, "list")
+	return c.fakeClient.List(ctx, opts)
+}
+
+func (c *recordingOverrideClient) Update(ctx context.Context, pj *prowapi.ProwJob, opts metav1.UpdateOptions) (*prowapi.ProwJob, error) {
+	c.operations = append(c.operations, "abort:"+pj.Spec.Job)
+	return c.fakeClient.Update(ctx, pj, opts)
+}
+
+func (c *recordingOverrideClient) CreateStatus(org, repo, ref string, status github.Status) error {
+	c.operations = append(c.operations, "status:"+status.Context)
+	return c.fakeClient.CreateStatus(org, repo, ref, status)
+}
+
+func TestOverrideMultipleContextsListsJobsOnce(t *testing.T) {
+	for _, sticky := range []bool{false, true} {
+		command := "/override"
+		wantDescription := statusDescription(adminUser)
+		if sticky {
+			command = "/override-sticky"
+			wantDescription = stickyStatusDescription(adminUser)
+		}
+		for _, failLater := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/failLater=%t", command, failLater), func(t *testing.T) {
+				secondContext := "context-b"
+				if failLater {
+					secondContext = "fail-create"
+				}
+				jobA := testPresubmitJob("job-a", "context-a", fakeSHA, prowapi.PendingState, false, true, fakePR)
+				jobB := testPresubmitJob("job-b", secondContext, fakeSHA, prowapi.PendingState, false, true, fakePR)
+				jobC := testPresubmitJob("job-c", "context-c", fakeSHA, prowapi.PendingState, false, true, fakePR)
+				// Context equality alone must not select another job, nor can job-name
+				// equality select jobs from another PR, repo, org, or job type.
+				unrelated := testPresubmitJob("unrelated", "context-a", fakeSHA, prowapi.PendingState, false, true, fakePR)
+				otherPR := testPresubmitJob("job-a", "context-a", fakeSHA, prowapi.PendingState, false, true, fakePR+1)
+				otherPR.Name = "other-pr"
+				otherRepo := *jobA.DeepCopy()
+				otherRepo.Name = "other-repo"
+				otherRepo.Labels[kube.RepoLabel] = "other"
+				otherOrg := *jobA.DeepCopy()
+				otherOrg.Name = "other-org"
+				otherOrg.Labels[kube.OrgLabel] = "other"
+				periodic := *jobA.DeepCopy()
+				periodic.Name = "periodic"
+				periodic.Labels[kube.ProwJobTypeLabel] = string(prowapi.PeriodicJob)
+				complete := testPresubmitJob("job-a", "context-a", fakeSHA, prowapi.FailureState, true, true, fakePR)
+				complete.Name = "complete"
+				untouched := []prowapi.ProwJob{unrelated, otherPR, otherRepo, otherOrg, periodic, complete}
+				fc := &recordingOverrideClient{fakeClient: &fakeClient{
+					statuses: []github.Status{
+						{Context: "context-a", State: github.StatusFailure},
+						{Context: secondContext, State: github.StatusFailure},
+						{Context: "context-c", State: github.StatusFailure},
+					},
+					ps: []config.Presubmit{
+						{JobBase: config.JobBase{Name: "job-a"}, Reporter: config.Reporter{Context: "context-a"}},
+						{JobBase: config.JobBase{Name: "job-b"}, Reporter: config.Reporter{Context: secondContext}},
+						{JobBase: config.JobBase{Name: "job-c"}, Reporter: config.Reporter{Context: "context-c"}},
+					},
+					jobs:     sets.New[string](),
+					prowJobs: append([]prowapi.ProwJob{jobA, jobB, jobC}, untouched...),
+				}}
+				event := github.GenericCommentEvent{
+					IsPR: true, IssueState: "open", Action: github.GenericCommentActionCreated,
+					Body: command + " job-a " + secondContext + " context-c", Number: fakePR,
+					User: github.User{Login: adminUser},
+					Repo: github.Repo{Owner: github.User{Login: fakeOrg}, Name: fakeRepo},
+				}
+				if err := handle(fc, logrus.WithField("plugin", pluginName), &event, plugins.Override{}, sticky); err != nil {
+					t.Fatalf("handle: %v", err)
+				}
+				wantOperations := []string{"create:job-a:context-a", "list", "abort:job-a", "status:context-a", "create:job-b:" + secondContext}
+				wantJobs := sets.New("context-a")
+				wantProwJobs := []prowapi.ProwJob{aborted(jobA), jobB, jobC}
+				wantStatuses := []github.Status{
+					{Context: "context-a", State: github.StatusSuccess, Description: wantDescription},
+					{Context: secondContext, State: github.StatusFailure},
+					{Context: "context-c", State: github.StatusFailure},
+				}
+				if !failLater {
+					wantOperations = append(wantOperations, "abort:job-b", "status:"+secondContext, "create:job-c:context-c", "abort:job-c", "status:context-c")
+					wantJobs.Insert(secondContext, "context-c")
+					wantProwJobs[1], wantProwJobs[2] = aborted(jobB), aborted(jobC)
+					for i := 1; i < len(wantStatuses); i++ {
+						wantStatuses[i].State = github.StatusSuccess
+						wantStatuses[i].Description = wantDescription
+					}
+				} else if len(fc.comments) != 2 || !strings.Contains(fc.comments[0], "Failed to create override job for fail-create") || !strings.Contains(fc.comments[1], "context-a") {
+					t.Errorf("expected error and partial success comments, got %q", fc.comments)
+				}
+				if diff := cmp.Diff(wantOperations, fc.operations); diff != "" {
+					t.Errorf("operations mismatch (-want +got):\n%s", diff)
+				}
+				if diff := cmp.Diff(wantJobs, fc.jobs); diff != "" {
+					t.Errorf("created jobs mismatch (-want +got):\n%s", diff)
+				}
+				if diff := cmp.Diff(append(wantProwJobs, untouched...), fc.prowJobs); diff != "" {
+					t.Errorf("prowjobs mismatch (-want +got):\n%s", diff)
+				}
+				if diff := cmp.Diff(wantStatuses, fc.statuses); diff != "" {
+					t.Errorf("statuses mismatch (-want +got):\n%s", diff)
+				}
+			})
+		}
+	}
+}

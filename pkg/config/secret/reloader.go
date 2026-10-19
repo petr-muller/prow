@@ -30,6 +30,9 @@ type parsingSecretReloader[T any] struct {
 	rawValue  []byte
 	parsed    T
 	parsingFN func([]byte) (T, error)
+	stopOnce  sync.Once
+	stopCh    chan struct{}
+	doneCh    chan struct{}
 }
 
 func (p *parsingSecretReloader[T]) start(reloadCensor func()) error {
@@ -37,6 +40,8 @@ func (p *parsingSecretReloader[T]) start(reloadCensor func()) error {
 	if err != nil {
 		return err
 	}
+	p.stopCh = make(chan struct{})
+	p.doneCh = make(chan struct{})
 	p.lock.Lock()
 	p.rawValue = raw
 	p.parsed = parsed
@@ -47,12 +52,27 @@ func (p *parsingSecretReloader[T]) start(reloadCensor func()) error {
 	return nil
 }
 
+// stop waits for a successfully started reloader, including its callback, to exit.
+// It must not be called from the reload callback itself.
+func (p *parsingSecretReloader[T]) stop() {
+	p.stopOnce.Do(func() { close(p.stopCh) })
+	<-p.doneCh
+}
+
 func (p *parsingSecretReloader[T]) reloadSecret(reloadCensor func()) {
+	defer close(p.doneCh)
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
 	var lastModTime time.Time
 	logger := logrus.NewEntry(logrus.StandardLogger())
 
 	skips := 0
-	for range time.Tick(1 * time.Second) {
+	for {
+		select {
+		case <-p.stopCh:
+			return
+		case <-ticker.C:
+		}
 		if skips < 600 {
 			// Check if the file changed to see if it needs to be re-read.
 			secretStat, err := os.Stat(p.path)

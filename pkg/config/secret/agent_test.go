@@ -275,14 +275,20 @@ func testAddWithParser(t *testing.T) {
 		},
 	}
 
-	// reloadCensor is invoked after the parsed value is stored (reloader.go:44 and :82), so
+	// reloadCensor is invoked after the parsed value is stored, so
 	// receiving from this channel guarantees loader.get() observes the published value. The
-	// parsingFN itself must NOT be used as the signal: it runs at reloader.go:72, before the
+	// parsingFN itself must NOT be used as the signal: it runs before the
 	// store, which is what made this test flaky under -race.
 	published := make(chan int, 8)
-	if err := loader.start(func() { published <- loader.get() }); err != nil {
+	if err := loader.start(func() {
+		select {
+		case published <- loader.get():
+		case <-loader.stopCh:
+		}
+	}); err != nil {
 		t.Fatalf("start failed: %v", err)
 	}
+	t.Cleanup(loader.stop)
 
 	last := 0
 	awaitPublish := func(want int) {

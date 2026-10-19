@@ -1804,6 +1804,9 @@ func loadConfig(prowConfig, jobConfig string, additionalProwConfigDirs []string,
 		return nil, err
 	}
 
+	contextSources := tideContextPolicySources{}
+	contextSources.record(nc.Tide.ContextOptions, prowConfig)
+
 	prowConfigCount := 0
 	allStart := time.Now()
 	for _, additionalProwConfigDir := range additionalProwConfigDirs {
@@ -1836,7 +1839,10 @@ func loadConfig(prowConfig, jobConfig string, additionalProwConfigDirs []string,
 				return nil
 			}
 
-			if err := nc.ProwConfig.mergeFrom(&cfg); err != nil {
+			mergeErr := nc.ProwConfig.mergeFrom(&cfg, contextSources)
+			// Context policies merge atomically, independently of other config types.
+			contextSources.record(nc.Tide.ContextOptions, path)
+			if err := mergeErr; err != nil {
 				errs = append(errs, fmt.Errorf("failed to merge in config from %s: %w", path, err))
 			} else {
 				logrus.WithField("prowConfig", path).WithField("duration", time.Since(fileStart)).Traceln("config loaded")
@@ -3394,7 +3400,7 @@ func StringsToOrgRepos(vs []string) []OrgRepo {
 // mergeFrom merges two prow configs. It must be called _before_ doing any
 // defaulting.
 // If you extend this, please also extend HasConfigFor accordingly.
-func (pc *ProwConfig) mergeFrom(additional *ProwConfig) error {
+func (pc *ProwConfig) mergeFrom(additional *ProwConfig, sources ...tideContextPolicySources) error {
 	emptyReference := &ProwConfig{
 		BranchProtection:     additional.BranchProtection,
 		Tide:                 Tide{TideGitHubConfig: TideGitHubConfig{MergeType: additional.Tide.MergeType, Queries: additional.Tide.Queries, ContextOptions: additional.Tide.ContextOptions}},
@@ -3408,7 +3414,7 @@ func (pc *ProwConfig) mergeFrom(additional *ProwConfig) error {
 	if err := pc.BranchProtection.merge(&additional.BranchProtection); err != nil {
 		errs = append(errs, fmt.Errorf("failed to merge branch protection config: %w", err))
 	}
-	if err := pc.Tide.mergeFrom(&additional.Tide); err != nil {
+	if err := pc.Tide.mergeFrom(&additional.Tide, sources...); err != nil {
 		errs = append(errs, fmt.Errorf("failed to merge tide config: %w", err))
 	}
 

@@ -18,6 +18,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"testing"
@@ -207,5 +209,112 @@ func TestSupplementalTideContextMergeOrderAndIdempotence(t *testing.T) {
 				})
 			}
 		})
+	}
+}
+
+func TestLoadSupplementalTideContextConflictSources(t *testing.T) {
+	for _, scope := range []struct {
+		name, format, path string
+	}{
+		{"global", "%s: %t", "tide.context_options"},
+		{"org", "orgs: {acme: {%s: %t}}", `tide.context_options.orgs["acme"]`},
+		{"repo", "orgs: {acme: {repos: {widget: {%s: %t}}}}", `tide.context_options.orgs["acme"].repos["widget"]`},
+		{"branch", "orgs: {acme: {repos: {widget: {branches: {main: {%s: %t}}}}}}", `tide.context_options.orgs["acme"].repos["widget"].branches["main"]`},
+	} {
+		for _, field := range []string{"skip-unknown-contexts", "from-branch-protection", "overwrite-pending-contexts"} {
+			for _, scenario := range []string{"main-to-shard", "shard-to-shard", "repeated-identical"} {
+				t.Run(scope.name+"/"+field+"/"+scenario, func(t *testing.T) {
+					root := t.TempDir()
+					firstDir, secondDir := filepath.Join(root, "first"), filepath.Join(root, "second")
+					for _, dir := range []string{firstDir, secondDir} {
+						if err := os.Mkdir(dir, 0700); err != nil {
+							t.Fatal(err)
+						}
+					}
+					write := func(path, content string) {
+						t.Helper()
+						if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+							t.Fatal(err)
+						}
+					}
+					policy := func(value bool) string {
+						return "tide: {context_options: {" + fmt.Sprintf(scope.format, field, value) + "}}"
+					}
+					mainPath := filepath.Join(root, "main.yaml")
+					firstPath := filepath.Join(firstDir, "01-first.yaml")
+					conflictPath := filepath.Join(secondDir, "03-conflict.yaml")
+					// A different field at the exact scope must not own the target field.
+					otherField := "skip-unknown-contexts"
+					if field == otherField {
+						otherField = "from-branch-protection"
+					}
+					write(mainPath, "tide: {context_options: {"+fmt.Sprintf(scope.format, otherField, false)+"}}")
+					if scenario == "main-to-shard" {
+						firstPath = mainPath
+					} else {
+						// The same field at a different scope is a valid inherited override.
+						otherScope := "%s: %t"
+						if scope.name == "global" {
+							otherScope = "orgs: {other: {%s: %t}}"
+						}
+						write(filepath.Join(firstDir, "00-other-scope.yaml"), "tide: {context_options: {"+fmt.Sprintf(otherScope, field, false)+"}}")
+					}
+					write(firstPath, policy(true))
+					if scenario == "repeated-identical" {
+						write(filepath.Join(firstDir, "02-identical.yaml"), policy(true))
+						write(filepath.Join(secondDir, "02-identical.yaml"), policy(true))
+					}
+					write(conflictPath, policy(false))
+					_, err := loadConfig(mainPath, "", []string{firstDir, secondDir}, ".yaml")
+					if err == nil {
+						t.Fatal("expected conflicting boolean to fail loading")
+					}
+					for _, want := range []string{
+						"failed to merge in config from " + conflictPath + ":",
+						scope.path + ": conflicting values for " + field,
+						"previously set in " + firstPath + ")",
+					} {
+						if !strings.Contains(err.Error(), want) {
+							t.Errorf("error %q does not contain %q", err, want)
+						}
+					}
+				})
+			}
+		}
+	}
+}
+
+// Other config types can fail after context options have merged successfully.
+// The loader keeps walking the directory and must retain that accepted source.
+func TestLoadSupplementalTideContextSourceAfterUnrelatedMergeError(t *testing.T) {
+	root := t.TempDir()
+	mainPath := filepath.Join(root, "main.yaml")
+	shardDir := filepath.Join(root, "shards")
+	if err := os.Mkdir(shardDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	firstPath := filepath.Join(shardDir, "01-first.yaml")
+	conflictPath := filepath.Join(shardDir, "02-conflict.yaml")
+	for path, content := range map[string]string{
+		mainPath:     "{}",
+		firstPath:    "config_version_sha: invalid-supplemental-field\ntide: {context_options: {skip-unknown-contexts: true}}",
+		conflictPath: "tide: {context_options: {skip-unknown-contexts: false}}",
+	} {
+		if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	_, err := loadConfig(mainPath, "", []string{shardDir}, ".yaml")
+	if err == nil {
+		t.Fatal("expected load failure")
+	}
+	for _, want := range []string{
+		"all other fields have no merging logic yet",
+		"failed to merge in config from " + conflictPath + ":",
+		"tide.context_options: conflicting values for skip-unknown-contexts (previously set in " + firstPath + ")",
+	} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("error %q does not contain %q", err, want)
+		}
 	}
 }

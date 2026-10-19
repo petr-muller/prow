@@ -1772,6 +1772,30 @@ func TestValidateTideContextPolicy(t *testing.T) {
 			expectedError: "context policy for master branch in a/b is invalid: contexts ci/prow/coverage are defined as optional and required if present",
 		},
 		{
+			name: "global required context collides with org optional context without repos",
+			cfg: cfg(func(c *config.Config) {
+				c.Tide.ContextOptions.RequiredContexts = []string{"test"}
+				c.Tide.ContextOptions.Orgs = map[string]config.TideOrgContextPolicy{
+					"org": {TideContextPolicy: config.TideContextPolicy{OptionalContexts: []string{"test"}}},
+				}
+			}),
+			expectedError: "context policy for org org is invalid: contexts test are defined as required and optional",
+		},
+		{
+			name: "valid inherited global and org context policies without repos",
+			cfg: cfg(func(c *config.Config) {
+				c.Tide.ContextOptions.RequiredContexts = []string{"required"}
+				c.Tide.ContextOptions.Orgs = map[string]config.TideOrgContextPolicy{
+					"org": {TideContextPolicy: config.TideContextPolicy{
+						RequiredContexts:          []string{"required", "org-required"},
+						RequiredIfPresentContexts: []string{"conditional"},
+						OptionalContexts:          []string{"optional"},
+						OptionalRegexContexts:     []string{"^other-"},
+					}},
+				}
+			}),
+		},
+		{
 			name: "repo key is not in org/repo format, no error",
 			cfg: cfg(func(c *config.Config) {
 				c.PresubmitsStatic["https://kunit-review.googlesource.com/linux"] = []config.Presubmit{
@@ -1795,6 +1819,79 @@ func TestValidateTideContextPolicy(t *testing.T) {
 				t.Errorf("expected error %q, got error %q", tc.expectedError, errMsg)
 			}
 		})
+	}
+}
+
+func TestValidateTideContextPolicyWithoutRepos(t *testing.T) {
+	testCases := []struct {
+		name          string
+		policy        config.TideContextPolicy
+		expectedError string
+	}{
+		{
+			name:          "malformed optional context regex",
+			policy:        config.TideContextPolicy{OptionalRegexContexts: []string{"["}},
+			expectedError: `optional context regex "[" doesn't compile: error parsing regexp: missing closing ]: ` + "`[`",
+		},
+		{
+			name: "required and optional conflict",
+			policy: config.TideContextPolicy{
+				RequiredContexts: []string{"test"}, OptionalContexts: []string{"test"},
+			},
+			expectedError: "contexts test are defined as required and optional",
+		},
+		{
+			name: "required and required if present conflict",
+			policy: config.TideContextPolicy{
+				RequiredContexts: []string{"test"}, RequiredIfPresentContexts: []string{"test"},
+			},
+			expectedError: "contexts test are defined as required and required if present",
+		},
+		{
+			name: "optional and required if present conflict",
+			policy: config.TideContextPolicy{
+				OptionalContexts: []string{"test"}, RequiredIfPresentContexts: []string{"test"},
+			},
+			expectedError: "contexts test are defined as optional and required if present",
+		},
+		{
+			name: "valid policy",
+			policy: config.TideContextPolicy{
+				RequiredContexts:          []string{"required"},
+				RequiredIfPresentContexts: []string{"conditional"},
+				OptionalContexts:          []string{"optional"},
+				OptionalRegexContexts:     []string{"^other-"},
+			},
+		},
+	}
+	for _, scope := range []string{"global", "org"} {
+		for _, tc := range testCases {
+			t.Run(scope+"/"+tc.name, func(t *testing.T) {
+				cfg := &config.Config{}
+				// Even when enabled, these checks must not clone any repositories.
+				cfg.InRepoConfig.Enabled = map[string]*bool{"*": new(true)}
+				prefix := "global context policy is invalid: "
+				if scope == "global" {
+					cfg.Tide.ContextOptions.TideContextPolicy = tc.policy
+				} else {
+					cfg.Tide.ContextOptions.Orgs = map[string]config.TideOrgContextPolicy{
+						"org": {TideContextPolicy: tc.policy},
+					}
+					prefix = "context policy for org org is invalid: "
+				}
+				expectedError := tc.expectedError
+				if expectedError != "" {
+					expectedError = prefix + expectedError
+				}
+				errMsg := ""
+				if err := validateTideContextPolicy(cfg); err != nil {
+					errMsg = err.Error()
+				}
+				if errMsg != expectedError {
+					t.Errorf("expected error %q, got error %q", expectedError, errMsg)
+				}
+			})
+		}
 	}
 }
 

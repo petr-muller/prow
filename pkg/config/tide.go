@@ -1080,10 +1080,18 @@ func mergeTideContextPolicy(a, b TideContextPolicy) TideContextPolicy {
 	return c
 }
 
-func ParseTideContextPolicyOptions(org, repo, branch string, options TideContextPolicyOptions) TideContextPolicy {
+// ForOrg returns the global context policy with the organization's overrides applied.
+func (options TideContextPolicyOptions) ForOrg(org string) TideContextPolicy {
 	option := options.TideContextPolicy
 	if o, ok := options.Orgs[org]; ok {
 		option = mergeTideContextPolicy(option, o.TideContextPolicy)
+	}
+	return option
+}
+
+func ParseTideContextPolicyOptions(org, repo, branch string, options TideContextPolicyOptions) TideContextPolicy {
+	option := options.ForOrg(org)
+	if o, ok := options.Orgs[org]; ok {
 		if r, ok := o.Repos[repo]; ok {
 			option = mergeTideContextPolicy(option, r.TideContextPolicy)
 			if b, ok := r.Branches[branch]; ok {

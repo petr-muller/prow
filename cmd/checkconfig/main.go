@@ -1217,6 +1217,17 @@ func validateInRepoConfig(cfg *config.Config, filepath, repoIdentifier string, s
 }
 
 func validateTideContextPolicy(cfg *config.Config) error {
+	var errs []error
+	if err := cfg.Tide.ContextOptions.TideContextPolicy.Validate(); err != nil {
+		errs = append(errs, fmt.Errorf("global context policy is invalid: %w", err))
+	}
+	for org := range cfg.Tide.ContextOptions.Orgs {
+		policy := cfg.Tide.ContextOptions.ForOrg(org)
+		if err := policy.Validate(); err != nil {
+			errs = append(errs, fmt.Errorf("context policy for org %s is invalid: %w", org, err))
+		}
+	}
+
 	// We can not know all possible branches without asking GitHub, so instead we verify
 	// all branches that are explicitly configured on any job. This will hopefully catch
 	// most cases.
@@ -1261,7 +1272,6 @@ func validateTideContextPolicy(cfg *config.Config) error {
 	cfg.InRepoConfig = config.InRepoConfig{}
 	defer func() { cfg.InRepoConfig = originalInRepoConfig }()
 
-	var errs []error
 	for orgRepo, branches := range allKnownOrgRepoBranches {
 		split := strings.Split(orgRepo, "/")
 		if n := len(split); n != 2 {

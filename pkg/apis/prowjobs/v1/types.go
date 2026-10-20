@@ -143,7 +143,7 @@ type ProwJobSpec struct {
 	// Type is the type of job and informs how
 	// the jobs is triggered
 	// +kubebuilder:validation:Enum=presubmit;postsubmit;periodic;batch
-	// +kubebuilder:validation:Required
+	// +required
 	Type ProwJobType `json:"type,omitempty"`
 	// Agent determines which controller fulfills
 	// this specific ProwJobSpec and runs the job
@@ -155,7 +155,7 @@ type ProwJobSpec struct {
 	// Namespace defines where to create pods/resources.
 	Namespace string `json:"namespace,omitempty"`
 	// Job is the name of the job
-	// +kubebuilder:validation:Required
+	// +required
 	Job string `json:"job,omitempty"`
 	// Refs is the code under test, determined at
 	// runtime by Prow itself
@@ -1116,7 +1116,7 @@ type ProwJobStatus struct {
 	// CompletionTime is the timestamp for when the job goes to a final state
 	CompletionTime *metav1.Time `json:"completionTime,omitempty"`
 	// +kubebuilder:validation:Enum=scheduling;triggered;pending;success;failure;aborted;error
-	// +kubebuilder:validation:Required
+	// +required
 	State       ProwJobState `json:"state,omitempty"`
 	Description string       `json:"description,omitempty"`
 	URL         string       `json:"url,omitempty"`

@@ -159,16 +159,9 @@ func createGCSClient(ctx context.Context, gcsCredentialsFile string) (storageCli
 	return storage.NewClient(ctx, option.WithoutAuthentication())
 }
 
-// ErrNotFoundTest can be used for unit tests to simulate NotFound errors.
-// This is required because gocloud doesn't expose its errors.
-var ErrNotFoundTest = fmt.Errorf("not found error which should only be used in tests")
-
 // IsNotExist will return true if the error shows that the object does not exist.
 func IsNotExist(err error) bool {
 	if os.IsNotExist(err) {
-		return true
-	}
-	if errors.Is(err, ErrNotFoundTest) {
 		return true
 	}
 	if errors.Is(err, os.ErrNotExist) {
@@ -177,7 +170,7 @@ func IsNotExist(err error) bool {
 	if errors.Is(err, storage.ErrObjectNotExist) {
 		return true
 	}
-	return gcerrors.Code(err) == gcerrors.NotFound
+	return errors.Is(err, gcerrors.ErrNotFound)
 }
 
 // LogClose will attempt a close an log any error

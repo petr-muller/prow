@@ -27,6 +27,8 @@ import (
 	"testing"
 
 	"cloud.google.com/go/storage"
+	"gocloud.dev/blob/memblob"
+	"gocloud.dev/gcerrors"
 	"google.golang.org/api/googleapi"
 
 	"sigs.k8s.io/prow/pkg/testutil"
@@ -168,11 +170,53 @@ RU5EIFBSSVZBVEUgS0VZLS0tLS1cbgo=`)
 
 func TestIsNotExist(t *testing.T) {
 	t.Parallel()
+	bucket := memblob.OpenBucket(nil)
+	t.Cleanup(func() {
+		if err := bucket.Close(); err != nil {
+			t.Errorf("close bucket: %v", err)
+		}
+	})
+	_, missingObjectErr := bucket.Attributes(context.Background(), "missing")
+	if missingObjectErr == nil {
+		t.Fatal("expected an error for a missing object")
+	}
 	testCases := []struct {
 		name        string
 		err         error
 		expectMatch bool
 	}{
+		{
+			name:        "Direct gcerrors.ErrNotFound",
+			err:         gcerrors.ErrNotFound,
+			expectMatch: true,
+		},
+		{
+			name:        "Wrapped gcerrors.ErrNotFound",
+			err:         fmt.Errorf("around: %w", gcerrors.ErrNotFound),
+			expectMatch: true,
+		},
+		{
+			name:        "Missing blob object",
+			err:         missingObjectErr,
+			expectMatch: true,
+		},
+		{
+			name:        "Wrapped missing blob object",
+			err:         fmt.Errorf("around: %w", missingObjectErr),
+			expectMatch: true,
+		},
+		{
+			name: "Filesystem permission denied",
+			err:  os.ErrPermission,
+		},
+		{
+			name: "Go Cloud permission denied",
+			err:  gcerrors.ErrPermissionDenied,
+		},
+		{
+			name: "Wrapped Go Cloud permission denied",
+			err:  fmt.Errorf("around: %w", gcerrors.ErrPermissionDenied),
+		},
 		{
 			name:        "Direct ErrNotExist",
 			err:         os.ErrNotExist,

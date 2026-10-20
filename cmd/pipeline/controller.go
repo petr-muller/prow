@@ -32,6 +32,7 @@ import (
 	prowjoblisters "sigs.k8s.io/prow/pkg/client/listers/prowjobs/v1"
 	"sigs.k8s.io/prow/pkg/config"
 	"sigs.k8s.io/prow/pkg/kube"
+	pipelineinfov1 "sigs.k8s.io/prow/pkg/pipeline/informers/externalversions/pipeline/v1"
 	"sigs.k8s.io/prow/pkg/pjutil"
 	"sigs.k8s.io/prow/pkg/pod-utils/decorate"
 	"sigs.k8s.io/prow/pkg/pod-utils/downwardapi"
@@ -79,7 +80,7 @@ type controller struct {
 type controllerOptions struct {
 	kc              kubernetes.Interface
 	pjc             prowjobset.Interface
-	pji             prowjobinfov1.ProwJobInformer
+	pji             prowjobinfov1.TypedProwJobInformer
 	pipelineConfigs map[string]pipelineConfig
 	totURL          string
 	prowConfig      config.Getter
@@ -151,49 +152,48 @@ func newController(opts controllerOptions) (*controller, error) {
 	logrus.Info("Setting up event handlers")
 
 	// Reconcile whenever a prowjob changes
-	opts.pji.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj any) {
-			pj, ok := obj.(*prowjobv1.ProwJob)
-			if !ok {
-				logrus.Warnf("Ignoring bad prowjob add: %v", obj)
-				return
-			}
-			c.enqueueKey(pjutil.ClusterToCtx(pj.Spec.Cluster), pj)
-		},
-		UpdateFunc: func(old, new any) {
-			pj, ok := new.(*prowjobv1.ProwJob)
-			if !ok {
-				logrus.Warnf("Ignoring bad prowjob update: %v", new)
-				return
-			}
-			c.enqueueKey(pjutil.ClusterToCtx(pj.Spec.Cluster), pj)
-		},
-		DeleteFunc: func(obj any) {
-			pj, ok := obj.(*prowjobv1.ProwJob)
-			if !ok {
-				logrus.Warnf("Ignoring bad prowjob delete: %v", obj)
-				return
-			}
-			c.enqueueKey(pjutil.ClusterToCtx(pj.Spec.Cluster), pj)
-		},
-	})
+	opts.pji.TypedInformer().AddTypedEventHandler(c.prowJobEventHandler())
 
 	for ctx, cfg := range opts.pipelineConfigs {
 		// Reconcile whenever a pipelinerun changes.
-		cfg.informer.Informer().AddEventHandler(cache.ResourceEventHandlerFuncs{
-			AddFunc: func(obj any) {
-				c.enqueueKey(ctx, obj)
-			},
-			UpdateFunc: func(old, new any) {
-				c.enqueueKey(ctx, new)
-			},
-			DeleteFunc: func(obj any) {
-				c.enqueueKey(ctx, obj)
-			},
-		})
+		cfg.informer.TypedInformer().AddTypedEventHandler(c.pipelineRunEventHandler(ctx))
 	}
 
 	return c, nil
+}
+
+func (c *controller) prowJobEventHandler() prowjobinfov1.ProwJobHandlerFuncs {
+	return prowjobinfov1.ProwJobHandlerFuncs{
+		AddFunc: func(pj *prowjobv1.ProwJob) {
+			c.enqueueKey(pjutil.ClusterToCtx(pj.Spec.Cluster), pj)
+		},
+		UpdateFunc: func(_, pj *prowjobv1.ProwJob) {
+			c.enqueueKey(pjutil.ClusterToCtx(pj.Spec.Cluster), pj)
+		},
+		DeleteFunc: func(deleted prowjobinfov1.DeletedProwJob) {
+			if pj := deleted.OptionalObj; pj != nil {
+				c.enqueueKey(pjutil.ClusterToCtx(pj.Spec.Cluster), pj)
+				return
+			}
+			// The cache key identifies the ProwJob, but does not contain its
+			// build cluster or Spec.Namespace. Neither can safely be inferred.
+			logrus.WithField("key", deleted.GetKey()).Warn("Cannot enqueue deleted ProwJob without an object: build cluster and namespace are unknown")
+		},
+	}
+}
+
+func (c *controller) pipelineRunEventHandler(ctx string) pipelineinfov1.PipelineRunHandlerFuncs {
+	return pipelineinfov1.PipelineRunHandlerFuncs{
+		AddFunc: func(pr *pipelinev1.PipelineRun) {
+			c.enqueueKey(ctx, pr)
+		},
+		UpdateFunc: func(_, pr *pipelinev1.PipelineRun) {
+			c.enqueueKey(ctx, pr)
+		},
+		DeleteFunc: func(deleted pipelineinfov1.DeletedPipelineRun) {
+			c.workqueue.AddRateLimited(toKey(ctx, deleted.GetNamespace(), deleted.GetName()))
+		},
+	}
 }
 
 // Run starts threads workers, returning after receiving a stop signal.

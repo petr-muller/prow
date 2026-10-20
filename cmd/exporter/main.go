@@ -110,7 +110,7 @@ func main() {
 	registry.MustRegister(configAgent)
 	// Pushgateway collection uses the default registry.
 	prometheus.MustRegister(configAgent)
-	registry.MustRegister(prowjobs.NewProwJobLifecycleHistogramVec(informerFactory.Prow().V1().ProwJobs().Informer()))
+	registry.MustRegister(prowjobs.NewProwJobLifecycleHistogramVec(informerFactory.Prow().V1().ProwJobs().TypedInformer()))
 
 	// Expose prometheus metrics
 	metrics.ExposeMetricsWithRegistry("exporter", cfg().PushGateway, o.instrumentationOptions.MetricsPort, registry, nil)

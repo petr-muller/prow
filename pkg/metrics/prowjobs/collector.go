@@ -23,9 +23,8 @@ import (
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 
-	"k8s.io/client-go/tools/cache"
-
 	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
+	prowjobinfov1 "sigs.k8s.io/prow/pkg/client/informers/externalversions/prowjobs/v1"
 )
 
 func update(histogramVec *prometheus.HistogramVec, oldJob *prowapi.ProwJob, newJob *prowapi.ProwJob) {
@@ -67,11 +66,11 @@ func update(histogramVec *prometheus.HistogramVec, oldJob *prowapi.ProwJob, newJ
 // The histograms are based on the job name, the old job state and the new job state.
 // Data is collected by hooking itself into the prowjob informer.
 // The collector will never record the same state transition twice, even if reboots happen.
-func NewProwJobLifecycleHistogramVec(informer cache.SharedIndexInformer) *prometheus.HistogramVec {
+func NewProwJobLifecycleHistogramVec(informer prowjobinfov1.ProwJobIndexInformer) *prometheus.HistogramVec {
 	histogramVec := newHistogramVec()
-	informer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		UpdateFunc: func(oldJob, newJob any) {
-			update(histogramVec, oldJob.(*prowapi.ProwJob), newJob.(*prowapi.ProwJob))
+	informer.AddTypedEventHandler(prowjobinfov1.ProwJobHandlerFuncs{
+		UpdateFunc: func(oldJob, newJob *prowapi.ProwJob) {
+			update(histogramVec, oldJob, newJob)
 		},
 	})
 	return histogramVec

@@ -78,7 +78,7 @@ func (o *options) parse(flags *flag.FlagSet, args []string) error {
 
 type pipelineConfig struct {
 	client   pipelineset.Interface
-	informer pipelineinfov1.PipelineRunInformer
+	informer pipelineinfov1.TypedPipelineRunInformer
 }
 
 // newPipelineConfig returns a client and informer capable of mutating and monitoring the specified config.

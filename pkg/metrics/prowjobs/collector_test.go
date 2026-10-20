@@ -27,7 +27,9 @@ import (
 	dto "github.com/prometheus/client_model/go"
 
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"k8s.io/client-go/tools/cache"
 	clock "k8s.io/utils/clock/testing"
+	prowjobinfov1 "sigs.k8s.io/prow/pkg/client/informers/externalversions/prowjobs/v1"
 
 	prowapi "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 )
@@ -264,4 +266,59 @@ func assertMetrics(t *testing.T, actual, expected []*dto.Metric, lastState prowa
 
 func toLabelPair(name, value string) *dto.LabelPair {
 	return &dto.LabelPair{Name: &name, Value: &value}
+}
+
+type recordingProwJobInformer struct {
+	prowjobinfov1.ProwJobIndexInformer
+	handler cache.TypedResourceEventHandler[*prowapi.ProwJob]
+}
+
+func (i *recordingProwJobInformer) AddTypedEventHandler(handler cache.TypedResourceEventHandler[*prowapi.ProwJob], _ ...cache.HandlerOptions) (cache.ResourceEventHandlerRegistration, error) {
+	i.handler = handler
+	return nil, nil
+}
+
+func TestLifecycleTypedHandler(t *testing.T) {
+	informer := &recordingProwJobInformer{}
+	histogram := NewProwJobLifecycleHistogramVec(informer)
+	created := v1.NewTime(time.Unix(1000, 0))
+	pending := v1.NewTime(created.Add(time.Minute))
+	old := &prowapi.ProwJob{
+		ObjectMeta: v1.ObjectMeta{Namespace: "prow", Name: "job", CreationTimestamp: created},
+		Spec:       prowapi.ProwJobSpec{Job: "test", Type: prowapi.PresubmitJob, Refs: &prowapi.Refs{Org: "org", Repo: "repo", BaseRef: "main"}},
+		Status:     prowapi.ProwJobStatus{State: prowapi.TriggeredState},
+	}
+	newJob := old.DeepCopy()
+	newJob.Status.State = prowapi.PendingState
+	newJob.Status.PendingTime = &pending
+	informer.handler.OnAdd(old, true)
+	informer.handler.OnAdd(old, false)
+	informer.handler.OnUpdate(old, old) // resync
+	informer.handler.OnDelete(prowjobinfov1.DeletedProwJob{OptionalObj: old})
+	informer.handler.OnDelete(prowjobinfov1.DeletedProwJob{OptionalObj: old, FinalStateUnknown: &cache.DeletedFinalStateUnknown{Key: "prow/job", Obj: old}})
+	informer.handler.OnDelete(prowjobinfov1.DeletedProwJob{FinalStateUnknown: &cache.DeletedFinalStateUnknown{Key: "prow/job"}})
+	if metrics := collect(histogram); len(metrics) != 0 {
+		t.Fatalf("unexpected observations from add/resync/delete: %v", metrics)
+	}
+	informer.handler.OnUpdate(old, newJob)
+	informer.handler.OnUpdate(newJob, newJob)
+	metrics := collect(histogram)
+	if len(metrics) != 1 {
+		t.Fatalf("got %d metrics, want 1", len(metrics))
+	}
+	metric := metrics[0]
+	if h := metric.Histogram; h.GetSampleCount() != 1 || h.GetSampleSum() != 60 {
+		t.Errorf("unexpected histogram: %v", h)
+	}
+	wantLabels := map[string]string{
+		"base_ref": "main", "job_name": "test", "job_namespace": "prow", "last_state": "triggered",
+		"org": "org", "repo": "repo", "state": "pending", "type": "presubmit",
+	}
+	labels := map[string]string{}
+	for _, label := range metric.Label {
+		labels[label.GetName()] = label.GetValue()
+	}
+	if diff := cmp.Diff(wantLabels, labels); diff != "" {
+		t.Errorf("labels differ (-want +got): %s", diff)
+	}
 }

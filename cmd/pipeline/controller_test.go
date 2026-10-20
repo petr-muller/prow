@@ -34,12 +34,15 @@ import (
 	apierrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/util/diff"
+	"k8s.io/client-go/tools/cache"
 	"k8s.io/client-go/util/workqueue"
 	"knative.dev/pkg/apis"
 	duckv1 "knative.dev/pkg/apis/duck/v1"
 	prowjobv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
+	prowjobinfov1 "sigs.k8s.io/prow/pkg/client/informers/externalversions/prowjobs/v1"
 	"sigs.k8s.io/prow/pkg/config"
 	"sigs.k8s.io/prow/pkg/kube"
+	pipelineinfov1 "sigs.k8s.io/prow/pkg/pipeline/informers/externalversions/pipeline/v1"
 	"sigs.k8s.io/prow/pkg/pod-utils/decorate"
 	"sigs.k8s.io/prow/pkg/pod-utils/downwardapi"
 )
@@ -1484,6 +1487,85 @@ func TestProwJobStatus(t *testing.T) {
 			}
 			if desc != tc.desc {
 				t.Errorf("description %q != expected %q", desc, tc.desc)
+			}
+		})
+	}
+}
+
+func TestProwJobEventHandler(t *testing.T) {
+	pj := &prowjobv1.ProwJob{
+		ObjectMeta: metav1.ObjectMeta{Namespace: "prow", Name: "job"},
+		Spec:       prowjobv1.ProwJobSpec{Cluster: "build", Namespace: "runs"},
+	}
+	old := pj.DeepCopy()
+	old.Spec.Cluster = "old-cluster"
+	old.Spec.Namespace = "old-namespace"
+	for _, namespace := range []string{"runs", ""} {
+		pj := pj.DeepCopy()
+		pj.Spec.Namespace = namespace
+		ns := namespace
+		if ns == "" {
+			ns = "prow"
+		}
+		for _, event := range []string{"add", "initial add", "update", "resync", "delete", "object tombstone", "key-only tombstone"} {
+			t.Run(namespace+"/"+event, func(t *testing.T) {
+				var queue fakeLimiter
+				c := controller{workqueue: &queue}
+				handler := c.prowJobEventHandler()
+				switch event {
+				case "add":
+					handler.OnAdd(pj, false)
+				case "initial add":
+					handler.OnAdd(pj, true)
+				case "update":
+					handler.OnUpdate(old, pj)
+				case "resync":
+					handler.OnUpdate(pj, pj)
+				case "delete":
+					handler.OnDelete(prowjobinfov1.DeletedProwJob{OptionalObj: pj})
+				case "object tombstone":
+					handler.OnDelete(prowjobinfov1.DeletedProwJob{OptionalObj: pj, FinalStateUnknown: &cache.DeletedFinalStateUnknown{Key: "prow/job", Obj: pj}})
+				case "key-only tombstone":
+					handler.OnDelete(prowjobinfov1.DeletedProwJob{FinalStateUnknown: &cache.DeletedFinalStateUnknown{Key: "prow/job"}})
+				}
+				want := toKey("build", ns, "job")
+				if event == "key-only tombstone" {
+					want = ""
+				}
+				if queue.added != want {
+					t.Errorf("enqueued %q, want %q", queue.added, want)
+				}
+			})
+		}
+	}
+}
+
+func TestPipelineRunEventHandler(t *testing.T) {
+	pr := &pipelinev1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Namespace: "runs", Name: "job"}}
+	old := &pipelinev1.PipelineRun{ObjectMeta: metav1.ObjectMeta{Namespace: "old", Name: "old"}}
+	for _, event := range []string{"add", "initial add", "update", "resync", "delete", "object tombstone", "key-only tombstone"} {
+		t.Run(event, func(t *testing.T) {
+			var queue fakeLimiter
+			c := controller{workqueue: &queue}
+			handler := c.pipelineRunEventHandler("build")
+			switch event {
+			case "add":
+				handler.OnAdd(pr, false)
+			case "initial add":
+				handler.OnAdd(pr, true)
+			case "update":
+				handler.OnUpdate(old, pr)
+			case "resync":
+				handler.OnUpdate(pr, pr)
+			case "delete":
+				handler.OnDelete(pipelineinfov1.DeletedPipelineRun{OptionalObj: pr})
+			case "object tombstone":
+				handler.OnDelete(pipelineinfov1.DeletedPipelineRun{OptionalObj: pr, FinalStateUnknown: &cache.DeletedFinalStateUnknown{Key: "runs/job", Obj: pr}})
+			case "key-only tombstone":
+				handler.OnDelete(pipelineinfov1.DeletedPipelineRun{FinalStateUnknown: &cache.DeletedFinalStateUnknown{Key: "runs/job"}})
+			}
+			if want := toKey("build", "runs", "job"); queue.added != want {
+				t.Errorf("enqueued %q, want %q", queue.added, want)
 			}
 		})
 	}

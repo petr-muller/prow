@@ -309,21 +309,7 @@ func (o *opener) Writer(ctx context.Context, p string, opts ...WriterOptions) (i
 	var wOpts blob.WriterOptions
 	options.apply(nil, &wOpts)
 
-	if options.PreconditionDoesNotExist != nil && *options.PreconditionDoesNotExist {
-		wOpts.BeforeWrite = func(asFunc func(any) bool) error {
-			_, err := o.Reader(ctx, p)
-			if err != nil {
-				// we got an error, but not object not exists
-				if !IsNotExist(err) {
-					return err
-				}
-				// Precondition fulfilled, return nil
-				return nil
-			}
-			// Precondition failed, we got no err because object already exists
-			return PreconditionFailedObjectAlreadyExists
-		}
-	}
+	wOpts.IfNotExist = options.PreconditionDoesNotExist != nil && *options.PreconditionDoesNotExist
 
 	writer, err := bucket.NewWriter(ctx, relativePath, &wOpts)
 	if err != nil {
@@ -551,6 +537,9 @@ func isErrUnexpected(err error) bool {
 		if e.Code == http.StatusPreconditionFailed {
 			return false
 		}
+	}
+	if errors.Is(err, gcerrors.ErrFailedPrecondition) {
+		return false
 	}
 	// Precondition file already exists is expected
 	if errors.Is(err, PreconditionFailedObjectAlreadyExists) {

@@ -100,7 +100,7 @@ func newHandler() *handler {
 	}
 }
 
-//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
+//go:generate go tool counterfeiter -generate
 //counterfeiter:generate . verifier
 type verifier interface {
 	CheckInTestFreeze(*logrus.Entry) (*checker.Result, error)

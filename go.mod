@@ -2,6 +2,8 @@ module sigs.k8s.io/prow
 
 go 1.26.4
 
+tool github.com/maxbrunsfeld/counterfeiter/v6
+
 require (
 	cloud.google.com/go/auth v0.24.0
 	cloud.google.com/go/cloudbuild v1.34.0

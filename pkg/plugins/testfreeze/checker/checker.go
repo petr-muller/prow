@@ -80,7 +80,7 @@ type Result struct {
 	LastFastForward string
 }
 
-//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
+//go:generate go tool counterfeiter -generate
 //counterfeiter:generate . checker
 type checker interface {
 	ListRefs(*git.Remote) ([]*plumbing.Reference, error)

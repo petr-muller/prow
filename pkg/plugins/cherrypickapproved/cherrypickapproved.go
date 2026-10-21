@@ -74,7 +74,7 @@ func newHandler() *handler {
 	}
 }
 
-//go:generate go run github.com/maxbrunsfeld/counterfeiter/v6 -generate
+//go:generate go tool counterfeiter -generate
 //counterfeiter:generate . impl
 type impl interface {
 	GetCombinedStatus(gc plugins.PluginGitHubClient, org, repo, ref string) (*github.CombinedStatus, error)

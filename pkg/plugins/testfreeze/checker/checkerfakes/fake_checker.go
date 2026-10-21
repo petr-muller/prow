@@ -61,17 +61,17 @@ type FakeChecker struct {
 		result1 []byte
 		result2 error
 	}
-	UnmarshalProwConfigStub        func([]byte) (interface{}, error)
+	UnmarshalProwConfigStub        func([]byte) (any, error)
 	unmarshalProwConfigMutex       sync.RWMutex
 	unmarshalProwConfigArgsForCall []struct {
 		arg1 []byte
 	}
 	unmarshalProwConfigReturns struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}
 	unmarshalProwConfigReturnsOnCall map[int]struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}
 	UnmarshalProwJobsStub        func([]byte) (*v1.ProwJobList, error)
@@ -344,7 +344,7 @@ func (fake *FakeChecker) ReadAllBodyReturnsOnCall(i int, result1 []byte, result2
 	}{result1, result2}
 }
 
-func (fake *FakeChecker) UnmarshalProwConfig(arg1 []byte) (interface{}, error) {
+func (fake *FakeChecker) UnmarshalProwConfig(arg1 []byte) (any, error) {
 	var arg1Copy []byte
 	if arg1 != nil {
 		arg1Copy = make([]byte, len(arg1))
@@ -374,7 +374,7 @@ func (fake *FakeChecker) UnmarshalProwConfigCallCount() int {
 	return len(fake.unmarshalProwConfigArgsForCall)
 }
 
-func (fake *FakeChecker) UnmarshalProwConfigCalls(stub func([]byte) (interface{}, error)) {
+func (fake *FakeChecker) UnmarshalProwConfigCalls(stub func([]byte) (any, error)) {
 	fake.unmarshalProwConfigMutex.Lock()
 	defer fake.unmarshalProwConfigMutex.Unlock()
 	fake.UnmarshalProwConfigStub = stub
@@ -387,28 +387,28 @@ func (fake *FakeChecker) UnmarshalProwConfigArgsForCall(i int) []byte {
 	return argsForCall.arg1
 }
 
-func (fake *FakeChecker) UnmarshalProwConfigReturns(result1 interface{}, result2 error) {
+func (fake *FakeChecker) UnmarshalProwConfigReturns(result1 any, result2 error) {
 	fake.unmarshalProwConfigMutex.Lock()
 	defer fake.unmarshalProwConfigMutex.Unlock()
 	fake.UnmarshalProwConfigStub = nil
 	fake.unmarshalProwConfigReturns = struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}{result1, result2}
 }
 
-func (fake *FakeChecker) UnmarshalProwConfigReturnsOnCall(i int, result1 interface{}, result2 error) {
+func (fake *FakeChecker) UnmarshalProwConfigReturnsOnCall(i int, result1 any, result2 error) {
 	fake.unmarshalProwConfigMutex.Lock()
 	defer fake.unmarshalProwConfigMutex.Unlock()
 	fake.UnmarshalProwConfigStub = nil
 	if fake.unmarshalProwConfigReturnsOnCall == nil {
 		fake.unmarshalProwConfigReturnsOnCall = make(map[int]struct {
-			result1 interface{}
+			result1 any
 			result2 error
 		})
 	}
 	fake.unmarshalProwConfigReturnsOnCall[i] = struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}{result1, result2}
 }
@@ -485,18 +485,6 @@ func (fake *FakeChecker) UnmarshalProwJobsReturnsOnCall(i int, result1 *v1.ProwJ
 func (fake *FakeChecker) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
-	fake.closeBodyMutex.RLock()
-	defer fake.closeBodyMutex.RUnlock()
-	fake.httpGetMutex.RLock()
-	defer fake.httpGetMutex.RUnlock()
-	fake.listRefsMutex.RLock()
-	defer fake.listRefsMutex.RUnlock()
-	fake.readAllBodyMutex.RLock()
-	defer fake.readAllBodyMutex.RUnlock()
-	fake.unmarshalProwConfigMutex.RLock()
-	defer fake.unmarshalProwConfigMutex.RUnlock()
-	fake.unmarshalProwJobsMutex.RLock()
-	defer fake.unmarshalProwJobsMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value

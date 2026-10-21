@@ -174,10 +174,6 @@ func (fake *FakeVerifier) CreateCommentReturnsOnCall(i int, result1 error) {
 func (fake *FakeVerifier) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
-	fake.checkInTestFreezeMutex.RLock()
-	defer fake.checkInTestFreezeMutex.RUnlock()
-	fake.createCommentMutex.RLock()
-	defer fake.createCommentMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value

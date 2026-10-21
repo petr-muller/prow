@@ -342,14 +342,6 @@ func (fake *FakeImpl) RemoveLabelReturnsOnCall(i int, result1 error) {
 func (fake *FakeImpl) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
-	fake.addLabelMutex.RLock()
-	defer fake.addLabelMutex.RUnlock()
-	fake.getCombinedStatusMutex.RLock()
-	defer fake.getCombinedStatusMutex.RUnlock()
-	fake.getIssueLabelsMutex.RLock()
-	defer fake.getIssueLabelsMutex.RUnlock()
-	fake.removeLabelMutex.RLock()
-	defer fake.removeLabelMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value

@@ -221,6 +221,8 @@ func (jr JunitResult) Status() testStatus {
 		res = skippedStatus
 	} else if jr.Failure != nil || jr.Errored != nil {
 		res = failedStatus
+	} else if jr.Result.Status == "skipped" {
+		res = skippedStatus
 	}
 	return res
 }

@@ -95,6 +95,91 @@ func (fa *FakeArtifact) ReadAtMost(n int64) ([]byte, error) {
 	return nil, nil
 }
 
+func TestJunitResultStatusAttribute(t *testing.T) {
+	for _, tc := range []struct {
+		name, attributes, outcome string
+		want                      testStatus
+	}{
+		{name: "skipped attribute", attributes: `status="skipped"`, want: skippedStatus},
+		{name: "missing attribute", want: passedStatus},
+		{name: "unknown attribute", attributes: `status="unknown"`, want: passedStatus},
+		{name: "case sensitive", attributes: `status="Skipped"`, want: passedStatus},
+		{name: "whitespace significant", attributes: `status=" skipped "`, want: passedStatus},
+		{name: "failure overrides attribute", attributes: `status="skipped"`, outcome: `<failure/>`, want: failedStatus},
+		{name: "error overrides attribute", attributes: `status="skipped"`, outcome: `<error/>`, want: failedStatus},
+		{name: "explicit skipped overrides unknown", attributes: `status="unknown"`, outcome: `<skipped/>`, want: skippedStatus},
+		{name: "explicit skipped overrides failure and error", attributes: `status="skipped"`, outcome: `<skipped/><failure/><error/>`, want: skippedStatus},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			suites, err := junit.Parse([]byte(`<testsuites><testsuite><testcase name="test" ` + tc.attributes + `>` + tc.outcome + `</testcase></testsuite></testsuites>`))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if len(suites.Suites) != 1 || len(suites.Suites[0].Results) != 1 {
+				t.Fatalf("expected one parsed test result, got %+v", suites)
+			}
+			if got := (JunitResult{Result: suites.Suites[0].Results[0]}).Status(); got != tc.want {
+				t.Errorf("Status() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestGetJvdStatusAttribute(t *testing.T) {
+	type counts struct {
+		total, passed, failed, skipped, flaky int
+	}
+	for _, tc := range []struct {
+		name string
+		runs []string
+		want counts
+	}{
+		{name: "skipped", runs: []string{`status="skipped">`}, want: counts{total: 1, skipped: 1}},
+		{name: "repeated skipped", runs: []string{`status="skipped">`, `status="skipped">`}, want: counts{total: 1, skipped: 1}},
+		{name: "skip then pass", runs: []string{`status="skipped">`, `>`}, want: counts{total: 1, skipped: 1}},
+		{name: "pass then skip", runs: []string{`>`, `status="skipped">`}, want: counts{total: 1, skipped: 1}},
+		{name: "skip then fail", runs: []string{`status="skipped">`, `><failure/>`}, want: counts{total: 1, failed: 1, skipped: 1}},
+		{name: "fail then skip", runs: []string{`><failure/>`, `status="skipped">`}, want: counts{total: 1, failed: 1, skipped: 1}},
+		{name: "skip with pass and fail", runs: []string{`status="skipped">`, `>`, `><failure/>`}, want: counts{total: 1, skipped: 1}},
+		{name: "pass and fail remain flaky", runs: []string{`>`, `><failure/>`}, want: counts{total: 1, flaky: 1}},
+		{name: "failure overrides attribute", runs: []string{`status="skipped"><failure/>`}, want: counts{total: 1, failed: 1}},
+		{name: "missing attribute passes", runs: []string{`>`}, want: counts{total: 1, passed: 1}},
+		{name: "unknown attribute passes", runs: []string{`status="other">`}, want: counts{total: 1, passed: 1}},
+	} {
+		for _, grouped := range []bool{false, true} {
+			name := tc.name + "/default"
+			var groups []GroupConfig
+			if grouped {
+				name = tc.name + "/configured group"
+				groups = []GroupConfig{{Name: "Informing", Selector: "properties/property[@name='lifecycle' and @value='informing']"}}
+			}
+			t.Run(name, func(t *testing.T) {
+				var xml strings.Builder
+				xml.WriteString(`<testsuites><testsuite>`)
+				for _, run := range tc.runs {
+					xml.WriteString(`<testcase name="test" ` + run + `<properties><property name="lifecycle" value="informing"/></properties></testcase>`)
+				}
+				xml.WriteString(`</testsuite></testsuites>`)
+				got := (Lens{}).getJvd([]api.Artifact{&FakeArtifact{path: "junit.xml", content: []byte(xml.String()), sizeLimit: 500e6}}, groups)
+				actual := counts{got.NumTests, len(got.Passed), len(got.Failed), len(got.Skipped), len(got.Flaky)}
+				if grouped {
+					if actual != (counts{}) {
+						t.Errorf("default counts = %+v, want empty", actual)
+					}
+					if len(got.Groups) != 1 {
+						t.Fatalf("got %d groups, want 1", len(got.Groups))
+					}
+					g := got.Groups[0]
+					actual = counts{g.NumTests, len(g.Passed), len(g.Failed), len(g.Skipped), len(g.Flaky)}
+				}
+				if actual != tc.want {
+					t.Errorf("counts = %+v, want %+v", actual, tc.want)
+				}
+			})
+		}
+	}
+}
+
 func TestGetJvd(t *testing.T) {
 	emptySkipped := junit.Skipped{}
 	failures := []junit.Failure{

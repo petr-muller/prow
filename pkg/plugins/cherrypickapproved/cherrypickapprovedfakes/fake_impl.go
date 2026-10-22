@@ -11,14 +11,8 @@ import (
 type FakeImpl struct {
 	AddLabelStub        func(plugins.PluginGitHubClient, string, string, int, string) error
 	addLabelMutex       sync.RWMutex
-	addLabelArgsForCall []struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-		arg5 string
-	}
-	addLabelReturns struct {
+	addLabelArgsForCall []FakeImplAddLabelArgs
+	addLabelReturns     struct {
 		result1 error
 	}
 	addLabelReturnsOnCall map[int]struct {
@@ -26,13 +20,8 @@ type FakeImpl struct {
 	}
 	GetCombinedStatusStub        func(plugins.PluginGitHubClient, string, string, string) (*github.CombinedStatus, error)
 	getCombinedStatusMutex       sync.RWMutex
-	getCombinedStatusArgsForCall []struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 string
-	}
-	getCombinedStatusReturns struct {
+	getCombinedStatusArgsForCall []FakeImplGetCombinedStatusArgs
+	getCombinedStatusReturns     struct {
 		result1 *github.CombinedStatus
 		result2 error
 	}
@@ -42,13 +31,8 @@ type FakeImpl struct {
 	}
 	GetIssueLabelsStub        func(plugins.PluginGitHubClient, string, string, int) ([]github.Label, error)
 	getIssueLabelsMutex       sync.RWMutex
-	getIssueLabelsArgsForCall []struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-	}
-	getIssueLabelsReturns struct {
+	getIssueLabelsArgsForCall []FakeImplGetIssueLabelsArgs
+	getIssueLabelsReturns     struct {
 		result1 []github.Label
 		result2 error
 	}
@@ -58,33 +42,56 @@ type FakeImpl struct {
 	}
 	RemoveLabelStub        func(plugins.PluginGitHubClient, string, string, int, string) error
 	removeLabelMutex       sync.RWMutex
-	removeLabelArgsForCall []struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-		arg5 string
-	}
-	removeLabelReturns struct {
+	removeLabelArgsForCall []FakeImplRemoveLabelArgs
+	removeLabelReturns     struct {
 		result1 error
 	}
 	removeLabelReturnsOnCall map[int]struct {
 		result1 error
 	}
 	invocations      map[string][][]interface{}
+	callOrder        []string
 	invocationsMutex sync.RWMutex
+}
+
+// FakeImplAddLabelArgs holds the arguments of one call to AddLabel.
+type FakeImplAddLabelArgs struct {
+	Arg1 plugins.PluginGitHubClient
+	Arg2 string
+	Arg3 string
+	Arg4 int
+	Arg5 string
+}
+
+// FakeImplGetCombinedStatusArgs holds the arguments of one call to GetCombinedStatus.
+type FakeImplGetCombinedStatusArgs struct {
+	Arg1 plugins.PluginGitHubClient
+	Arg2 string
+	Arg3 string
+	Arg4 string
+}
+
+// FakeImplGetIssueLabelsArgs holds the arguments of one call to GetIssueLabels.
+type FakeImplGetIssueLabelsArgs struct {
+	Arg1 plugins.PluginGitHubClient
+	Arg2 string
+	Arg3 string
+	Arg4 int
+}
+
+// FakeImplRemoveLabelArgs holds the arguments of one call to RemoveLabel.
+type FakeImplRemoveLabelArgs struct {
+	Arg1 plugins.PluginGitHubClient
+	Arg2 string
+	Arg3 string
+	Arg4 int
+	Arg5 string
 }
 
 func (fake *FakeImpl) AddLabel(arg1 plugins.PluginGitHubClient, arg2 string, arg3 string, arg4 int, arg5 string) error {
 	fake.addLabelMutex.Lock()
 	ret, specificReturn := fake.addLabelReturnsOnCall[len(fake.addLabelArgsForCall)]
-	fake.addLabelArgsForCall = append(fake.addLabelArgsForCall, struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-		arg5 string
-	}{arg1, arg2, arg3, arg4, arg5})
+	fake.addLabelArgsForCall = append(fake.addLabelArgsForCall, FakeImplAddLabelArgs{arg1, arg2, arg3, arg4, arg5})
 	stub := fake.AddLabelStub
 	fakeReturns := fake.addLabelReturns
 	fake.recordInvocation("AddLabel", []interface{}{arg1, arg2, arg3, arg4, arg5})
@@ -114,7 +121,15 @@ func (fake *FakeImpl) AddLabelArgsForCall(i int) (plugins.PluginGitHubClient, st
 	fake.addLabelMutex.RLock()
 	defer fake.addLabelMutex.RUnlock()
 	argsForCall := fake.addLabelArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+	return argsForCall.Arg1, argsForCall.Arg2, argsForCall.Arg3, argsForCall.Arg4, argsForCall.Arg5
+}
+
+func (fake *FakeImpl) AddLabelArgs() []FakeImplAddLabelArgs {
+	fake.addLabelMutex.RLock()
+	defer fake.addLabelMutex.RUnlock()
+	args := make([]FakeImplAddLabelArgs, len(fake.addLabelArgsForCall))
+	copy(args, fake.addLabelArgsForCall)
+	return args
 }
 
 func (fake *FakeImpl) AddLabelReturns(result1 error) {
@@ -143,12 +158,7 @@ func (fake *FakeImpl) AddLabelReturnsOnCall(i int, result1 error) {
 func (fake *FakeImpl) GetCombinedStatus(arg1 plugins.PluginGitHubClient, arg2 string, arg3 string, arg4 string) (*github.CombinedStatus, error) {
 	fake.getCombinedStatusMutex.Lock()
 	ret, specificReturn := fake.getCombinedStatusReturnsOnCall[len(fake.getCombinedStatusArgsForCall)]
-	fake.getCombinedStatusArgsForCall = append(fake.getCombinedStatusArgsForCall, struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 string
-	}{arg1, arg2, arg3, arg4})
+	fake.getCombinedStatusArgsForCall = append(fake.getCombinedStatusArgsForCall, FakeImplGetCombinedStatusArgs{arg1, arg2, arg3, arg4})
 	stub := fake.GetCombinedStatusStub
 	fakeReturns := fake.getCombinedStatusReturns
 	fake.recordInvocation("GetCombinedStatus", []interface{}{arg1, arg2, arg3, arg4})
@@ -178,7 +188,15 @@ func (fake *FakeImpl) GetCombinedStatusArgsForCall(i int) (plugins.PluginGitHubC
 	fake.getCombinedStatusMutex.RLock()
 	defer fake.getCombinedStatusMutex.RUnlock()
 	argsForCall := fake.getCombinedStatusArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+	return argsForCall.Arg1, argsForCall.Arg2, argsForCall.Arg3, argsForCall.Arg4
+}
+
+func (fake *FakeImpl) GetCombinedStatusArgs() []FakeImplGetCombinedStatusArgs {
+	fake.getCombinedStatusMutex.RLock()
+	defer fake.getCombinedStatusMutex.RUnlock()
+	args := make([]FakeImplGetCombinedStatusArgs, len(fake.getCombinedStatusArgsForCall))
+	copy(args, fake.getCombinedStatusArgsForCall)
+	return args
 }
 
 func (fake *FakeImpl) GetCombinedStatusReturns(result1 *github.CombinedStatus, result2 error) {
@@ -210,12 +228,7 @@ func (fake *FakeImpl) GetCombinedStatusReturnsOnCall(i int, result1 *github.Comb
 func (fake *FakeImpl) GetIssueLabels(arg1 plugins.PluginGitHubClient, arg2 string, arg3 string, arg4 int) ([]github.Label, error) {
 	fake.getIssueLabelsMutex.Lock()
 	ret, specificReturn := fake.getIssueLabelsReturnsOnCall[len(fake.getIssueLabelsArgsForCall)]
-	fake.getIssueLabelsArgsForCall = append(fake.getIssueLabelsArgsForCall, struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-	}{arg1, arg2, arg3, arg4})
+	fake.getIssueLabelsArgsForCall = append(fake.getIssueLabelsArgsForCall, FakeImplGetIssueLabelsArgs{arg1, arg2, arg3, arg4})
 	stub := fake.GetIssueLabelsStub
 	fakeReturns := fake.getIssueLabelsReturns
 	fake.recordInvocation("GetIssueLabels", []interface{}{arg1, arg2, arg3, arg4})
@@ -245,7 +258,15 @@ func (fake *FakeImpl) GetIssueLabelsArgsForCall(i int) (plugins.PluginGitHubClie
 	fake.getIssueLabelsMutex.RLock()
 	defer fake.getIssueLabelsMutex.RUnlock()
 	argsForCall := fake.getIssueLabelsArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4
+	return argsForCall.Arg1, argsForCall.Arg2, argsForCall.Arg3, argsForCall.Arg4
+}
+
+func (fake *FakeImpl) GetIssueLabelsArgs() []FakeImplGetIssueLabelsArgs {
+	fake.getIssueLabelsMutex.RLock()
+	defer fake.getIssueLabelsMutex.RUnlock()
+	args := make([]FakeImplGetIssueLabelsArgs, len(fake.getIssueLabelsArgsForCall))
+	copy(args, fake.getIssueLabelsArgsForCall)
+	return args
 }
 
 func (fake *FakeImpl) GetIssueLabelsReturns(result1 []github.Label, result2 error) {
@@ -277,13 +298,7 @@ func (fake *FakeImpl) GetIssueLabelsReturnsOnCall(i int, result1 []github.Label,
 func (fake *FakeImpl) RemoveLabel(arg1 plugins.PluginGitHubClient, arg2 string, arg3 string, arg4 int, arg5 string) error {
 	fake.removeLabelMutex.Lock()
 	ret, specificReturn := fake.removeLabelReturnsOnCall[len(fake.removeLabelArgsForCall)]
-	fake.removeLabelArgsForCall = append(fake.removeLabelArgsForCall, struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-		arg5 string
-	}{arg1, arg2, arg3, arg4, arg5})
+	fake.removeLabelArgsForCall = append(fake.removeLabelArgsForCall, FakeImplRemoveLabelArgs{arg1, arg2, arg3, arg4, arg5})
 	stub := fake.RemoveLabelStub
 	fakeReturns := fake.removeLabelReturns
 	fake.recordInvocation("RemoveLabel", []interface{}{arg1, arg2, arg3, arg4, arg5})
@@ -313,7 +328,15 @@ func (fake *FakeImpl) RemoveLabelArgsForCall(i int) (plugins.PluginGitHubClient,
 	fake.removeLabelMutex.RLock()
 	defer fake.removeLabelMutex.RUnlock()
 	argsForCall := fake.removeLabelArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+	return argsForCall.Arg1, argsForCall.Arg2, argsForCall.Arg3, argsForCall.Arg4, argsForCall.Arg5
+}
+
+func (fake *FakeImpl) RemoveLabelArgs() []FakeImplRemoveLabelArgs {
+	fake.removeLabelMutex.RLock()
+	defer fake.removeLabelMutex.RUnlock()
+	args := make([]FakeImplRemoveLabelArgs, len(fake.removeLabelArgsForCall))
+	copy(args, fake.removeLabelArgsForCall)
+	return args
 }
 
 func (fake *FakeImpl) RemoveLabelReturns(result1 error) {
@@ -342,14 +365,6 @@ func (fake *FakeImpl) RemoveLabelReturnsOnCall(i int, result1 error) {
 func (fake *FakeImpl) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
-	fake.addLabelMutex.RLock()
-	defer fake.addLabelMutex.RUnlock()
-	fake.getCombinedStatusMutex.RLock()
-	defer fake.getCombinedStatusMutex.RUnlock()
-	fake.getIssueLabelsMutex.RLock()
-	defer fake.getIssueLabelsMutex.RUnlock()
-	fake.removeLabelMutex.RLock()
-	defer fake.removeLabelMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value
@@ -357,9 +372,18 @@ func (fake *FakeImpl) Invocations() map[string][][]interface{} {
 	return copiedInvocations
 }
 
+func (fake *FakeImpl) CallOrder() []string {
+	fake.invocationsMutex.RLock()
+	defer fake.invocationsMutex.RUnlock()
+	order := make([]string, len(fake.callOrder))
+	copy(order, fake.callOrder)
+	return order
+}
+
 func (fake *FakeImpl) recordInvocation(key string, args []interface{}) {
 	fake.invocationsMutex.Lock()
 	defer fake.invocationsMutex.Unlock()
+	fake.callOrder = append(fake.callOrder, key)
 	if fake.invocations == nil {
 		fake.invocations = map[string][][]interface{}{}
 	}

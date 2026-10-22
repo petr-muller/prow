@@ -13,10 +13,8 @@ import (
 type FakeChecker struct {
 	CloseBodyStub        func(*http.Response) error
 	closeBodyMutex       sync.RWMutex
-	closeBodyArgsForCall []struct {
-		arg1 *http.Response
-	}
-	closeBodyReturns struct {
+	closeBodyArgsForCall []FakeCheckerCloseBodyArgs
+	closeBodyReturns     struct {
 		result1 error
 	}
 	closeBodyReturnsOnCall map[int]struct {
@@ -24,10 +22,8 @@ type FakeChecker struct {
 	}
 	HttpGetStub        func(string) (*http.Response, error)
 	httpGetMutex       sync.RWMutex
-	httpGetArgsForCall []struct {
-		arg1 string
-	}
-	httpGetReturns struct {
+	httpGetArgsForCall []FakeCheckerHttpGetArgs
+	httpGetReturns     struct {
 		result1 *http.Response
 		result2 error
 	}
@@ -37,10 +33,8 @@ type FakeChecker struct {
 	}
 	ListRefsStub        func(*git.Remote) ([]*plumbing.Reference, error)
 	listRefsMutex       sync.RWMutex
-	listRefsArgsForCall []struct {
-		arg1 *git.Remote
-	}
-	listRefsReturns struct {
+	listRefsArgsForCall []FakeCheckerListRefsArgs
+	listRefsReturns     struct {
 		result1 []*plumbing.Reference
 		result2 error
 	}
@@ -50,10 +44,8 @@ type FakeChecker struct {
 	}
 	ReadAllBodyStub        func(*http.Response) ([]byte, error)
 	readAllBodyMutex       sync.RWMutex
-	readAllBodyArgsForCall []struct {
-		arg1 *http.Response
-	}
-	readAllBodyReturns struct {
+	readAllBodyArgsForCall []FakeCheckerReadAllBodyArgs
+	readAllBodyReturns     struct {
 		result1 []byte
 		result2 error
 	}
@@ -61,25 +53,21 @@ type FakeChecker struct {
 		result1 []byte
 		result2 error
 	}
-	UnmarshalProwConfigStub        func([]byte) (interface{}, error)
+	UnmarshalProwConfigStub        func([]byte) (any, error)
 	unmarshalProwConfigMutex       sync.RWMutex
-	unmarshalProwConfigArgsForCall []struct {
-		arg1 []byte
-	}
-	unmarshalProwConfigReturns struct {
-		result1 interface{}
+	unmarshalProwConfigArgsForCall []FakeCheckerUnmarshalProwConfigArgs
+	unmarshalProwConfigReturns     struct {
+		result1 any
 		result2 error
 	}
 	unmarshalProwConfigReturnsOnCall map[int]struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}
 	UnmarshalProwJobsStub        func([]byte) (*v1.ProwJobList, error)
 	unmarshalProwJobsMutex       sync.RWMutex
-	unmarshalProwJobsArgsForCall []struct {
-		arg1 []byte
-	}
-	unmarshalProwJobsReturns struct {
+	unmarshalProwJobsArgsForCall []FakeCheckerUnmarshalProwJobsArgs
+	unmarshalProwJobsReturns     struct {
 		result1 *v1.ProwJobList
 		result2 error
 	}
@@ -88,15 +76,44 @@ type FakeChecker struct {
 		result2 error
 	}
 	invocations      map[string][][]interface{}
+	callOrder        []string
 	invocationsMutex sync.RWMutex
+}
+
+// FakeCheckerCloseBodyArgs holds the arguments of one call to CloseBody.
+type FakeCheckerCloseBodyArgs struct {
+	Arg1 *http.Response
+}
+
+// FakeCheckerHttpGetArgs holds the arguments of one call to HttpGet.
+type FakeCheckerHttpGetArgs struct {
+	Arg1 string
+}
+
+// FakeCheckerListRefsArgs holds the arguments of one call to ListRefs.
+type FakeCheckerListRefsArgs struct {
+	Arg1 *git.Remote
+}
+
+// FakeCheckerReadAllBodyArgs holds the arguments of one call to ReadAllBody.
+type FakeCheckerReadAllBodyArgs struct {
+	Arg1 *http.Response
+}
+
+// FakeCheckerUnmarshalProwConfigArgs holds the arguments of one call to UnmarshalProwConfig.
+type FakeCheckerUnmarshalProwConfigArgs struct {
+	Arg1 []byte
+}
+
+// FakeCheckerUnmarshalProwJobsArgs holds the arguments of one call to UnmarshalProwJobs.
+type FakeCheckerUnmarshalProwJobsArgs struct {
+	Arg1 []byte
 }
 
 func (fake *FakeChecker) CloseBody(arg1 *http.Response) error {
 	fake.closeBodyMutex.Lock()
 	ret, specificReturn := fake.closeBodyReturnsOnCall[len(fake.closeBodyArgsForCall)]
-	fake.closeBodyArgsForCall = append(fake.closeBodyArgsForCall, struct {
-		arg1 *http.Response
-	}{arg1})
+	fake.closeBodyArgsForCall = append(fake.closeBodyArgsForCall, FakeCheckerCloseBodyArgs{arg1})
 	stub := fake.CloseBodyStub
 	fakeReturns := fake.closeBodyReturns
 	fake.recordInvocation("CloseBody", []interface{}{arg1})
@@ -126,7 +143,15 @@ func (fake *FakeChecker) CloseBodyArgsForCall(i int) *http.Response {
 	fake.closeBodyMutex.RLock()
 	defer fake.closeBodyMutex.RUnlock()
 	argsForCall := fake.closeBodyArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
+}
+
+func (fake *FakeChecker) CloseBodyArgs() []FakeCheckerCloseBodyArgs {
+	fake.closeBodyMutex.RLock()
+	defer fake.closeBodyMutex.RUnlock()
+	args := make([]FakeCheckerCloseBodyArgs, len(fake.closeBodyArgsForCall))
+	copy(args, fake.closeBodyArgsForCall)
+	return args
 }
 
 func (fake *FakeChecker) CloseBodyReturns(result1 error) {
@@ -155,9 +180,7 @@ func (fake *FakeChecker) CloseBodyReturnsOnCall(i int, result1 error) {
 func (fake *FakeChecker) HttpGet(arg1 string) (*http.Response, error) {
 	fake.httpGetMutex.Lock()
 	ret, specificReturn := fake.httpGetReturnsOnCall[len(fake.httpGetArgsForCall)]
-	fake.httpGetArgsForCall = append(fake.httpGetArgsForCall, struct {
-		arg1 string
-	}{arg1})
+	fake.httpGetArgsForCall = append(fake.httpGetArgsForCall, FakeCheckerHttpGetArgs{arg1})
 	stub := fake.HttpGetStub
 	fakeReturns := fake.httpGetReturns
 	fake.recordInvocation("HttpGet", []interface{}{arg1})
@@ -187,7 +210,15 @@ func (fake *FakeChecker) HttpGetArgsForCall(i int) string {
 	fake.httpGetMutex.RLock()
 	defer fake.httpGetMutex.RUnlock()
 	argsForCall := fake.httpGetArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
+}
+
+func (fake *FakeChecker) HttpGetArgs() []FakeCheckerHttpGetArgs {
+	fake.httpGetMutex.RLock()
+	defer fake.httpGetMutex.RUnlock()
+	args := make([]FakeCheckerHttpGetArgs, len(fake.httpGetArgsForCall))
+	copy(args, fake.httpGetArgsForCall)
+	return args
 }
 
 func (fake *FakeChecker) HttpGetReturns(result1 *http.Response, result2 error) {
@@ -219,9 +250,7 @@ func (fake *FakeChecker) HttpGetReturnsOnCall(i int, result1 *http.Response, res
 func (fake *FakeChecker) ListRefs(arg1 *git.Remote) ([]*plumbing.Reference, error) {
 	fake.listRefsMutex.Lock()
 	ret, specificReturn := fake.listRefsReturnsOnCall[len(fake.listRefsArgsForCall)]
-	fake.listRefsArgsForCall = append(fake.listRefsArgsForCall, struct {
-		arg1 *git.Remote
-	}{arg1})
+	fake.listRefsArgsForCall = append(fake.listRefsArgsForCall, FakeCheckerListRefsArgs{arg1})
 	stub := fake.ListRefsStub
 	fakeReturns := fake.listRefsReturns
 	fake.recordInvocation("ListRefs", []interface{}{arg1})
@@ -251,7 +280,15 @@ func (fake *FakeChecker) ListRefsArgsForCall(i int) *git.Remote {
 	fake.listRefsMutex.RLock()
 	defer fake.listRefsMutex.RUnlock()
 	argsForCall := fake.listRefsArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
+}
+
+func (fake *FakeChecker) ListRefsArgs() []FakeCheckerListRefsArgs {
+	fake.listRefsMutex.RLock()
+	defer fake.listRefsMutex.RUnlock()
+	args := make([]FakeCheckerListRefsArgs, len(fake.listRefsArgsForCall))
+	copy(args, fake.listRefsArgsForCall)
+	return args
 }
 
 func (fake *FakeChecker) ListRefsReturns(result1 []*plumbing.Reference, result2 error) {
@@ -283,9 +320,7 @@ func (fake *FakeChecker) ListRefsReturnsOnCall(i int, result1 []*plumbing.Refere
 func (fake *FakeChecker) ReadAllBody(arg1 *http.Response) ([]byte, error) {
 	fake.readAllBodyMutex.Lock()
 	ret, specificReturn := fake.readAllBodyReturnsOnCall[len(fake.readAllBodyArgsForCall)]
-	fake.readAllBodyArgsForCall = append(fake.readAllBodyArgsForCall, struct {
-		arg1 *http.Response
-	}{arg1})
+	fake.readAllBodyArgsForCall = append(fake.readAllBodyArgsForCall, FakeCheckerReadAllBodyArgs{arg1})
 	stub := fake.ReadAllBodyStub
 	fakeReturns := fake.readAllBodyReturns
 	fake.recordInvocation("ReadAllBody", []interface{}{arg1})
@@ -315,7 +350,15 @@ func (fake *FakeChecker) ReadAllBodyArgsForCall(i int) *http.Response {
 	fake.readAllBodyMutex.RLock()
 	defer fake.readAllBodyMutex.RUnlock()
 	argsForCall := fake.readAllBodyArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
+}
+
+func (fake *FakeChecker) ReadAllBodyArgs() []FakeCheckerReadAllBodyArgs {
+	fake.readAllBodyMutex.RLock()
+	defer fake.readAllBodyMutex.RUnlock()
+	args := make([]FakeCheckerReadAllBodyArgs, len(fake.readAllBodyArgsForCall))
+	copy(args, fake.readAllBodyArgsForCall)
+	return args
 }
 
 func (fake *FakeChecker) ReadAllBodyReturns(result1 []byte, result2 error) {
@@ -344,7 +387,7 @@ func (fake *FakeChecker) ReadAllBodyReturnsOnCall(i int, result1 []byte, result2
 	}{result1, result2}
 }
 
-func (fake *FakeChecker) UnmarshalProwConfig(arg1 []byte) (interface{}, error) {
+func (fake *FakeChecker) UnmarshalProwConfig(arg1 []byte) (any, error) {
 	var arg1Copy []byte
 	if arg1 != nil {
 		arg1Copy = make([]byte, len(arg1))
@@ -352,9 +395,7 @@ func (fake *FakeChecker) UnmarshalProwConfig(arg1 []byte) (interface{}, error) {
 	}
 	fake.unmarshalProwConfigMutex.Lock()
 	ret, specificReturn := fake.unmarshalProwConfigReturnsOnCall[len(fake.unmarshalProwConfigArgsForCall)]
-	fake.unmarshalProwConfigArgsForCall = append(fake.unmarshalProwConfigArgsForCall, struct {
-		arg1 []byte
-	}{arg1Copy})
+	fake.unmarshalProwConfigArgsForCall = append(fake.unmarshalProwConfigArgsForCall, FakeCheckerUnmarshalProwConfigArgs{arg1Copy})
 	stub := fake.UnmarshalProwConfigStub
 	fakeReturns := fake.unmarshalProwConfigReturns
 	fake.recordInvocation("UnmarshalProwConfig", []interface{}{arg1Copy})
@@ -374,7 +415,7 @@ func (fake *FakeChecker) UnmarshalProwConfigCallCount() int {
 	return len(fake.unmarshalProwConfigArgsForCall)
 }
 
-func (fake *FakeChecker) UnmarshalProwConfigCalls(stub func([]byte) (interface{}, error)) {
+func (fake *FakeChecker) UnmarshalProwConfigCalls(stub func([]byte) (any, error)) {
 	fake.unmarshalProwConfigMutex.Lock()
 	defer fake.unmarshalProwConfigMutex.Unlock()
 	fake.UnmarshalProwConfigStub = stub
@@ -384,31 +425,39 @@ func (fake *FakeChecker) UnmarshalProwConfigArgsForCall(i int) []byte {
 	fake.unmarshalProwConfigMutex.RLock()
 	defer fake.unmarshalProwConfigMutex.RUnlock()
 	argsForCall := fake.unmarshalProwConfigArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
 }
 
-func (fake *FakeChecker) UnmarshalProwConfigReturns(result1 interface{}, result2 error) {
+func (fake *FakeChecker) UnmarshalProwConfigArgs() []FakeCheckerUnmarshalProwConfigArgs {
+	fake.unmarshalProwConfigMutex.RLock()
+	defer fake.unmarshalProwConfigMutex.RUnlock()
+	args := make([]FakeCheckerUnmarshalProwConfigArgs, len(fake.unmarshalProwConfigArgsForCall))
+	copy(args, fake.unmarshalProwConfigArgsForCall)
+	return args
+}
+
+func (fake *FakeChecker) UnmarshalProwConfigReturns(result1 any, result2 error) {
 	fake.unmarshalProwConfigMutex.Lock()
 	defer fake.unmarshalProwConfigMutex.Unlock()
 	fake.UnmarshalProwConfigStub = nil
 	fake.unmarshalProwConfigReturns = struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}{result1, result2}
 }
 
-func (fake *FakeChecker) UnmarshalProwConfigReturnsOnCall(i int, result1 interface{}, result2 error) {
+func (fake *FakeChecker) UnmarshalProwConfigReturnsOnCall(i int, result1 any, result2 error) {
 	fake.unmarshalProwConfigMutex.Lock()
 	defer fake.unmarshalProwConfigMutex.Unlock()
 	fake.UnmarshalProwConfigStub = nil
 	if fake.unmarshalProwConfigReturnsOnCall == nil {
 		fake.unmarshalProwConfigReturnsOnCall = make(map[int]struct {
-			result1 interface{}
+			result1 any
 			result2 error
 		})
 	}
 	fake.unmarshalProwConfigReturnsOnCall[i] = struct {
-		result1 interface{}
+		result1 any
 		result2 error
 	}{result1, result2}
 }
@@ -421,9 +470,7 @@ func (fake *FakeChecker) UnmarshalProwJobs(arg1 []byte) (*v1.ProwJobList, error)
 	}
 	fake.unmarshalProwJobsMutex.Lock()
 	ret, specificReturn := fake.unmarshalProwJobsReturnsOnCall[len(fake.unmarshalProwJobsArgsForCall)]
-	fake.unmarshalProwJobsArgsForCall = append(fake.unmarshalProwJobsArgsForCall, struct {
-		arg1 []byte
-	}{arg1Copy})
+	fake.unmarshalProwJobsArgsForCall = append(fake.unmarshalProwJobsArgsForCall, FakeCheckerUnmarshalProwJobsArgs{arg1Copy})
 	stub := fake.UnmarshalProwJobsStub
 	fakeReturns := fake.unmarshalProwJobsReturns
 	fake.recordInvocation("UnmarshalProwJobs", []interface{}{arg1Copy})
@@ -453,7 +500,15 @@ func (fake *FakeChecker) UnmarshalProwJobsArgsForCall(i int) []byte {
 	fake.unmarshalProwJobsMutex.RLock()
 	defer fake.unmarshalProwJobsMutex.RUnlock()
 	argsForCall := fake.unmarshalProwJobsArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
+}
+
+func (fake *FakeChecker) UnmarshalProwJobsArgs() []FakeCheckerUnmarshalProwJobsArgs {
+	fake.unmarshalProwJobsMutex.RLock()
+	defer fake.unmarshalProwJobsMutex.RUnlock()
+	args := make([]FakeCheckerUnmarshalProwJobsArgs, len(fake.unmarshalProwJobsArgsForCall))
+	copy(args, fake.unmarshalProwJobsArgsForCall)
+	return args
 }
 
 func (fake *FakeChecker) UnmarshalProwJobsReturns(result1 *v1.ProwJobList, result2 error) {
@@ -485,18 +540,6 @@ func (fake *FakeChecker) UnmarshalProwJobsReturnsOnCall(i int, result1 *v1.ProwJ
 func (fake *FakeChecker) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
-	fake.closeBodyMutex.RLock()
-	defer fake.closeBodyMutex.RUnlock()
-	fake.httpGetMutex.RLock()
-	defer fake.httpGetMutex.RUnlock()
-	fake.listRefsMutex.RLock()
-	defer fake.listRefsMutex.RUnlock()
-	fake.readAllBodyMutex.RLock()
-	defer fake.readAllBodyMutex.RUnlock()
-	fake.unmarshalProwConfigMutex.RLock()
-	defer fake.unmarshalProwConfigMutex.RUnlock()
-	fake.unmarshalProwJobsMutex.RLock()
-	defer fake.unmarshalProwJobsMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value
@@ -504,9 +547,18 @@ func (fake *FakeChecker) Invocations() map[string][][]interface{} {
 	return copiedInvocations
 }
 
+func (fake *FakeChecker) CallOrder() []string {
+	fake.invocationsMutex.RLock()
+	defer fake.invocationsMutex.RUnlock()
+	order := make([]string, len(fake.callOrder))
+	copy(order, fake.callOrder)
+	return order
+}
+
 func (fake *FakeChecker) recordInvocation(key string, args []interface{}) {
 	fake.invocationsMutex.Lock()
 	defer fake.invocationsMutex.Unlock()
+	fake.callOrder = append(fake.callOrder, key)
 	if fake.invocations == nil {
 		fake.invocations = map[string][][]interface{}{}
 	}

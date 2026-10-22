@@ -12,10 +12,8 @@ import (
 type FakeVerifier struct {
 	CheckInTestFreezeStub        func(*logrus.Entry) (*checker.Result, error)
 	checkInTestFreezeMutex       sync.RWMutex
-	checkInTestFreezeArgsForCall []struct {
-		arg1 *logrus.Entry
-	}
-	checkInTestFreezeReturns struct {
+	checkInTestFreezeArgsForCall []FakeVerifierCheckInTestFreezeArgs
+	checkInTestFreezeReturns     struct {
 		result1 *checker.Result
 		result2 error
 	}
@@ -25,29 +23,36 @@ type FakeVerifier struct {
 	}
 	CreateCommentStub        func(plugins.PluginGitHubClient, string, string, int, string) error
 	createCommentMutex       sync.RWMutex
-	createCommentArgsForCall []struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-		arg5 string
-	}
-	createCommentReturns struct {
+	createCommentArgsForCall []FakeVerifierCreateCommentArgs
+	createCommentReturns     struct {
 		result1 error
 	}
 	createCommentReturnsOnCall map[int]struct {
 		result1 error
 	}
 	invocations      map[string][][]interface{}
+	callOrder        []string
 	invocationsMutex sync.RWMutex
+}
+
+// FakeVerifierCheckInTestFreezeArgs holds the arguments of one call to CheckInTestFreeze.
+type FakeVerifierCheckInTestFreezeArgs struct {
+	Arg1 *logrus.Entry
+}
+
+// FakeVerifierCreateCommentArgs holds the arguments of one call to CreateComment.
+type FakeVerifierCreateCommentArgs struct {
+	Arg1 plugins.PluginGitHubClient
+	Arg2 string
+	Arg3 string
+	Arg4 int
+	Arg5 string
 }
 
 func (fake *FakeVerifier) CheckInTestFreeze(arg1 *logrus.Entry) (*checker.Result, error) {
 	fake.checkInTestFreezeMutex.Lock()
 	ret, specificReturn := fake.checkInTestFreezeReturnsOnCall[len(fake.checkInTestFreezeArgsForCall)]
-	fake.checkInTestFreezeArgsForCall = append(fake.checkInTestFreezeArgsForCall, struct {
-		arg1 *logrus.Entry
-	}{arg1})
+	fake.checkInTestFreezeArgsForCall = append(fake.checkInTestFreezeArgsForCall, FakeVerifierCheckInTestFreezeArgs{arg1})
 	stub := fake.CheckInTestFreezeStub
 	fakeReturns := fake.checkInTestFreezeReturns
 	fake.recordInvocation("CheckInTestFreeze", []interface{}{arg1})
@@ -77,7 +82,15 @@ func (fake *FakeVerifier) CheckInTestFreezeArgsForCall(i int) *logrus.Entry {
 	fake.checkInTestFreezeMutex.RLock()
 	defer fake.checkInTestFreezeMutex.RUnlock()
 	argsForCall := fake.checkInTestFreezeArgsForCall[i]
-	return argsForCall.arg1
+	return argsForCall.Arg1
+}
+
+func (fake *FakeVerifier) CheckInTestFreezeArgs() []FakeVerifierCheckInTestFreezeArgs {
+	fake.checkInTestFreezeMutex.RLock()
+	defer fake.checkInTestFreezeMutex.RUnlock()
+	args := make([]FakeVerifierCheckInTestFreezeArgs, len(fake.checkInTestFreezeArgsForCall))
+	copy(args, fake.checkInTestFreezeArgsForCall)
+	return args
 }
 
 func (fake *FakeVerifier) CheckInTestFreezeReturns(result1 *checker.Result, result2 error) {
@@ -109,13 +122,7 @@ func (fake *FakeVerifier) CheckInTestFreezeReturnsOnCall(i int, result1 *checker
 func (fake *FakeVerifier) CreateComment(arg1 plugins.PluginGitHubClient, arg2 string, arg3 string, arg4 int, arg5 string) error {
 	fake.createCommentMutex.Lock()
 	ret, specificReturn := fake.createCommentReturnsOnCall[len(fake.createCommentArgsForCall)]
-	fake.createCommentArgsForCall = append(fake.createCommentArgsForCall, struct {
-		arg1 plugins.PluginGitHubClient
-		arg2 string
-		arg3 string
-		arg4 int
-		arg5 string
-	}{arg1, arg2, arg3, arg4, arg5})
+	fake.createCommentArgsForCall = append(fake.createCommentArgsForCall, FakeVerifierCreateCommentArgs{arg1, arg2, arg3, arg4, arg5})
 	stub := fake.CreateCommentStub
 	fakeReturns := fake.createCommentReturns
 	fake.recordInvocation("CreateComment", []interface{}{arg1, arg2, arg3, arg4, arg5})
@@ -145,7 +152,15 @@ func (fake *FakeVerifier) CreateCommentArgsForCall(i int) (plugins.PluginGitHubC
 	fake.createCommentMutex.RLock()
 	defer fake.createCommentMutex.RUnlock()
 	argsForCall := fake.createCommentArgsForCall[i]
-	return argsForCall.arg1, argsForCall.arg2, argsForCall.arg3, argsForCall.arg4, argsForCall.arg5
+	return argsForCall.Arg1, argsForCall.Arg2, argsForCall.Arg3, argsForCall.Arg4, argsForCall.Arg5
+}
+
+func (fake *FakeVerifier) CreateCommentArgs() []FakeVerifierCreateCommentArgs {
+	fake.createCommentMutex.RLock()
+	defer fake.createCommentMutex.RUnlock()
+	args := make([]FakeVerifierCreateCommentArgs, len(fake.createCommentArgsForCall))
+	copy(args, fake.createCommentArgsForCall)
+	return args
 }
 
 func (fake *FakeVerifier) CreateCommentReturns(result1 error) {
@@ -174,10 +189,6 @@ func (fake *FakeVerifier) CreateCommentReturnsOnCall(i int, result1 error) {
 func (fake *FakeVerifier) Invocations() map[string][][]interface{} {
 	fake.invocationsMutex.RLock()
 	defer fake.invocationsMutex.RUnlock()
-	fake.checkInTestFreezeMutex.RLock()
-	defer fake.checkInTestFreezeMutex.RUnlock()
-	fake.createCommentMutex.RLock()
-	defer fake.createCommentMutex.RUnlock()
 	copiedInvocations := map[string][][]interface{}{}
 	for key, value := range fake.invocations {
 		copiedInvocations[key] = value
@@ -185,9 +196,18 @@ func (fake *FakeVerifier) Invocations() map[string][][]interface{} {
 	return copiedInvocations
 }
 
+func (fake *FakeVerifier) CallOrder() []string {
+	fake.invocationsMutex.RLock()
+	defer fake.invocationsMutex.RUnlock()
+	order := make([]string, len(fake.callOrder))
+	copy(order, fake.callOrder)
+	return order
+}
+
 func (fake *FakeVerifier) recordInvocation(key string, args []interface{}) {
 	fake.invocationsMutex.Lock()
 	defer fake.invocationsMutex.Unlock()
+	fake.callOrder = append(fake.callOrder, key)
 	if fake.invocations == nil {
 		fake.invocations = map[string][][]interface{}{}
 	}

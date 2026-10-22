@@ -27,9 +27,12 @@ package ghcache
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"os"
 	"path"
 	"path/filepath"
@@ -518,16 +521,59 @@ func NewMemCache(roundTripper http.RoundTripper, maxConcurrency int, throttlingT
 // CachePartitionCreator creates a new cache partition using the given key
 type CachePartitionCreator func(partitionKey string, expiresAt *time.Time) httpcache.Cache
 
+type originalURLContextKey struct{}
+
+// acceptAwareCacheTransport extends httpcache.Transport's URL-only cache key
+// with a digest of the original URL and all Accept header values.
+type acceptAwareCacheTransport struct {
+	transport *httpcache.Transport
+}
+
+func (transport *acceptAwareCacheTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	if req.Method != http.MethodGet {
+		return transport.transport.RoundTrip(req)
+	}
+
+	keyedRequest := req.Clone(req.Context())
+	keyedRequest.URL = new(url.URL)
+	*keyedRequest.URL = *req.URL
+	acceptKey := req.URL.String() + "\n" + strings.Join(req.Header.Values("Accept"), ", ")
+	acceptKeyDigest := sha256.Sum256([]byte(acceptKey))
+	keyedRequest.URL.Fragment = "ghcache-accept-" + hex.EncodeToString(acceptKeyDigest[:])
+	keyedRequest.URL.RawFragment = ""
+	keyedRequest = keyedRequest.WithContext(context.WithValue(keyedRequest.Context(), originalURLContextKey{}, req.URL))
+	return transport.transport.RoundTrip(keyedRequest)
+}
+
+// restoreRequestURLTransport removes the cache-only URL fragment before the
+// request reaches throttling, metrics, and the upstream transport.
+type restoreRequestURLTransport struct {
+	roundTripper http.RoundTripper
+}
+
+func (transport *restoreRequestURLTransport) RoundTrip(req *http.Request) (*http.Response, error) {
+	originalURL, ok := req.Context().Value(originalURLContextKey{}).(*url.URL)
+	if !ok {
+		return transport.roundTripper.RoundTrip(req)
+	}
+
+	restoredRequest := req.Clone(req.Context())
+	restoredRequest.URL = originalURL
+	return transport.roundTripper.RoundTrip(restoredRequest)
+}
+
 // NewFromCache creates a GitHub cache RoundTripper that is backed by the
 // specified httpcache.Cache implementation.
 func NewFromCache(roundTripper http.RoundTripper, cache CachePartitionCreator, maxConcurrency int, throttlingTimes RequestThrottlingTimes) http.RoundTripper {
 	hasher := ghmetrics.NewCachingHasher()
 	return newPartitioningRoundTripper(func(partitionKey string, expiresAt *time.Time) http.RoundTripper {
 		cacheTransport := httpcache.NewTransport(cache(partitionKey, expiresAt))
-		cacheTransport.Transport = newThrottlingTransport(maxConcurrency, upstreamTransport{roundTripper: roundTripper, hasher: hasher}, hasher, throttlingTimes)
+		cacheTransport.Transport = &restoreRequestURLTransport{
+			roundTripper: newThrottlingTransport(maxConcurrency, upstreamTransport{roundTripper: roundTripper, hasher: hasher}, hasher, throttlingTimes),
+		}
 		return &requestCoalescer{
 			cache:           make(map[string]*firstRequest),
-			requestExecutor: cacheTransport,
+			requestExecutor: &acceptAwareCacheTransport{transport: cacheTransport},
 			hasher:          hasher,
 		}
 	})

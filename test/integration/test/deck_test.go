@@ -224,6 +224,34 @@ func getSpecs(pjs *prowjobv1.ProwJobList) []prowjobv1.ProwJobSpec {
 	return res
 }
 
+// deckHTTPScraper retries transient HTTP failures. The poll context bounds both
+// waiting for response headers and reading the body.
+func deckHTTPScraper(t *testing.T, endpoint string, body *[]byte) wait.ConditionWithContextFunc {
+	return func(ctx context.Context) (bool, error) {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint, nil)
+		if err != nil {
+			return false, err
+		}
+		resp, err := http.DefaultClient.Do(req)
+		if err != nil {
+			t.Logf("Failed running GET request against %q: %v", endpoint, err)
+			return false, nil
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Logf("Expected response status code %d, got %d", http.StatusOK, resp.StatusCode)
+			return false, nil
+		}
+		content, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Logf("Failed getting deck body response content: %v", err)
+			return false, nil
+		}
+		*body = content
+		return true, nil
+	}
+}
+
 func TestDeck(t *testing.T) {
 	t.Parallel()
 
@@ -232,24 +260,7 @@ func TestDeck(t *testing.T) {
 	// to pick up job-config changes, during which the ingress answers with
 	// a 5xx. Retry until deck serves the front page.
 	var body []byte
-	scraper := func(ctx context.Context) (bool, error) {
-		resp, err := http.Get("http://localhost/deck")
-		if err != nil {
-			t.Logf("Failed getting deck front end: %v", err)
-			return false, nil
-		}
-		defer resp.Body.Close()
-		if resp.StatusCode != http.StatusOK {
-			t.Logf("Expected response status code %d, got %d", http.StatusOK, resp.StatusCode)
-			return false, nil
-		}
-		body, err = io.ReadAll(resp.Body)
-		if err != nil {
-			t.Logf("Failed getting deck body response content: %v", err)
-			return false, nil
-		}
-		return true, nil
-	}
+	scraper := deckHTTPScraper(t, "http://localhost/deck", &body)
 	if waitErr := wait.PollUntilContextTimeout(context.Background(), 1*time.Second, 180*time.Second, true, scraper); waitErr != nil {
 		t.Fatalf("Timed out waiting for deck front end: %v", waitErr)
 	}
@@ -311,22 +322,11 @@ func TestDeckTenantIDs(t *testing.T) {
 			timeout := 180 * time.Second
 			pollInterval := 1 * time.Second
 			endpoint := fmt.Sprintf("http://localhost/%s/prowjobs.js", tt.deckInstance)
+			readResponse := deckHTTPScraper(t, endpoint, &body)
 			// Every time "scraper" below returns "false, nil" we retry it.
 			scraper := func(ctx context.Context) (bool, error) {
-				resp, err := http.Get(endpoint)
-				if err != nil {
-					t.Logf("Failed running GET request against %q: %v", endpoint, err)
-					return false, nil
-				}
-				defer resp.Body.Close()
-				if resp.StatusCode != http.StatusOK {
-					t.Logf("Expected response status code %d, got %d, ", http.StatusOK, resp.StatusCode)
-					return false, nil
-				}
-				body, err = io.ReadAll(resp.Body)
-				if err != nil {
-					t.Logf("Failed getting deck body response content %v", err)
-					return false, nil
+				if ok, err := readResponse(ctx); !ok || err != nil {
+					return ok, err
 				}
 
 				got := prowjobv1.ProwJobList{}

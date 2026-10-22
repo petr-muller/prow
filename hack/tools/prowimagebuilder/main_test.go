@@ -309,6 +309,7 @@ func TestGitTag(t *testing.T) {
 
 func TestBuildAndPush(t *testing.T) {
 	date, gitHash := "20220222", "a1b2c3d4"
+	t.Setenv("VERSION", "v20220222-a1b2c3d4")
 
 	tests := []struct {
 		name         string
@@ -333,9 +334,58 @@ func TestBuildAndPush(t *testing.T) {
 				"--tags=latest-root",
 				"--tags=20220222-a1b2c3d4",
 				"--tags=ko-20220222-a1b2c3d4",
+				"--ldflags=-s -w",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Version=v20220222-a1b2c3d4",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Name=awesome",
 				"--base-import-paths",
 				"--platform=linux/amd64",
 				"./cmd/awesome",
+			},
+		},
+		{
+			name: "external-plugin",
+			id: imageDef{
+				Dir:  "cmd/external-plugins/needs-rebase",
+				Arch: "linux/amd64",
+			},
+			koDockerRepo: "local.test",
+			want: []string{
+				"publish",
+				"--tarball=_bin/needs-rebase.tar",
+				"--push=false",
+				"--tags=latest",
+				"--tags=latest-root",
+				"--tags=20220222-a1b2c3d4",
+				"--tags=ko-20220222-a1b2c3d4",
+				"--ldflags=-s -w",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Version=v20220222-a1b2c3d4",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Name=needs-rebase",
+				"--base-import-paths",
+				"--platform=linux/amd64",
+				"./cmd/external-plugins/needs-rebase",
+			},
+		},
+		{
+			name: "webhook-server",
+			id: imageDef{
+				Dir:  "cmd/webhook-server",
+				Arch: "linux/amd64",
+			},
+			koDockerRepo: "local.test",
+			want: []string{
+				"publish",
+				"--tarball=_bin/webhook-server.tar",
+				"--push=false",
+				"--tags=latest",
+				"--tags=latest-root",
+				"--tags=20220222-a1b2c3d4",
+				"--tags=ko-20220222-a1b2c3d4",
+				"--ldflags=-s -w",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Version=v20220222-a1b2c3d4",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Name=webhook-server",
+				"--base-import-paths",
+				"--platform=linux/amd64",
+				"./cmd/webhook-server",
 			},
 		},
 		{
@@ -353,6 +403,9 @@ func TestBuildAndPush(t *testing.T) {
 				"--tags=latest-root",
 				"--tags=20220222-a1b2c3d4",
 				"--tags=ko-20220222-a1b2c3d4",
+				"--ldflags=-s -w",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Version=v20220222-a1b2c3d4",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Name=awesome",
 				"--base-import-paths",
 				"--platform=linux/amd64",
 				"./cmd/awesome",
@@ -385,6 +438,9 @@ func TestBuildAndPush(t *testing.T) {
 				"--tags=latest-root-ppc64le",
 				"--tags=20220222-a1b2c3d4-ppc64le",
 				"--tags=ko-20220222-a1b2c3d4-ppc64le",
+				"--ldflags=-s -w",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Version=v20220222-a1b2c3d4",
+				"--ldflags=-X sigs.k8s.io/prow/pkg/version.Name=awesome",
 				"--base-import-paths",
 				"--platform=all",
 				"./cmd/awesome",

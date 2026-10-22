@@ -255,7 +255,12 @@ func buildAndPush(id *imageDef, dockerRepos []string, push bool) error {
 	for _, tag := range tags {
 		publishArgs = append(publishArgs, fmt.Sprintf("--tags=%s", tag))
 	}
-	publishArgs = append(publishArgs, "--base-import-paths", "--platform="+id.Arch, "./"+id.Dir)
+	// CLI ldflags replace ko's configured ldflags, so supply the complete set.
+	publishArgs = append(publishArgs,
+		"--ldflags=-s -w",
+		"--ldflags=-X sigs.k8s.io/prow/pkg/version.Version="+os.Getenv("VERSION"),
+		"--ldflags=-X sigs.k8s.io/prow/pkg/version.Name="+path.Base(id.Dir),
+		"--base-import-paths", "--platform="+id.Arch, "./"+id.Dir)
 
 	defer teardown(id)
 	if err := setup(id); err != nil {

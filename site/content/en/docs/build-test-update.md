@@ -19,6 +19,42 @@ Push to remote with
 ```shell
 make push-images REGISTRY=<YOUR_REGISTRY>
 ```
+
+The supported image build entry point is `hack/tools/prowimagebuilder`, invoked by
+these Make targets. To build one image, use
+`make build-single-image PROW_IMAGE=cmd/hook` (or
+`PROW_IMAGE=cmd/external-plugins/needs-rebase` for an external plugin).
+The builder passes the complete linker flags to `ko`: `-s -w` strips symbol and
+DWARF debug information, `Version` comes from its existing `VERSION` value
+(`vYYYYMMDD-<git describe --always --dirty>`), and `Name` is the basename of the
+image directory. The flags apply to every requested platform.
+
+`cmd/webhook-server` previously had no `builds` entry in `.ko.yaml`, so it did not
+receive the explicit stripping or Prow version/name flags configured for the
+other 35 components. Through the image builder it now receives `-s -w`, the same
+version value, and `Name=webhook-server`.
+
+`.ko.yaml` retains base image overrides but no longer supplies linker metadata.
+Direct `ko` invocations must pass all linker flags explicitly to retain the
+previous stripping and version/name values. With ko v0.19.0 or newer, run from the
+repository root (set `KO_DOCKER_REPO` for your destination):
+
+```shell
+image=cmd/hook # or cmd/external-plugins/needs-rebase
+VERSION="$(date +v%Y%m%d)-$(git describe --always --dirty)"
+_bin/ko publish \
+  --ldflags="-s -w" \
+  --ldflags="-X sigs.k8s.io/prow/pkg/version.Version=${VERSION}" \
+  --ldflags="-X sigs.k8s.io/prow/pkg/version.Name=${image##*/}" \
+  "./${image}"
+```
+
+The builder installs the repository's pinned ko at `_bin/ko`; an independently
+installed ko v0.19.0 or newer can also run this command. Setting `VERSION` alone
+is insufficient for direct ko builds because the YAML templates were removed.
+CLI `--ldflags` replace all YAML linker flags, so include stripping, version, and
+name together. Specify platform, tags, and push or tarball options as needed.
+
 Unit test with:
 ```shell
 make test

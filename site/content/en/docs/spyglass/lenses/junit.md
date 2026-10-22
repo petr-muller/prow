@@ -15,6 +15,7 @@ The JUnit lens supports optional configuration to group testcases based on their
   * `name` - Display name for the group section header
   * `selector` - XPath property selector expression (currently supports `properties/property[@name='X' and @value='Y']` syntax)
   * `collapsed` - Boolean, whether the group section starts collapsed (default: `false`)
+  * `include_suite_properties` - Boolean, whether the selector also uses properties inherited from enclosing `<testsuite>` elements (default: `false`). Testcase properties override suite properties with the same name; nearer suites override ancestor suites. This option applies only to this group.
 
 Tests matching a group selector are displayed in a separate group section with its name as header and the group's pass/fail/skip/flaky breakdown. Tests that don't match any group remain in a default group at the beginning.
 
@@ -31,6 +32,7 @@ deck:
           - name: "Informing Tests"
             selector: "properties/property[@name='lifecycle' and @value='informing']"
             collapsed: true
+            include_suite_properties: true
           - name: "Upgrade Tests"
             selector: "properties/property[@name='type' and @value='upgrade']"
             collapsed: false
@@ -53,6 +55,33 @@ JUnit XML files with optional `<properties>` elements within `<testcase>` elemen
   </testsuite>
 </testsuites>
 ```
+
+Groups with `include_suite_properties: true` also match suite-level properties. For
+example, the "Informing Tests" group above matches `test_inherited` below, while
+`test_override` remains in the default group because its testcase property overrides
+the suite's `lifecycle` value:
+
+```xml
+<testsuites>
+  <testsuite name="parent">
+    <properties>
+      <property name="lifecycle" value="informing"/>
+    </properties>
+    <testsuite name="nested">
+      <testcase name="test_inherited"/>
+      <testcase name="test_override">
+        <properties>
+          <property name="lifecycle" value="blocking"/>
+        </properties>
+      </testcase>
+    </testsuite>
+  </testsuite>
+</testsuites>
+```
+
+Groups without this option continue to inspect testcase properties only. Suite
+properties do not carry over to sibling suites. Group order still determines the
+first match, including when groups use different settings for this option.
 
 ## Selector Syntax
 

@@ -64,6 +64,8 @@ type GroupConfig struct {
 	Name      string `json:"name"`
 	Selector  string `json:"selector"`
 	Collapsed bool   `json:"collapsed"`
+	// IncludeSuiteProperties enables inherited suite properties for this group.
+	IncludeSuiteProperties bool `json:"include_suite_properties,omitempty"`
 }
 
 // LensConfig is the configuration for the JUnit lens.
@@ -209,6 +211,28 @@ func (lens Lens) Callback(artifacts []api.Artifact, resourceDir string, data str
 
 type JunitResult struct {
 	junit.Result
+}
+
+// inheritProperties overlays local properties by name without modifying either input.
+// Preserve multiple values at the same level, as testcase-only selectors do.
+func inheritProperties(parent, local *junit.Properties) *junit.Properties {
+	if local == nil {
+		return parent
+	}
+	names := make(map[string]bool, len(local.PropertyList))
+	for _, property := range local.PropertyList {
+		names[property.Name] = true
+	}
+	var props []junit.Property
+	if parent != nil {
+		for _, property := range parent.PropertyList {
+			if !names[property.Name] {
+				props = append(props, property)
+			}
+		}
+	}
+	props = append(props, local.PropertyList...)
+	return &junit.Properties{PropertyList: props}
 }
 
 func (jr JunitResult) Duration() time.Duration {
@@ -360,9 +384,11 @@ func (lens Lens) getJvd(artifacts []api.Artifact, groups []GroupConfig) JVD {
 
 	type testResults struct {
 		junit [][]JunitResult
-		link  string
-		path  string
-		err   error
+		// effectiveProperties parallels junit and leaves parsed testcase metadata intact.
+		effectiveProperties []*junit.Properties
+		link                string
+		path                string
+		err                 error
 	}
 	type testIdentifier struct {
 		suite string
@@ -373,6 +399,7 @@ func (lens Lens) getJvd(artifacts []api.Artifact, groups []GroupConfig) JVD {
 	for _, artifact := range artifacts {
 		go func(artifact api.Artifact) {
 			dedupe := make(map[testIdentifier][]JunitResult)
+			effectiveProperties := make(map[testIdentifier]*junit.Properties)
 			var testsSequence []testIdentifier
 			result := testResults{
 				link: artifact.CanonicalLink(),
@@ -392,10 +419,11 @@ func (lens Lens) getJvd(artifacts []api.Artifact, groups []GroupConfig) JVD {
 				resultChan <- result
 				return
 			}
-			var record func(suite junit.Suite)
-			record = func(suite junit.Suite) {
+			var record func(suite junit.Suite, inherited *junit.Properties)
+			record = func(suite junit.Suite, inherited *junit.Properties) {
+				properties := inheritProperties(inherited, suite.Properties)
 				for _, subSuite := range suite.Suites {
-					record(subSuite)
+					record(subSuite, properties)
 				}
 
 				for _, test := range suite.Results {
@@ -407,15 +435,17 @@ func (lens Lens) getJvd(artifacts []api.Artifact, groups []GroupConfig) JVD {
 					k := testIdentifier{suite.Name, test.ClassName, test.Name}
 					dedupe[k] = append(dedupe[k], JunitResult{Result: test})
 					if len(dedupe[k]) == 1 {
+						effectiveProperties[k] = inheritProperties(properties, test.Properties)
 						testsSequence = append(testsSequence, k)
 					}
 				}
 			}
 			for _, suite := range suites.Suites {
-				record(suite)
+				record(suite, nil)
 			}
 			for _, identifier := range testsSequence {
 				result.junit = append(result.junit, dedupe[identifier])
+				result.effectiveProperties = append(result.effectiveProperties, effectiveProperties[identifier])
 			}
 			resultChan <- result
 		}(artifact)
@@ -451,10 +481,14 @@ func (lens Lens) getJvd(artifacts []api.Artifact, groups []GroupConfig) JVD {
 		// Partition tests by group membership.
 		groupPartitions := make([][][]JunitResult, len(compiled))
 		var defaultPartition [][]JunitResult
-		for _, tests := range result.junit {
+		for testIndex, tests := range result.junit {
 			matched := false
 			for i := range compiled {
-				if compiled[i].predicate.matches(tests[0].Result) {
+				test := tests[0].Result
+				if compiled[i].config.IncludeSuiteProperties {
+					test.Properties = result.effectiveProperties[testIndex]
+				}
+				if compiled[i].predicate.matches(test) {
 					groupPartitions[i] = append(groupPartitions[i], tests)
 					matched = true
 					break

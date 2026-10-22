@@ -1366,3 +1366,82 @@ func TestTemplate(t *testing.T) {
 		})
 	}
 }
+
+func TestGetJvdWithSuiteProperties(t *testing.T) {
+	const selector = "properties/property[@name='lifecycle' and @value='informing']"
+	inherited := GroupConfig{Name: "Inherited", Selector: selector, IncludeSuiteProperties: true}
+	ordinary := GroupConfig{Name: "Ordinary", Selector: selector}
+	tests := []struct {
+		name        string
+		xml         string
+		groups      []GroupConfig
+		wantDefault int
+		wantGroups  []int
+	}{
+		{
+			name:   "absent properties",
+			xml:    `<testsuite><testcase name="absent"/><testcase name="empty"><properties/></testcase></testsuite>`,
+			groups: []GroupConfig{inherited}, wantDefault: 2, wantGroups: []int{0},
+		},
+		{
+			name:   "suite properties require opt in",
+			xml:    `<testsuite><properties><property name="lifecycle" value="informing"/></properties><testcase name="test"/></testsuite>`,
+			groups: []GroupConfig{ordinary}, wantDefault: 1, wantGroups: []int{0},
+		},
+		{
+			name:   "suite only and testcase override",
+			xml:    `<testsuite><properties><property name="lifecycle" value="informing"/></properties><testcase name="inherited"/><testcase name="override"><properties><property name="lifecycle" value="blocking"/></properties></testcase></testsuite>`,
+			groups: []GroupConfig{inherited}, wantDefault: 1, wantGroups: []int{1},
+		},
+		{
+			name:   "nested suite override and sibling isolation",
+			xml:    `<testsuites><testsuite name="outer"><properties><property name="lifecycle" value="informing"/></properties><testsuite name="near"><properties><property name="lifecycle" value="blocking"/></properties><testcase name="near"/><testsuite name="deep"><testcase name="deep"/></testsuite></testsuite><testsuite name="sibling"><testcase name="sibling"/></testsuite><testcase name="outer"/></testsuite><testsuite name="separate"><testcase name="separate"/></testsuite></testsuites>`,
+			groups: []GroupConfig{inherited}, wantDefault: 3, wantGroups: []int{2},
+		},
+		{
+			name:       "nonmatching opted in group does not mutate testcase properties",
+			xml:        `<testsuite><properties><property name="lifecycle" value="informing"/></properties><testcase name="test"/></testsuite>`,
+			groups:     []GroupConfig{{Name: "No match", Selector: selector + "properties/property[@name='missing']", IncludeSuiteProperties: true}, ordinary, inherited},
+			wantGroups: []int{0, 0, 1},
+		},
+		{
+			name:   "ordinary group retains first match priority",
+			xml:    `<testsuite><properties><property name="lifecycle" value="blocking"/></properties><testcase name="test"><properties><property name="lifecycle" value="informing"/></properties></testcase></testsuite>`,
+			groups: []GroupConfig{ordinary, inherited}, wantGroups: []int{1, 0},
+		},
+		{
+			name:   "opted in group retains first match priority",
+			xml:    `<testsuite><testcase name="test"><properties><property name="lifecycle" value="informing"/></properties></testcase></testsuite>`,
+			groups: []GroupConfig{inherited, ordinary}, wantGroups: []int{1, 0},
+		},
+		{
+			name:   "repeated tests use first run properties and keep counts",
+			xml:    `<testsuite><properties><property name="lifecycle" value="informing"/></properties><testcase name="flaky"><failure/></testcase><testcase name="flaky"><properties><property name="lifecycle" value="blocking"/></properties></testcase><testcase name="skip"><skipped/></testcase><testcase name="fail"><failure/></testcase><testcase name="pass"/></testsuite>`,
+			groups: []GroupConfig{inherited}, wantGroups: []int{4},
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := (Lens{}).getJvd([]api.Artifact{&FakeArtifact{path: "junit.xml", content: []byte(tc.xml), sizeLimit: 500e6}}, tc.groups)
+			if got.NumTests != tc.wantDefault {
+				t.Errorf("default count = %d, want %d", got.NumTests, tc.wantDefault)
+			}
+			wantTotal := tc.wantDefault
+			for i, want := range tc.wantGroups {
+				wantTotal += want
+				if got.Groups[i].NumTests != want {
+					t.Errorf("group %d count = %d, want %d", i, got.Groups[i].NumTests, want)
+				}
+			}
+			if got.TotalTests() != wantTotal {
+				t.Errorf("total count = %d, want %d", got.TotalTests(), wantTotal)
+			}
+			if tc.name == "repeated tests use first run properties and keep counts" {
+				g := got.Groups[0]
+				if len(g.Flaky) != 1 || len(g.Flaky[0].Junit) != 2 || len(g.Passed) != 1 || len(g.Failed) != 1 || len(g.Skipped) != 1 {
+					t.Errorf("unexpected repeated test classification: %+v", g)
+				}
+			}
+		})
+	}
+}

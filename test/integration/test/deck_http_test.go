@@ -20,12 +20,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/util/wait"
 )
 
@@ -112,4 +115,99 @@ func TestDeckHTTPScraperRetries(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestRerunWithRetry(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		outcomes []string
+		wantErr  string
+		waits    []time.Duration
+	}{
+		{name: "success", outcomes: []string{"success"}},
+		{name: "transport retries", outcomes: []string{"transport", "transport", "success"}, waits: []time.Duration{10 * time.Second, 20 * time.Second}},
+		{name: "status retries", outcomes: []string{"status", "success"}, waits: []time.Duration{10 * time.Second}},
+		{name: "exhausted status", outcomes: []string{"status", "status", "status"}, wantErr: "status not expected: 503", waits: []time.Duration{10 * time.Second, 20 * time.Second}},
+		{name: "exhausted transport", outcomes: []string{"transport", "transport", "transport"}, wantErr: "could not make post request transport failure", waits: []time.Duration{10 * time.Second, 20 * time.Second}},
+		{name: "response with error", outcomes: []string{"response error", "success"}, waits: []time.Duration{10 * time.Second}},
+		{name: "body read error", outcomes: []string{"body"}, wantErr: "could not read body response read failure"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var bodies []*rerunTestBody
+			checkClosed := func() {
+				t.Helper()
+				for i, body := range bodies {
+					if body.closes != 1 {
+						t.Fatalf("body %d closed %d times, want once", i, body.closes)
+					}
+				}
+			}
+			calls := 0
+			req, err := http.NewRequest(http.MethodPost, "http://deck/rerun", nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			do := func(got *http.Request) (*http.Response, error) {
+				checkClosed()
+				if got != req {
+					t.Fatal("request changed")
+				}
+				if calls >= len(tc.outcomes) {
+					t.Fatal("unexpected additional retry")
+				}
+				outcome := tc.outcomes[calls]
+				calls++
+				if outcome == "transport" {
+					return nil, errors.New("transport failure")
+				}
+				body := &rerunTestBody{Reader: strings.NewReader("rerun response"), readError: outcome == "body"}
+				bodies = append(bodies, body)
+				res := &http.Response{StatusCode: http.StatusOK, Body: body}
+				if outcome == "status" {
+					res.StatusCode = http.StatusServiceUnavailable
+				}
+				if outcome == "response error" {
+					return res, errors.New("transport failure")
+				}
+				return res, nil
+			}
+			var waits []time.Duration
+			body, err := rerunWithRetry(req, do, func(d time.Duration) {
+				checkClosed()
+				waits = append(waits, d)
+			})
+			checkClosed()
+			if calls != len(tc.outcomes) {
+				t.Errorf("requests = %d, want %d", calls, len(tc.outcomes))
+			}
+			if diff := cmp.Diff(tc.waits, waits); diff != "" {
+				t.Errorf("waits (-want +got): %s", diff)
+			}
+			if tc.wantErr != "" {
+				if err == nil || err.Error() != tc.wantErr {
+					t.Errorf("error = %v, want %q", err, tc.wantErr)
+				}
+			} else if err != nil || string(body) != "rerun response" {
+				t.Errorf("body = %q, error = %v", body, err)
+			}
+		})
+	}
+}
+
+type rerunTestBody struct {
+	io.Reader
+	readError bool
+	closes    int
+}
+
+func (b *rerunTestBody) Read(p []byte) (int, error) {
+	if b.readError {
+		return 0, errors.New("read failure")
+	}
+	return b.Reader.Read(p)
+}
+
+func (b *rerunTestBody) Close() error {
+	b.closes++
+	return nil
 }

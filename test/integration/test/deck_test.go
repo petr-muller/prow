@@ -368,6 +368,37 @@ func TestDeckTenantIDs(t *testing.T) {
 	}
 }
 
+// rerunWithRetry allows Deck time to observe job config updates.
+func rerunWithRetry(req *http.Request, do func(*http.Request) (*http.Response, error), sleep func(time.Duration)) ([]byte, error) {
+	waitDur := 5 * time.Second
+	var lastErr error
+	for attempt := range 3 {
+		res, err := do(req)
+		if err != nil {
+			// Transport errors can return a nil response.
+			if res != nil && res.Body != nil {
+				res.Body.Close()
+			}
+			lastErr = fmt.Errorf("could not make post request %v", err)
+		} else if res.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("status not expected: %d", res.StatusCode)
+			res.Body.Close()
+		} else {
+			body, err := io.ReadAll(res.Body)
+			res.Body.Close()
+			if err != nil {
+				return nil, fmt.Errorf("could not read body response %v", err)
+			}
+			return body, nil
+		}
+		if attempt < 2 {
+			waitDur *= 2
+			sleep(waitDur)
+		}
+	}
+	return nil, lastErr
+}
+
 func TestRerun(t *testing.T) {
 	t.Parallel()
 	const rerunJobConfigFile = "rerun-test.yaml"
@@ -464,42 +495,11 @@ func TestRerun(t *testing.T) {
 			t.Fatalf("Could not generate a request %v", err)
 		}
 
-		// Deck might not have been informed about the job config update, retry
-		// for this case.
-		waitDur := time.Second * 5
-		var lastErr error
-		for range 3 {
-			lastErr = nil
-			res, err := http.DefaultClient.Do(req)
-			if err != nil {
-				// res is nil on a transport-level error (e.g. a pooled
-				// connection to the ingress closed under us; Go does not
-				// auto-retry POSTs), so there is no body to close. Retry
-				// like any other transient failure.
-				lastErr = fmt.Errorf("could not make post request %v", err)
-				waitDur *= 2
-				time.Sleep(waitDur)
-				continue
-			}
-			if res.StatusCode != http.StatusOK {
-				lastErr = fmt.Errorf("status not expected: %d", res.StatusCode)
-				res.Body.Close()
-				waitDur *= 2
-				time.Sleep(waitDur)
-				continue
-			}
-			body, err := io.ReadAll(res.Body)
-			if err != nil {
-				lastErr = fmt.Errorf("could not read body response %v", err)
-				res.Body.Close()
-				break
-			}
-			t.Logf("Response body: %s", string(body))
-			break
+		body, err := rerunWithRetry(req, http.DefaultClient.Do, time.Sleep)
+		if err != nil {
+			t.Fatalf("Failed trigger rerun: %v", err)
 		}
-		if lastErr != nil {
-			t.Fatalf("Failed trigger rerun: %v", lastErr)
-		}
+		t.Logf("Response body: %s", string(body))
 	}
 	jobToRerun := getLatestJob(t, jobName, nil)
 	rerunJobConfig = fmt.Sprintf(rerunJobConfigTemplate, jobName, "bar")

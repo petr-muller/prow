@@ -360,7 +360,10 @@ func Test_getJobHistory(t *testing.T) {
 			},
 		},
 	}
-	gcsServer := fakestorage.NewServer(objects)
+	gcsServer, err := fakestorage.NewServerWithOptions(fakestorage.Options{InitialObjects: objects})
+	if err != nil {
+		t.Fatalf("failed to create fake GCS server: %v", err)
+	}
 	defer gcsServer.Stop()
 
 	fakeGCSClient := gcsServer.Client()

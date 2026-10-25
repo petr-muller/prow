@@ -342,7 +342,10 @@ func TestShouldCompressFileType(t *testing.T) {
 func Test_openerObjectWriter_Write(t *testing.T) {
 
 	fakeBucket := "test-bucket"
-	fakeGCSServer := fakestorage.NewServer([]fakestorage.Object{})
+	fakeGCSServer, err := fakestorage.NewServerWithOptions(fakestorage.Options{InitialObjects: []fakestorage.Object{}})
+	if err != nil {
+		t.Fatalf("failed to create fake GCS server: %v", err)
+	}
 	fakeGCSServer.CreateBucketWithOpts(fakestorage.CreateBucketOpts{Name: fakeBucket})
 	defer fakeGCSServer.Stop()
 	fakeGCSClient := fakeGCSServer.Client()

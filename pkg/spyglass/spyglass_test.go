@@ -83,7 +83,8 @@ func TestMain(m *testing.M) {
 	for range 300 {
 		longLog.WriteString("here a log\nthere a log\neverywhere a log log\n")
 	}
-	fakeGCSServer = fakestorage.NewServer([]fakestorage.Object{
+	var err error
+	fakeGCSServer, err = fakestorage.NewServerWithOptions(fakestorage.Options{InitialObjects: []fakestorage.Object{
 		{
 			ObjectAttrs: fakestorage.ObjectAttrs{
 				BucketName: "test-bucket",
@@ -170,7 +171,11 @@ test/e2e/e2e.go:137 BeforeSuite on Node 1 failed test/e2e/e2e.go:137
 			},
 			Content: []byte("this log exists in gcs!"),
 		},
-	})
+	}})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		os.Exit(1)
+	}
 	defer fakeGCSServer.Stop()
 	kc := fkc{
 		prowapi.ProwJob{
@@ -1617,7 +1622,10 @@ func TestExtraLinks(t *testing.T) {
 					},
 				}
 			}
-			gcsServer := fakestorage.NewServer(objects)
+			gcsServer, err := fakestorage.NewServerWithOptions(fakestorage.Options{InitialObjects: objects})
+			if err != nil {
+				t.Fatalf("failed to create fake GCS server: %v", err)
+			}
 			defer gcsServer.Stop()
 
 			gcsClient := gcsServer.Client()

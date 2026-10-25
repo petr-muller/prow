@@ -579,7 +579,10 @@ func Test_getPRHistory(t *testing.T) {
 			Content: []byte("{\"timestamp\": 1587908767,\"passed\": true,\"result\": \"SUCCESS\",\"revision\": \"664ba002bc2155e7438b810a1bb7473c55dc1c6a\"}"),
 		},
 	}
-	gcsServer := fakestorage.NewServer(objects)
+	gcsServer, err := fakestorage.NewServerWithOptions(fakestorage.Options{InitialObjects: objects})
+	if err != nil {
+		t.Fatalf("failed to create fake GCS server: %v", err)
+	}
 	defer gcsServer.Stop()
 
 	fakeGCSClient := gcsServer.Client()

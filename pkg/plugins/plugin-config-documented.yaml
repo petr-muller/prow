@@ -57,7 +57,7 @@ blunderbuss:
     # ReviewerCount is the minimum number of reviewers to request
     # reviews from. Defaults to requesting reviews from 2 reviewers
     request_count: 0
-    # UseStatusAvailability controls whether blunderbuss will consider GitHub's
+    # UseStatusAvailability controls whether the plugin will consider GitHub's
     # status availability when requesting reviews for users. This will use at one
     # additional token per successful reviewer (and potentially more depending on
     # how many busy reviewers it had to pass over).
@@ -622,7 +622,7 @@ rifle:
     # ReviewerCount is the minimum number of reviewers to request
     # reviews from. Defaults to requesting reviews from 2 reviewers
     request_count: 0
-    # UseStatusAvailability controls whether rifle will consider GitHub's
+    # UseStatusAvailability controls whether the plugin will consider GitHub's
     # status availability when requesting reviews for users. This will use at one
     # additional token per successful reviewer (and potentially more depending on
     # how many busy reviewers it had to pass over).

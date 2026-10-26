@@ -17,15 +17,12 @@ limitations under the License.
 package rifle
 
 import (
-	"fmt"
 	"math"
 	"math/rand"
-	"slices"
 	"sort"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
 	"sigs.k8s.io/prow/pkg/layeredsets"
 
@@ -33,7 +30,6 @@ import (
 	"sigs.k8s.io/prow/pkg/github"
 	"sigs.k8s.io/prow/pkg/pluginhelp"
 	"sigs.k8s.io/prow/pkg/plugins"
-	"sigs.k8s.io/prow/pkg/plugins/assign"
 	"sigs.k8s.io/prow/pkg/reviewer"
 )
 
@@ -88,283 +84,106 @@ func helpProvider(config *plugins.Configuration, _ []config.OrgRepo) (*pluginhel
 	return pluginHelp, nil
 }
 
-func handlePullRequestEvent(pc plugins.Agent, pre github.PullRequestEvent) error {
-	return handlePullRequest(
-		pc.GitHubClient,
-		pc.OwnersClient,
-		pc.Logger,
-		pc.PluginConfig.Rifle,
-		pre.Action,
-		&pre.PullRequest,
-		&pre.Repo,
-	)
+// blameStrategy selects reviewers using git blame data, falling back to random
+// selection when blame scores are unavailable.
+type blameStrategy struct {
+	ghc rifleGitHubClient
 }
 
-func handlePullRequest(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, cfg plugins.Rifle, action github.PullRequestEventAction, pr *github.PullRequest, repo *github.Repo) error {
-	if !(action == github.PullRequestActionOpened || action == github.PullRequestActionReadyForReview) || assign.CCRegexp.MatchString(pr.Body) || cfg.WaitForStatus != nil {
-		return nil
-	}
-	if pr.Draft && cfg.IgnoreDrafts {
-		return nil
-	}
-	if slices.Contains(cfg.IgnoreAuthors, pr.User.Login) {
-		return nil
-	}
-	return handle(
-		ghc,
-		roc,
-		log,
-		cfg.ReviewerCount,
-		cfg.MaxReviewerCount,
-		cfg.ExcludeApprovers,
-		cfg.UseStatusAvailability,
-		repo,
-		pr,
-	)
-}
-
-func handleGenericCommentEvent(pc plugins.Agent, ce github.GenericCommentEvent) error {
-	return handleGenericComment(
-		pc.GitHubClient,
-		pc.OwnersClient,
-		pc.Logger,
-		pc.PluginConfig.Rifle,
-		ce.Action,
-		ce.IsPR,
-		ce.Number,
-		ce.IssueState,
-		&ce.Repo,
-		ce.Body,
-	)
-}
-
-func handleGenericComment(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, cfg plugins.Rifle, action github.GenericCommentEventAction, isPR bool, prNumber int, issueState string, repo *github.Repo, body string) error {
-	if action != github.GenericCommentActionCreated || !isPR || issueState == "closed" {
-		return nil
-	}
-
-	if !reviewer.AutoCCMatch.MatchString(body) {
-		return nil
-	}
-
-	pr, err := ghc.GetPullRequest(repo.Owner.Login, repo.Name, prNumber)
-	if err != nil {
-		return fmt.Errorf("error loading PullRequest: %w", err)
-	}
-
-	return handle(
-		ghc,
-		roc,
-		log,
-		cfg.ReviewerCount,
-		cfg.MaxReviewerCount,
-		cfg.ExcludeApprovers,
-		cfg.UseStatusAvailability,
-		repo,
-		pr,
-	)
-}
-
-func handleStatusEvent(pc plugins.Agent, se github.StatusEvent) error {
-	if se.State == "" || se.Context == "" || se.Description == "" {
-		return fmt.Errorf("invalid status event delivered with empty state/context/description")
-	}
-
-	return handleStatus(
-		pc.GitHubClient,
-		pc.OwnersClient,
-		pc.Logger,
-		pc.PluginConfig.Rifle,
-		se.SHA,
-		se.Context,
-		se.State,
-		se.Description,
-		&se.Repo,
-	)
-}
-
-func handleStatus(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, cfg plugins.Rifle, sha string, context string, state string, description string, repo *github.Repo) error {
-	wfs := cfg.WaitForStatus
-	if wfs == nil {
-		return nil
-	}
-
-	if context != wfs.Context {
-		return nil
-	}
-
-	if state != wfs.State {
-		return nil
-	}
-
-	if !wfs.DescriptionRe.MatchString(description) {
-		return nil
-	}
-
-	org := repo.Owner.Login
-	log.Info("Searching for PRs matching the commit.")
-
-	issues, err := ghc.FindIssuesWithOrg(org, fmt.Sprintf("%s repo:%s/%s type:pr state:open", sha, org, repo.Name), "", false)
-	if err != nil {
-		return fmt.Errorf("error searching for issues matching commit: %w", err)
-	}
-	log.Infof("Found %d PRs matching commit.", len(issues))
-
-	var errs []error
-	for _, issue := range issues {
-		l := log.WithField("pr", issue.Number)
-
-		l.Info("Getting pull request info.")
-		pr, err := ghc.GetPullRequest(org, repo.Name, issue.Number)
-		if err != nil {
-			l.WithError(err).Warning("Unable to fetch pull request.")
-			continue
-		}
-
-		if pr.Head.SHA != sha {
-			l.Info("Event is not for PR HEAD, skipping.")
-			continue
-		}
-
-		if pr.Draft && cfg.IgnoreDrafts {
-			continue
-		}
-
-		if slices.Contains(cfg.IgnoreAuthors, pr.User.Login) {
-			continue
-		}
-
-		if len(pr.RequestedReviewers) > 0 {
-			continue
-		}
-
-		if err := handle(
-			ghc,
-			roc,
-			l,
-			cfg.ReviewerCount,
-			cfg.MaxReviewerCount,
-			cfg.ExcludeApprovers,
-			cfg.UseStatusAvailability,
-			repo,
-			pr); err != nil {
-			l.WithError(err).Warning("Error processing event from commit status update")
-			errs = append(errs, err)
-		}
-	}
-	return utilerrors.NewAggregate(errs)
-}
-
-func handle(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, reviewerCount *int, maxReviewers int, excludeApprovers bool, useStatusAvailability bool, repo *github.Repo, pr *github.PullRequest) error {
-	oc, err := roc.LoadRepoOwners(repo.Owner.Login, repo.Name, pr.Base.Ref)
-	if err != nil {
-		return fmt.Errorf("error loading RepoOwners: %w", err)
-	}
-
-	changes, err := ghc.GetPullRequestChanges(repo.Owner.Login, repo.Name, pr.Number)
-	if err != nil {
-		return fmt.Errorf("error getting PR changes: %w", err)
-	}
-
+func (s blameStrategy) NewSelection(ctx reviewer.SelectionContext) reviewer.Selection {
 	allReviewerCandidates := sets.New[string]()
 	allApproverCandidates := sets.New[string]()
-	for _, file := range changes {
-		allReviewerCandidates = allReviewerCandidates.Union(oc.Reviewers(file.Filename).Set())
-		allApproverCandidates = allApproverCandidates.Union(oc.Approvers(file.Filename).Set())
+	for _, file := range ctx.Changes {
+		allReviewerCandidates = allReviewerCandidates.Union(ctx.OwnersClient.Reviewers(file.Filename).Set())
+		allApproverCandidates = allApproverCandidates.Union(ctx.OwnersClient.Approvers(file.Filename).Set())
 	}
 
 	// PR file patches are three-dot diffs: old-side hunk line numbers refer to
 	// the merge-base of head and base, not the current tip of the base branch.
-	ref := pr.Base.Ref
-	if pr.Head.SHA != "" {
-		mergeBase, err := ghc.GetMergeBase(repo.Owner.Login, repo.Name, pr.Base.Ref, pr.Head.SHA)
+	ref := ctx.PR.Base.Ref
+	if ctx.PR.Head.SHA != "" {
+		mergeBase, err := s.ghc.GetMergeBase(ctx.Repo.Owner.Login, ctx.Repo.Name, ctx.PR.Base.Ref, ctx.PR.Head.SHA)
 		if err != nil {
-			log.WithError(err).Warn("Failed to resolve merge-base for blame; falling back to base ref")
+			ctx.Log.WithError(err).Warn("Failed to resolve merge-base for blame; falling back to base ref")
 		} else if mergeBase != "" {
 			ref = mergeBase
 		}
 	}
 
 	scorer := &reviewerScorer{
-		ghc:       ghc,
-		org:       repo.Owner.Login,
-		repo:      repo.Name,
+		ghc:       s.ghc,
+		org:       ctx.Repo.Owner.Login,
+		repo:      ctx.Repo.Name,
 		ref:       ref,
 		approvers: allApproverCandidates,
 		reviewers: allReviewerCandidates,
 		now:       time.Now(),
-		log:       log,
+		log:       ctx.Log,
 	}
 	var blameScores map[string]float64
-	scores, err := scorer.scoreReviewers(changes)
+	scores, err := scorer.scoreReviewers(ctx.Changes)
 	if err != nil {
-		log.WithError(err).Warn("Failed to compute blame scores, falling back to random selection")
+		ctx.Log.WithError(err).Warn("Failed to compute blame scores, falling back to random selection")
 	} else {
 		blameScores = scores
 	}
 
-	busyReviewers := sets.New[string]()
-	selector := func(candidates *layeredsets.String) string {
-		if hasBlameScores(blameScores) {
-			return selectBestReviewer(blameScores, candidates, &busyReviewers, ghc, log, useStatusAvailability)
-		}
-		return reviewer.FindReviewer(ghc, log, useStatusAvailability, &busyReviewers, candidates)
+	return &blameSelection{
+		blameScores:           blameScores,
+		ghc:                   s.ghc,
+		oc:                    ctx.OwnersClient,
+		log:                   ctx.Log,
+		useStatusAvailability: ctx.UseStatusAvailability,
+		busyReviewers:         ctx.BusyReviewers,
 	}
+}
 
-	var reviewers []string
-	var requiredReviewers []string
-	if reviewerCount != nil {
-		reviewers, requiredReviewers, err = reviewer.GetReviewers(oc, selector, log, pr.User.Login, changes, *reviewerCount)
-		if err != nil {
-			return err
-		}
-		if missing := *reviewerCount - len(reviewers); missing > 0 {
-			if !excludeApprovers {
-				frc := reviewer.FallbackReviewersClient{OwnersClient: oc}
-				approvers, _, err := reviewer.GetReviewers(frc, selector, log, pr.User.Login, changes, *reviewerCount)
-				if err != nil {
-					return err
-				}
-				var added int
-				combinedReviewers := sets.New[string](reviewers...)
-				for _, approver := range approvers {
-					if !combinedReviewers.Has(approver) {
-						reviewers = append(reviewers, approver)
-						combinedReviewers.Insert(approver)
-						added++
-					}
-				}
-				log.Infof("Added %d approvers as reviewers. %d/%d reviewers found.", added, combinedReviewers.Len(), *reviewerCount)
-			}
-		}
-		if missing := *reviewerCount - len(reviewers); missing > 0 {
-			log.Debugf("Not enough reviewers found in OWNERS files for files touched by this PR. %d/%d reviewers found.", len(reviewers), *reviewerCount)
+type blameSelection struct {
+	blameScores           map[string]float64
+	ghc                   rifleGitHubClient
+	oc                    reviewer.OwnersClient
+	log                   *logrus.Entry
+	useStatusAvailability bool
+	busyReviewers         *sets.Set[string]
+}
 
-			excludeFromFallback := sets.New[string](reviewers...)
-			excludeFromFallback.Insert(github.NormLogin(pr.User.Login))
-			fallbackReviewers := findFallbackReviewers(
-				blameScores, oc, excludeFromFallback, missing,
-				&busyReviewers, ghc, log, useStatusAvailability,
-			)
-			if len(fallbackReviewers) > 0 {
-				reviewers = append(reviewers, fallbackReviewers...)
-				log.Infof("Fallback added %d reviewer(s) from broader OWNERS scope: %v", len(fallbackReviewers), fallbackReviewers)
-			}
-		}
+func (s *blameSelection) Selector(candidates *layeredsets.String) string {
+	if hasBlameScores(s.blameScores) {
+		return selectBestReviewer(s.blameScores, candidates, s.busyReviewers, s.ghc, s.log, s.useStatusAvailability)
 	}
+	return reviewer.FindReviewer(s.ghc, s.log, s.useStatusAvailability, s.busyReviewers, candidates)
+}
 
-	if maxReviewers > 0 && len(reviewers) > maxReviewers {
-		log.Infof("Limiting request of %d reviewers to %d maxReviewers.", len(reviewers), maxReviewers)
-		reviewers = reviewers[:maxReviewers]
-	}
+func (s *blameSelection) Fallback(exclude sets.Set[string], needed int) []string {
+	return findFallbackReviewers(s.blameScores, s.oc, exclude, needed, s.busyReviewers, s.ghc, s.log, s.useStatusAvailability)
+}
 
-	reviewers = append(reviewers, requiredReviewers...)
+func handlePullRequestEvent(pc plugins.Agent, pre github.PullRequestEvent) error {
+	return reviewer.HandlePullRequestEvent(pc, &pc.PluginConfig.Rifle, blameStrategy{ghc: pc.GitHubClient}, pre)
+}
 
-	if len(reviewers) > 0 {
-		log.Infof("Requesting reviews from users %s.", reviewers)
-		return ghc.RequestReview(repo.Owner.Login, repo.Name, pr.Number, reviewers)
-	}
-	return nil
+func handlePullRequest(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, cfg plugins.Rifle, action github.PullRequestEventAction, pr *github.PullRequest, repo *github.Repo) error {
+	return reviewer.HandlePullRequest(ghc, roc, log, &cfg, blameStrategy{ghc: ghc}, action, pr, repo)
+}
+
+func handleGenericCommentEvent(pc plugins.Agent, ce github.GenericCommentEvent) error {
+	return reviewer.HandleGenericCommentEvent(pc, &pc.PluginConfig.Rifle, blameStrategy{ghc: pc.GitHubClient}, ce)
+}
+
+func handleGenericComment(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, cfg plugins.Rifle, action github.GenericCommentEventAction, isPR bool, prNumber int, issueState string, repo *github.Repo, body string) error {
+	return reviewer.HandleGenericComment(ghc, roc, log, &cfg, blameStrategy{ghc: ghc}, action, isPR, prNumber, issueState, repo, body)
+}
+
+func handleStatusEvent(pc plugins.Agent, se github.StatusEvent) error {
+	return reviewer.HandleStatusEvent(pc, &pc.PluginConfig.Rifle, blameStrategy{ghc: pc.GitHubClient}, se)
+}
+
+func handleStatus(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, cfg plugins.Rifle, sha string, context string, state string, description string, repo *github.Repo) error {
+	return reviewer.HandleStatus(ghc, roc, log, &cfg, blameStrategy{ghc: ghc}, sha, context, state, description, repo)
+}
+
+func handle(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.Entry, reviewerCount *int, maxReviewers int, excludeApprovers bool, useStatusAvailability bool, repo *github.Repo, pr *github.PullRequest) error {
+	return reviewer.Handle(ghc, roc, log, blameStrategy{ghc: ghc}, reviewerCount, maxReviewers, excludeApprovers, useStatusAvailability, repo, pr)
 }
 
 func selectBestReviewer(

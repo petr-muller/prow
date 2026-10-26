@@ -194,8 +194,9 @@ type ContextMatch struct {
 	State string `json:"state,omitempty"`
 }
 
-// Blunderbuss defines configuration for the blunderbuss plugin.
-type Blunderbuss struct {
+// ReviewerSelectionConfig defines the configuration shared by plugins that
+// request reviews from owners, such as blunderbuss and rifle.
+type ReviewerSelectionConfig struct {
 	// ReviewerCount is the minimum number of reviewers to request
 	// reviews from. Defaults to requesting reviews from 2 reviewers
 	ReviewerCount *int `json:"request_count,omitempty"`
@@ -207,7 +208,7 @@ type Blunderbuss struct {
 	// insufficient reviewers are available. If ExcludeApprovers is true,
 	// approvers will never be considered as reviewers.
 	ExcludeApprovers bool `json:"exclude_approvers,omitempty"`
-	// UseStatusAvailability controls whether blunderbuss will consider GitHub's
+	// UseStatusAvailability controls whether the plugin will consider GitHub's
 	// status availability when requesting reviews for users. This will use at one
 	// additional token per successful reviewer (and potentially more depending on
 	// how many busy reviewers it had to pass over).
@@ -224,36 +225,12 @@ type Blunderbuss struct {
 	WaitForStatus *ContextMatch `json:"wait_for_status,omitempty"`
 }
 
+// Blunderbuss defines configuration for the blunderbuss plugin.
+type Blunderbuss = ReviewerSelectionConfig
+
 // Rifle holds configuration for the rifle plugin, which uses git blame data
 // to select reviewers most familiar with the changed code.
-type Rifle struct {
-	// ReviewerCount is the minimum number of reviewers to request
-	// reviews from. Defaults to requesting reviews from 2 reviewers
-	ReviewerCount *int `json:"request_count,omitempty"`
-	// MaxReviewerCount is the maximum number of reviewers to request
-	// reviews from. Defaults to 0 meaning no limit.
-	MaxReviewerCount int `json:"max_request_count,omitempty"`
-	// ExcludeApprovers controls whether approvers are considered to be
-	// reviewers. By default, approvers are considered as reviewers if
-	// insufficient reviewers are available. If ExcludeApprovers is true,
-	// approvers will never be considered as reviewers.
-	ExcludeApprovers bool `json:"exclude_approvers,omitempty"`
-	// UseStatusAvailability controls whether rifle will consider GitHub's
-	// status availability when requesting reviews for users. This will use at one
-	// additional token per successful reviewer (and potentially more depending on
-	// how many busy reviewers it had to pass over).
-	UseStatusAvailability bool `json:"use_status_availability,omitempty"`
-	// IgnoreDrafts instructs the plugin to ignore assigning reviewers
-	// to the PR that is in Draft state. Default it's false.
-	IgnoreDrafts bool `json:"ignore_drafts,omitempty"`
-	// IgnoreAuthors skips requesting reviewers for specified users.
-	// This is useful when a bot user or admin opens a PR that will be
-	// merged regardless of approvals.
-	IgnoreAuthors []string `json:"ignore_authors,omitempty"`
-	// WaitForStatus specifies whether to request reviews if the tide status indicates that
-	// the tests have passed but there are insufficient pull request reviews.
-	WaitForStatus *ContextMatch `json:"wait_for_status,omitempty"`
-}
+type Rifle = ReviewerSelectionConfig
 
 // Owners contains configuration related to handling OWNERS files.
 type Owners struct {
@@ -1441,16 +1418,9 @@ func validateExternalPlugins(pluginMap map[string][]ExternalPlugin) error {
 	return nil
 }
 
-func validateBlunderbuss(b *Blunderbuss) error {
-	if b.ReviewerCount != nil && *b.ReviewerCount < 1 {
-		return fmt.Errorf("invalid request_count: %v (needs to be positive)", *b.ReviewerCount)
-	}
-	return nil
-}
-
-func validateRifle(r *Rifle) error {
-	if r.ReviewerCount != nil && *r.ReviewerCount < 1 {
-		return fmt.Errorf("invalid request_count: %v (needs to be positive)", *r.ReviewerCount)
+func validateReviewerSelection(cfg *ReviewerSelectionConfig) error {
+	if cfg.ReviewerCount != nil && *cfg.ReviewerCount < 1 {
+		return fmt.Errorf("invalid request_count: %v (needs to be positive)", *cfg.ReviewerCount)
 	}
 	return nil
 }
@@ -1697,18 +1667,24 @@ func compileRegexpsAndDurations(pc *Configuration) error {
 		rs[i].GracePeriodDuration = dur
 	}
 
-	if pc.Blunderbuss.WaitForStatus != nil {
-		pc.Blunderbuss.WaitForStatus.DescriptionRe, err = regexp.Compile(pc.Blunderbuss.WaitForStatus.Description)
-		if err != nil {
-			return fmt.Errorf("failed to compile blunderbuss wait for context description regular expression: %q, error: %w", pc.Blunderbuss.WaitForStatus.Description, err)
-		}
+	if err := compileWaitForStatus("blunderbuss", pc.Blunderbuss.WaitForStatus); err != nil {
+		return err
 	}
-	if pc.Rifle.WaitForStatus != nil {
-		pc.Rifle.WaitForStatus.DescriptionRe, err = regexp.Compile(pc.Rifle.WaitForStatus.Description)
-		if err != nil {
-			return fmt.Errorf("failed to compile rifle wait for context description regular expression: %q, error: %w", pc.Rifle.WaitForStatus.Description, err)
-		}
+	if err := compileWaitForStatus("rifle", pc.Rifle.WaitForStatus); err != nil {
+		return err
 	}
+	return nil
+}
+
+func compileWaitForStatus(pluginName string, wfs *ContextMatch) error {
+	if wfs == nil {
+		return nil
+	}
+	re, err := regexp.Compile(wfs.Description)
+	if err != nil {
+		return fmt.Errorf("failed to compile %s wait for context description regular expression: %q, error: %w", pluginName, wfs.Description, err)
+	}
+	wfs.DescriptionRe = re
 	return nil
 }
 
@@ -1730,11 +1706,10 @@ func (c *Configuration) Validate() error {
 	if err := validateExternalPlugins(c.ExternalPlugins); err != nil {
 		return err
 	}
-	if err := validateBlunderbuss(&c.Blunderbuss); err != nil {
-		return err
-	}
-	if err := validateRifle(&c.Rifle); err != nil {
-		return err
+	for _, cfg := range []*ReviewerSelectionConfig{&c.Blunderbuss, &c.Rifle} {
+		if err := validateReviewerSelection(cfg); err != nil {
+			return err
+		}
 	}
 	if err := validateMutuallyExclusivePlugins(c.Plugins); err != nil {
 		return err

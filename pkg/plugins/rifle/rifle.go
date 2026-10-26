@@ -344,6 +344,7 @@ func handle(ghc rifleGitHubClient, roc reviewer.RepoOwnersClient, log *logrus.En
 			excludeFromFallback.Insert(github.NormLogin(pr.User.Login))
 			fallbackReviewers := findFallbackReviewers(
 				blameScores, oc, excludeFromFallback, missing,
+				&busyReviewers, ghc, log, useStatusAvailability,
 			)
 			if len(fallbackReviewers) > 0 {
 				reviewers = append(reviewers, fallbackReviewers...)
@@ -398,19 +399,42 @@ func selectBestReviewer(
 	}
 
 	for _, c := range ranked {
-		if useStatusAvailability {
-			busy, err := reviewer.IsUserBusy(ghc, c.login)
-			if err != nil {
-				log.WithError(err).WithField("user", c.login).Warn("Failed to check user availability")
-			} else if busy {
-				busyReviewers.Insert(c.login)
-				continue
-			}
+		if !isReviewerAvailable(c.login, busyReviewers, ghc, log, useStatusAvailability) {
+			continue
 		}
 		candidates.Delete(c.login)
 		return c.login
 	}
 	return ""
+}
+
+// isReviewerAvailable reports whether login can be asked for a review. Users
+// already known to be busy are rejected without another API call; when
+// useStatusAvailability is enabled, the remaining candidates are checked and
+// busy users are recorded in busyReviewers. Errors are treated as available.
+func isReviewerAvailable(
+	login string,
+	busyReviewers *sets.Set[string],
+	ghc reviewer.GitHubClient,
+	log *logrus.Entry,
+	useStatusAvailability bool,
+) bool {
+	if busyReviewers.Has(login) {
+		return false
+	}
+	if !useStatusAvailability {
+		return true
+	}
+	busy, err := reviewer.IsUserBusy(ghc, login)
+	if err != nil {
+		log.WithError(err).WithField("user", login).Warn("Failed to check user availability")
+		return true
+	}
+	if busy {
+		busyReviewers.Insert(login)
+		return false
+	}
+	return true
 }
 
 func hasBlameScores(scores map[string]float64) bool {
@@ -427,6 +451,10 @@ func findFallbackReviewers(
 	oc reviewer.OwnersClient,
 	exclude sets.Set[string],
 	needed int,
+	busyReviewers *sets.Set[string],
+	ghc reviewer.GitHubClient,
+	log *logrus.Entry,
+	useStatusAvailability bool,
 ) []string {
 	allOwners := oc.AllOwners()
 	eligible := allOwners.Difference(exclude)
@@ -450,6 +478,9 @@ func findFallbackReviewers(
 			return candidates[i].score > candidates[j].score
 		})
 		for i := 0; i < len(candidates) && len(result) < needed; i++ {
+			if !isReviewerAvailable(candidates[i].login, busyReviewers, ghc, log, useStatusAvailability) {
+				continue
+			}
 			result = append(result, candidates[i].login)
 		}
 	}
@@ -466,6 +497,9 @@ func findFallbackReviewers(
 			pool[i], pool[j] = pool[j], pool[i]
 		})
 		for i := 0; i < len(pool) && len(result) < needed; i++ {
+			if !isReviewerAvailable(pool[i], busyReviewers, ghc, log, useStatusAvailability) {
+				continue
+			}
 			result = append(result, pool[i])
 		}
 	}

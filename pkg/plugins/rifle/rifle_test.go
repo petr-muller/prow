@@ -41,6 +41,8 @@ type fakeGitHubClient struct {
 	pr        *github.PullRequest
 	changes   []github.PullRequestChange
 	requested []string
+	busyUsers sets.Set[string]
+	queried   []string
 }
 
 func newFakeGitHubClient(pr *github.PullRequest, filesChanged []string) *fakeGitHubClient {
@@ -92,7 +94,8 @@ func (c *fakeGitHubClient) Query(ctx context.Context, q any, vars map[string]any
 		return errors.New("unexpected query type")
 	}
 	sq.User.Login = vars["user"].(githubql.String)
-	if sq.User.Login == githubql.String("busy-user") {
+	c.queried = append(c.queried, string(sq.User.Login))
+	if sq.User.Login == githubql.String("busy-user") || c.busyUsers.Has(string(sq.User.Login)) {
 		sq.User.Status.IndicatesLimitedAvailability = githubql.Boolean(true)
 	}
 	return nil
@@ -386,8 +389,12 @@ func TestFindFallbackReviewers(t *testing.T) {
 			foc := &fakeOwnersClient{}
 			foc.allOwners = tc.allOwners
 
+			fghc := newFakeGitHubClient(&github.PullRequest{Number: 5, User: github.User{Login: "author"}, Head: github.PullRequestBranch{SHA: "abc"}}, nil)
+			busyReviewers := sets.New[string]()
+
 			got := findFallbackReviewers(
 				tc.blameScores, foc, tc.exclude, tc.needed,
+				&busyReviewers, fghc, logrusEntry(), false,
 			)
 
 			if tc.checkOrder {
@@ -410,6 +417,173 @@ func TestFindFallbackReviewers(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestFindFallbackReviewersSkipsBusy(t *testing.T) {
+	tests := []struct {
+		name                  string
+		blameScores           map[string]float64
+		allOwners             sets.Set[string]
+		busyUsers             sets.Set[string]
+		alreadyBusy           sets.Set[string]
+		useStatusAvailability bool
+		needed                int
+		expected              []string
+		notQueried            []string
+	}{
+		{
+			name: "all candidates busy yields no fallback reviewers",
+			blameScores: map[string]float64{
+				"busy1": 100.0,
+				"busy2": 50.0,
+			},
+			allOwners:             sets.New[string]("busy1", "busy2"),
+			busyUsers:             sets.New[string]("busy1", "busy2"),
+			useStatusAvailability: true,
+			needed:                2,
+			expected:              nil,
+		},
+		{
+			name: "busy candidates skipped, unbusy assigned",
+			blameScores: map[string]float64{
+				"busy1": 100.0,
+				"alice": 50.0,
+			},
+			allOwners:             sets.New[string]("busy1", "alice", "bob"),
+			busyUsers:             sets.New[string]("busy1"),
+			useStatusAvailability: true,
+			needed:                2,
+			expected:              []string{"alice", "bob"},
+		},
+		{
+			name: "cached busy candidates are never queried",
+			blameScores: map[string]float64{
+				"busy1": 100.0,
+				"alice": 50.0,
+			},
+			allOwners:             sets.New[string]("busy1", "alice"),
+			busyUsers:             sets.New[string]("busy1"),
+			alreadyBusy:           sets.New[string]("busy1"),
+			useStatusAvailability: true,
+			needed:                1,
+			expected:              []string{"alice"},
+			notQueried:            []string{"busy1"},
+		},
+		{
+			name: "availability disabled ignores busy state",
+			blameScores: map[string]float64{
+				"busy1": 100.0,
+				"alice": 50.0,
+			},
+			allOwners:             sets.New[string]("busy1", "alice"),
+			busyUsers:             sets.New[string]("busy1"),
+			useStatusAvailability: false,
+			needed:                1,
+			expected:              []string{"busy1"},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			foc := &fakeOwnersClient{allOwners: tc.allOwners}
+			fghc := newFakeGitHubClient(&github.PullRequest{Number: 5, User: github.User{Login: "author"}, Head: github.PullRequestBranch{SHA: "abc"}}, nil)
+			fghc.busyUsers = tc.busyUsers
+			busyReviewers := sets.New[string](tc.alreadyBusy.UnsortedList()...)
+
+			got := findFallbackReviewers(
+				tc.blameScores, foc, sets.Set[string]{}, tc.needed,
+				&busyReviewers, fghc, logrusEntry(), tc.useStatusAvailability,
+			)
+
+			if !reflect.DeepEqual(got, tc.expected) {
+				t.Errorf("expected %v, got %v", tc.expected, got)
+			}
+			for _, login := range tc.notQueried {
+				if slices.Contains(fghc.queried, login) {
+					t.Errorf("expected no IsUserBusy query for cached busy user %q, queries were %v", login, fghc.queried)
+				}
+			}
+			seen := sets.New[string]()
+			for _, login := range fghc.queried {
+				if seen.Has(login) {
+					t.Errorf("user %q was queried for availability more than once: %v", login, fghc.queried)
+				}
+				seen.Insert(login)
+			}
+			if tc.useStatusAvailability {
+				if slices.ContainsFunc(got, func(login string) bool { return tc.busyUsers.Has(login) }) {
+					t.Errorf("busy user assigned as reviewer: %v", got)
+				}
+			}
+		})
+	}
+}
+
+func TestHandleRifleFallbackSkipsBusyReviewers(t *testing.T) {
+	froc := &fakeRepoownersClient{
+		foc: &fakeOwnersClient{
+			owners: map[string]string{
+				"pkg/foo/a.go": "1",
+			},
+			approvers: map[string]layeredsets.String{},
+			leafReviewers: map[string]sets.Set[string]{
+				"pkg/foo/a.go": sets.New[string]("alice"),
+			},
+			reviewers: map[string]layeredsets.String{
+				"pkg/foo/a.go": layeredsets.NewString("alice"),
+			},
+			allOwners: sets.New[string]("alice", "busy-user", "bob"),
+		},
+	}
+
+	now := time.Now()
+	pr := github.PullRequest{
+		Number: 5,
+		User:   github.User{Login: "author"},
+		Base:   github.PullRequestBranch{Ref: "main"},
+		Head:   github.PullRequestBranch{SHA: "abc123"},
+	}
+	repo := github.Repo{Owner: github.User{Login: "org"}, Name: "repo"}
+	reviewerCount := 2
+
+	fghc := &fakeRifleClient{
+		fakeGitHubClient: &fakeGitHubClient{
+			pr: &pr,
+			changes: []github.PullRequestChange{
+				{
+					Filename: "pkg/foo/a.go",
+					Status:   "modified",
+					Patch:    "@@ -1,10 +1,12 @@ package foo",
+					SHA:      "abc123",
+				},
+			},
+		},
+		blames: map[string][]github.BlameRange{
+			"pkg/foo/a.go": {
+				{StartingLine: 1, EndingLine: 10, AuthorLogin: "busy-user", Date: now.Add(-24 * time.Hour)},
+				{StartingLine: 1, EndingLine: 1, AuthorLogin: "bob", Date: now.Add(-365 * 24 * time.Hour)},
+			},
+		},
+		mergeBase: "mergebaseSHA",
+	}
+
+	if err := handle(
+		fghc, froc, logrus.WithField("plugin", PluginName),
+		&reviewerCount, 0, true, true, &repo, &pr,
+	); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	sort.Strings(fghc.requested)
+	expected := []string{"alice", "bob"}
+	if !reflect.DeepEqual(fghc.requested, expected) {
+		t.Errorf("expected %v, got %v", expected, fghc.requested)
+	}
+	for _, login := range []string{"busy-user", "bob"} {
+		if !slices.Contains(fghc.queried, login) {
+			t.Errorf("expected fallback candidate %q to be checked for availability, queries were %v", login, fghc.queried)
+		}
 	}
 }
 

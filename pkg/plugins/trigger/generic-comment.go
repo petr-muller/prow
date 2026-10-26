@@ -309,11 +309,28 @@ func addHelpComment(githubClient githubClient, body, org, repo, branch string, n
 	return githubClient.CreateComment(org, repo, number, plugins.FormatResponseRaw(body, HTMLURL, user, resp))
 }
 
-// isSameRepoPullRequest reports whether the head branch of the PR is in the
-// base repository. GitHub repository names are case insensitive. The head
-// repository has no name when its fork was deleted.
-func isSameRepoPullRequest(pr github.PullRequest) bool {
-	return pr.Head.Repo.FullName != "" && strings.EqualFold(pr.Head.Repo.FullName, pr.Base.Repo.FullName)
+type pullRequestRepoRelationship int
+
+const (
+	repoRelationshipUnknown pullRequestRepoRelationship = iota
+	repoRelationshipSameRepo
+	repoRelationshipFork
+)
+
+// classifyPullRequestRepo compares the repository identities populated on the
+// PR head and base. GitHub repository names are case insensitive. A missing
+// name, as for a deleted fork, leaves the relationship unknown. The head
+// repository's Fork flag is deliberately ignored: a PR within a repository
+// that is itself a fork is still a same-repo PR.
+func classifyPullRequestRepo(pr github.PullRequest) pullRequestRepoRelationship {
+	headRepo, baseRepo := pr.Head.Repo.FullName, pr.Base.Repo.FullName
+	if headRepo == "" || baseRepo == "" {
+		return repoRelationshipUnknown
+	}
+	if strings.EqualFold(headRepo, baseRepo) {
+		return repoRelationshipSameRepo
+	}
+	return repoRelationshipFork
 }
 
 // approveGitHubActionsWorkflowRuns starts the workflow runs of a PR that wait
@@ -333,7 +350,7 @@ func approveGitHubActionsWorkflowRuns(c Client, org, repo string, pr *github.Pul
 		return wg
 	}
 
-	sameRepo := isSameRepoPullRequest(*pr)
+	relationship := classifyPullRequestRepo(*pr)
 	for _, run := range pendingRuns {
 		log := c.Logger.WithFields(logrus.Fields{
 			"runID":   run.ID,
@@ -344,7 +361,9 @@ func approveGitHubActionsWorkflowRuns(c Client, org, repo string, pr *github.Pul
 		})
 		runID := run.ID
 		wg.Go(func() {
-			if sameRepo {
+			if relationship == repoRelationshipSameRepo {
+				// The approve endpoint only applies to fork PRs. Re-running is
+				// also the 403 fallback for a same-repo PR.
 				if err := c.GitHubClient.TriggerGitHubWorkflow(org, repo, runID); err != nil {
 					log.Errorf("failed to re-run workflow run: %v", err)
 				} else {
@@ -355,9 +374,19 @@ func approveGitHubActionsWorkflowRuns(c Client, org, repo string, pr *github.Pul
 			if err := c.GitHubClient.ApproveGitHubWorkflowRun(org, repo, runID); err != nil {
 				// A 404 tells that the run does not wait for approval, for
 				// example because another actor approved it.
-				if github.IsNotFound(err) {
+				switch {
+				case github.IsNotFound(err):
 					log.Infof("workflow run not pending approval (already approved or completed): %v", err)
-				} else {
+				case github.IsForbidden(err) && relationship == repoRelationshipFork:
+					log.Warnf("permission denied approving workflow run for a fork PR: %v", err)
+				case github.IsForbidden(err):
+					log.Infof("approve endpoint returned 403, falling back to re-run: %v", err)
+					if rerunErr := c.GitHubClient.TriggerGitHubWorkflow(org, repo, runID); rerunErr != nil {
+						log.Errorf("failed to approve workflow run (%v) and re-run it as fallback (%v)", err, rerunErr)
+					} else {
+						log.Infof("successfully re-ran workflow run as fallback for approval")
+					}
+				default:
 					log.Errorf("failed to approve workflow run: %v", err)
 				}
 			} else {

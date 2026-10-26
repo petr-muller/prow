@@ -1861,6 +1861,35 @@ func countErrorEntries(hook *logrustest.Hook) int {
 	return count
 }
 
+func countWarningEntries(hook *logrustest.Hook) int {
+	var count int
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel {
+			count++
+		}
+	}
+	return count
+}
+
+func findLogEntryContaining(hook *logrustest.Hook, level logrus.Level, substrings []string) *logrus.Entry {
+	for _, entry := range hook.AllEntries() {
+		if entry.Level != level {
+			continue
+		}
+		matches := true
+		for _, substring := range substrings {
+			if !strings.Contains(entry.Message, substring) {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return entry
+		}
+	}
+	return nil
+}
+
 func TestApproveGitHubActionsWorkflowRuns(t *testing.T) {
 	testCases := []struct {
 		name                   string
@@ -2078,27 +2107,32 @@ func TestHandleGenericCommentWaitsForActionsCalls(t *testing.T) {
 	}
 }
 
-func TestIsSameRepoPullRequest(t *testing.T) {
+func TestClassifyPullRequestRepo(t *testing.T) {
 	testCases := []struct {
-		name     string
-		headRepo string
-		baseRepo string
-		expected bool
+		name         string
+		headRepo     string
+		baseRepo     string
+		headRepoFork bool
+		baseRepoFork bool
+		expected     pullRequestRepoRelationship
 	}{
-		{name: "same repository", headRepo: "org/repo", baseRepo: "org/repo", expected: true},
-		{name: "fork", headRepo: "author/repo", baseRepo: "org/repo", expected: false},
-		{name: "same repository with a case difference", headRepo: "Org/Repo", baseRepo: "org/repo", expected: true},
-		{name: "deleted fork", headRepo: "", baseRepo: "org/repo", expected: false},
-		{name: "no repository names", headRepo: "", baseRepo: "", expected: false},
+		{name: "same repository", headRepo: "org/repo", baseRepo: "org/repo", expected: repoRelationshipSameRepo},
+		{name: "fork", headRepo: "author/repo", baseRepo: "org/repo", expected: repoRelationshipFork},
+		{name: "same repository with a case difference", headRepo: "Org/Repo", baseRepo: "org/repo", expected: repoRelationshipSameRepo},
+		{name: "same repository within a fork", headRepo: "org/repo", baseRepo: "org/repo", headRepoFork: true, baseRepoFork: true, expected: repoRelationshipSameRepo},
+		{name: "fork from a fork", headRepo: "author/repo", baseRepo: "org/repo", headRepoFork: true, baseRepoFork: true, expected: repoRelationshipFork},
+		{name: "deleted fork", headRepo: "", baseRepo: "org/repo", expected: repoRelationshipUnknown},
+		{name: "no repository names", headRepo: "", baseRepo: "", expected: repoRelationshipUnknown},
+		{name: "missing base repository", headRepo: "org/repo", baseRepo: "", expected: repoRelationshipUnknown},
 	}
 	for _, tc := range testCases {
 		t.Run(tc.name, func(t *testing.T) {
 			pr := github.PullRequest{
-				Head: github.PullRequestBranch{Repo: github.Repo{FullName: tc.headRepo}},
-				Base: github.PullRequestBranch{Repo: github.Repo{FullName: tc.baseRepo}},
+				Head: github.PullRequestBranch{Repo: github.Repo{FullName: tc.headRepo, Fork: tc.headRepoFork}},
+				Base: github.PullRequestBranch{Repo: github.Repo{FullName: tc.baseRepo, Fork: tc.baseRepoFork}},
 			}
-			if got := isSameRepoPullRequest(pr); got != tc.expected {
-				t.Errorf("Expected %t, got %t", tc.expected, got)
+			if got := classifyPullRequestRepo(pr); got != tc.expected {
+				t.Errorf("Expected relationship %d, got %d", tc.expected, got)
 			}
 		})
 	}
@@ -2110,15 +2144,22 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 		baseRepo = "org/repo"
 	)
 	testCases := []struct {
-		name           string
-		headRepo       string
-		baseRepo       string
-		pendingRuns    []github.WorkflowRun
-		approveErrors  map[string]error
-		rerunErrors    map[string]error
-		expectApproved []string
-		expectReran    []string
-		expectErrors   int
+		name                  string
+		headRepo              string
+		baseRepo              string
+		headRepoFork          bool
+		baseRepoFork          bool
+		pendingRuns           []github.WorkflowRun
+		approveErrors         map[string]error
+		rerunErrors           map[string]error
+		expectApproved        []string
+		expectReran           []string
+		expectErrors          int
+		expectWarnings        int
+		expectErrorContains   []string
+		expectErrorFields     map[string]any
+		expectWarningContains []string
+		expectNoLogSubstring  string
 	}{
 		{
 			name:     "fork: successful approval, no re-run",
@@ -2141,7 +2182,7 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 			},
 		},
 		{
-			name:     "fork: 403 from approve logs an error, no re-run",
+			name:     "fork: 403 from approve logs a warning, no re-run",
 			headRepo: forkRepo,
 			baseRepo: baseRepo,
 			pendingRuns: []github.WorkflowRun{
@@ -2150,7 +2191,8 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 			approveErrors: map[string]error{
 				"org/repo/1": github.NewForbidden(),
 			},
-			expectErrors: 1,
+			expectWarnings:        1,
+			expectWarningContains: []string{"permission denied"},
 		},
 		{
 			name:     "fork: generic error from approve logs an error, no re-run",
@@ -2176,7 +2218,22 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 				"org/repo/2": github.NewForbidden(),
 			},
 			expectApproved: []string{"org/repo/1"},
-			expectErrors:   1,
+			expectWarnings: 1,
+		},
+		{
+			name:         "fork from a fork: 403 still logs a warning and does not re-run",
+			headRepo:     forkRepo,
+			baseRepo:     baseRepo,
+			headRepoFork: true,
+			baseRepoFork: true,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			approveErrors: map[string]error{
+				"org/repo/1": github.NewForbidden(),
+			},
+			expectWarnings:        1,
+			expectWarningContains: []string{"permission denied"},
 		},
 		{
 			name:     "same repository: re-run without an approve call",
@@ -2187,6 +2244,22 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 				{ID: 2, Name: "workflow-2", Status: "completed", Conclusion: "action_required"},
 			},
 			expectReran: []string{"org/repo/1", "org/repo/2"},
+		},
+		{
+			// A same-repo PR never calls approve because it re-runs directly.
+			// Configure a 403 anyway to pin the required fallback outcome.
+			name:         "same repository within a fork: 403 from approve still re-runs",
+			headRepo:     baseRepo,
+			baseRepo:     baseRepo,
+			headRepoFork: true,
+			baseRepoFork: true,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			approveErrors: map[string]error{
+				"org/repo/1": github.NewForbidden(),
+			},
+			expectReran: []string{"org/repo/1"},
 		},
 		{
 			name:     "same repository: re-run error logs an error",
@@ -2201,11 +2274,64 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 			expectErrors: 1,
 		},
 		{
-			name: "no repository names: approve path",
+			name: "unknown repository metadata: successful approval",
 			pendingRuns: []github.WorkflowRun{
 				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
 			},
 			expectApproved: []string{"org/repo/1"},
+		},
+		{
+			name:     "unknown repository metadata: 404 from approve, no re-run",
+			baseRepo: baseRepo,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			approveErrors: map[string]error{
+				"org/repo/1": github.NewNotFound(),
+			},
+		},
+		{
+			name:     "unknown repository metadata: 403 falls back to re-run",
+			baseRepo: baseRepo,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			approveErrors: map[string]error{
+				"org/repo/1": github.NewForbidden(),
+			},
+			expectReran:          []string{"org/repo/1"},
+			expectNoLogSubstring: "non-fork",
+		},
+		{
+			name:     "unknown repository metadata: failed fallback contains both errors",
+			baseRepo: baseRepo,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			approveErrors: map[string]error{
+				"org/repo/1": github.NewForbidden(),
+			},
+			rerunErrors: map[string]error{
+				"org/repo/1": fmt.Errorf("rerun failed"),
+			},
+			expectErrors:        1,
+			expectErrorContains: []string{"403 error", "rerun failed"},
+			expectErrorFields: map[string]any{
+				"runID": 1,
+				"org":   "org",
+				"repo":  "repo",
+			},
+		},
+		{
+			name:     "unknown repository metadata: non-403 error does not re-run",
+			baseRepo: baseRepo,
+			pendingRuns: []github.WorkflowRun{
+				{ID: 1, Name: "test-workflow", Status: "completed", Conclusion: "action_required"},
+			},
+			approveErrors: map[string]error{
+				"org/repo/1": fmt.Errorf("server error"),
+			},
+			expectErrors: 1,
 		},
 		{
 			name:        "no pending runs: no-op",
@@ -2228,11 +2354,11 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 				Logger:       logrus.NewEntry(logger),
 			}
 			pr := &github.PullRequest{
-				Base: github.PullRequestBranch{Repo: github.Repo{FullName: tc.baseRepo}},
+				Base: github.PullRequestBranch{Repo: github.Repo{FullName: tc.baseRepo, Fork: tc.baseRepoFork}},
 				Head: github.PullRequestBranch{
 					Ref:  actionsBranch,
 					SHA:  actionsHeadSHA,
-					Repo: github.Repo{FullName: tc.headRepo},
+					Repo: github.Repo{FullName: tc.headRepo, Fork: tc.headRepoFork},
 				},
 			}
 
@@ -2246,6 +2372,31 @@ func TestApproveWorkflowRunsByRepository(t *testing.T) {
 			}
 			if errorEntries := countErrorEntries(hook); errorEntries != tc.expectErrors {
 				t.Errorf("Expected %d error log entries, got %d", tc.expectErrors, errorEntries)
+			}
+			if warningEntries := countWarningEntries(hook); warningEntries != tc.expectWarnings {
+				t.Errorf("Expected %d warning log entries, got %d", tc.expectWarnings, warningEntries)
+			}
+			if len(tc.expectErrorContains) > 0 {
+				entry := findLogEntryContaining(hook, logrus.ErrorLevel, tc.expectErrorContains)
+				if entry == nil {
+					t.Errorf("Expected an error log entry containing %q, got %v", tc.expectErrorContains, hook.AllEntries())
+				} else {
+					for key, want := range tc.expectErrorFields {
+						if got := entry.Data[key]; got != want {
+							t.Errorf("Expected error log field %q to be %v, got %v", key, want, got)
+						}
+					}
+				}
+			}
+			if len(tc.expectWarningContains) > 0 && findLogEntryContaining(hook, logrus.WarnLevel, tc.expectWarningContains) == nil {
+				t.Errorf("Expected a warning log entry containing %q, got %v", tc.expectWarningContains, hook.AllEntries())
+			}
+			if tc.expectNoLogSubstring != "" {
+				for _, entry := range hook.AllEntries() {
+					if strings.Contains(entry.Message, tc.expectNoLogSubstring) {
+						t.Errorf("Expected no log entry to contain %q, got %q", tc.expectNoLogSubstring, entry.Message)
+					}
+				}
 			}
 		})
 	}

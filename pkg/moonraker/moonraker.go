@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"reflect"
 
 	"github.com/sirupsen/logrus"
 
@@ -103,36 +102,21 @@ func (mr *Moonraker) ServeGetInrepoconfig(w http.ResponseWriter, r *http.Request
 	}
 }
 
-func (mr *Moonraker) RunConfigWatcher(ctx context.Context) error {
-	configEvent := mr.ConfigAgent.Subscribe()
-
-	var err error
+func (mr *Moonraker) RunConfigWatcher(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			logrus.WithError(ctx.Err()).Error("ConfigWatcher shutting down.")
 		}
 		logrus.Debug("Pull server shutting down.")
 	}()
-	currentConfig := configSectionsToWatch{
-		mr.ConfigAgent.Config().InRepoConfig,
-	}
 
-	for {
-		select {
-		// Parent context. Shutdown
-		case <-ctx.Done():
+	return config.WatchConfig(ctx, mr.ConfigAgent, nil,
+		func(c *config.Config) configSectionsToWatch {
+			return configSectionsToWatch{c.InRepoConfig}
+		},
+		func(c *config.Config) error {
+			logrus.Info("New config found, resetting Config in ConfigAgent")
+			mr.ConfigAgent.SetWithoutBroadcast(c)
 			return nil
-		// Checking for update config
-		case event := <-configEvent:
-			newConfig := configSectionsToWatch{
-				event.After.InRepoConfig,
-			}
-			logrus.Info("Received new config")
-			if !reflect.DeepEqual(currentConfig, newConfig) {
-				logrus.Info("New config found, resetting Config in ConfigAgent")
-				mr.ConfigAgent.SetWithoutBroadcast(&event.After)
-				currentConfig = newConfig
-			}
-		}
-	}
+		})
 }

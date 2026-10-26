@@ -19,7 +19,6 @@ package subscriber
 import (
 	"context"
 	"errors"
-	"reflect"
 	"strings"
 
 	"github.com/sirupsen/logrus"
@@ -150,52 +149,33 @@ func (s *PullServer) handlePulls(ctx context.Context, projectSubscriptions confi
 
 // Run will block listening to all subscriptions and return once the context is cancelled
 // or one of the subscription has a unrecoverable error.
-func (s *PullServer) Run(ctx context.Context) error {
-	configEvent := s.Subscriber.ConfigAgent.Subscribe()
-
-	var err error
+func (s *PullServer) Run(ctx context.Context) (err error) {
 	defer func() {
 		if err != nil {
 			logrus.WithError(ctx.Err()).Error("Pull server shutting down.")
 		}
 		logrus.Debug("Pull server shutting down.")
 	}()
-	currentConfig := configToWatch{
-		s.Subscriber.ConfigAgent.Config().PubSubTriggers,
-		s.Subscriber.ConfigAgent.Config().PubSubSubscriptions,
-	}
-	errGroup, derivedCtx, err := s.handlePulls(ctx, currentConfig.PubSubTriggers)
+	errGroup, derivedCtx, err := s.handlePulls(ctx, s.Subscriber.ConfigAgent.Config().PubSubTriggers)
 	if err != nil {
 		return err
 	}
 
-	for {
-		select {
-		// Parent context. Shutdown
-		case <-ctx.Done():
-			return nil
-		// Current thread context, it may be failing already
-		case <-derivedCtx.Done():
-			err = errGroup.Wait()
+	err = config.WatchConfig(ctx, s.Subscriber.ConfigAgent,
+		func() <-chan struct{} { return derivedCtx.Done() },
+		func(c *config.Config) configToWatch {
+			return configToWatch{c.PubSubTriggers, c.PubSubSubscriptions}
+		},
+		func(c *config.Config) error {
+			logrus.Info("New config found, reloading pull Server")
+			// Making sure the current thread finishes before starting a new one.
+			errGroup.Wait()
+			// Starting a new thread with new config
+			errGroup, derivedCtx, err = s.handlePulls(ctx, c.PubSubTriggers)
 			return err
-		// Checking for update config
-		case event := <-configEvent:
-			newConfig := configToWatch{
-				event.After.PubSubTriggers,
-				event.After.PubSubSubscriptions,
-			}
-			logrus.Info("Received new config")
-			if !reflect.DeepEqual(currentConfig, newConfig) {
-				logrus.Info("New config found, reloading pull Server")
-				// Making sure the current thread finishes before starting a new one.
-				errGroup.Wait()
-				// Starting a new thread with new config
-				errGroup, derivedCtx, err = s.handlePulls(ctx, newConfig.PubSubTriggers)
-				if err != nil {
-					return err
-				}
-				currentConfig = newConfig
-			}
-		}
+		})
+	if errors.Is(err, config.ErrWatchDone) {
+		return errGroup.Wait()
 	}
+	return err
 }

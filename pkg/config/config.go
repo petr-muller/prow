@@ -1701,6 +1701,9 @@ func loadWithYamlOpts(yamlOpts []yaml.JSONOpt, prowConfig string, jobConfigs []s
 // it, but does not expand or validate the result. Every path is either a single
 // file or a directory that is searched recursively. File basenames must be
 // unique across all the paths, and the paths must not overlap.
+// A path that is a symlink to a directory is not supported and is rejected,
+// because directory symlinks are not followed. Symlinks to files are loaded as
+// files.
 //
 // The paths are an implementation detail of where the job config is stored: the
 // result is the job config of all of them, or an error if any of them cannot be
@@ -1754,6 +1757,16 @@ func (r *jobConfigReader) readPath(jobConfig string, walk func(string, filepath.
 	if !stat.IsDir() {
 		// still support a single file.
 		r.readFile(jobConfig)
+		return
+	}
+
+	// os.Stat follows symlinks, but filepath.Walk does not traverse a symlink
+	// root. Reject such roots instead of silently loading no jobs.
+	if link, err := os.Lstat(jobConfig); err != nil {
+		r.errs = append(r.errs, err)
+		return
+	} else if link.Mode()&os.ModeSymlink != 0 {
+		r.errs = append(r.errs, fmt.Errorf("job config path %q is a symlink to a directory, which is not supported; use the actual directory path instead", jobConfig))
 		return
 	}
 

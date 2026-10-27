@@ -73,6 +73,9 @@ all in one place, for example when they are stored on different volumes. The
 job configs of all the paths are merged. A path is either a file or a directory
 that is searched recursively, the paths must not overlap, and the base names of
 the files must be unique across all the paths, not only within each of them.
+Directory symlinks are not followed, so a path that is a symlink to a directory
+is rejected; configure the actual directory path instead. A path that is a
+symlink to a file is loaded as that file.
 
 ### GitHub API Cache
 

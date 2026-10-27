@@ -3964,6 +3964,89 @@ func TestReadJobConfigsFileAndDirectory(t *testing.T) {
 	}
 }
 
+func TestReadJobConfigsSymlinkRoots(t *testing.T) {
+	targetDir := t.TempDir()
+	writeJobConfigFiles(t, targetDir, map[string]string{"in-target.yaml": periodicJobConfig("in-target")})
+	dirLink := filepath.Join(t.TempDir(), "dir-link")
+	if err := os.Symlink(targetDir, dirLink); err != nil {
+		t.Fatalf("failed to create directory symlink: %v", err)
+	}
+
+	plainDir := t.TempDir()
+	writeJobConfigFiles(t, plainDir, map[string]string{"plain.yaml": periodicJobConfig("plain")})
+
+	fileDir := t.TempDir()
+	writeJobConfigFiles(t, fileDir, map[string]string{"single.yaml": periodicJobConfig("in-file")})
+	file := filepath.Join(fileDir, "single.yaml")
+	fileLink := filepath.Join(t.TempDir(), "linked.yaml")
+	if err := os.Symlink(file, fileLink); err != nil {
+		t.Fatalf("failed to create file symlink: %v", err)
+	}
+
+	symlinkRootError := fmt.Sprintf("job config path %q is a symlink to a directory, which is not supported; use the actual directory path instead", dirLink)
+
+	testCases := []struct {
+		name          string
+		roots         []string
+		expected      []string
+		expectedError string
+	}{
+		{
+			name:          "directory symlink root is rejected",
+			roots:         []string{dirLink},
+			expectedError: symlinkRootError,
+		},
+		{
+			name:          "directory symlink root after a valid source is rejected",
+			roots:         []string{plainDir, dirLink},
+			expectedError: symlinkRootError,
+		},
+		{
+			name:          "directory symlink root before a valid source is rejected",
+			roots:         []string{dirLink, plainDir},
+			expectedError: symlinkRootError,
+		},
+		{
+			name:     "ordinary directory root is loaded",
+			roots:    []string{plainDir},
+			expected: []string{"plain"},
+		},
+		{
+			name:     "direct file source is loaded",
+			roots:    []string{file},
+			expected: []string{"in-file"},
+		},
+		{
+			name:     "symlinked file source is loaded",
+			roots:    []string{fileLink},
+			expected: []string{"in-file"},
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			actual, err := ReadJobConfigs(tc.roots)
+
+			var actualError string
+			if err != nil {
+				actualError = err.Error()
+			}
+			if diff := cmp.Diff(tc.expectedError, actualError); diff != "" {
+				t.Fatalf("unexpected error (-want +got):\n%s", diff)
+			}
+			if tc.expectedError != "" {
+				if !reflect.DeepEqual(JobConfig{}, actual) {
+					t.Errorf("expected an empty JobConfig on error, got %+v", actual)
+				}
+				return
+			}
+			if diff := cmp.Diff(sets.New(tc.expected...), periodicNames(actual.Periodics)); diff != "" {
+				t.Errorf("unexpected jobs (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestLoadWithMultipleJobConfigPaths(t *testing.T) {
 	testCases := []struct {
 		name          string

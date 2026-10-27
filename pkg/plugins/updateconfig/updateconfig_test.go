@@ -17,7 +17,10 @@ limitations under the License.
 package updateconfig
 
 import (
+	"bytes"
+	"compress/gzip"
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -172,6 +175,7 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 		changes            []github.PullRequestChange
 		existConfigMaps    []runtime.Object
 		expectedConfigMaps []*coreapi.ConfigMap
+		expectedGzipData   map[string]map[string]string
 		config             *plugins.ConfigUpdater
 	}{
 		{
@@ -888,13 +892,13 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 							"app.kubernetes.io/component": "updateconfig-plugin",
 						},
 					},
-					BinaryData: map[string][]byte{
-						"config.yaml": {31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 0, 10, 0, 245, 255, 110, 101, 119, 45, 99, 111, 110, 102, 105, 103, 3, 0, 84, 214, 231, 87, 10, 0, 0, 0},
-					},
 					Data: map[string]string{
 						"VERSION": "12345",
 					},
 				},
+			},
+			expectedGzipData: map[string]map[string]string{
+				"config": {"config.yaml": "new-config"},
 			},
 			config: &plugins.ConfigUpdater{
 				GZIP: true,
@@ -937,9 +941,6 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 							"app.kubernetes.io/component": "updateconfig-plugin",
 						},
 					},
-					BinaryData: map[string][]byte{
-						"config.yaml": {31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 0, 10, 0, 245, 255, 110, 101, 119, 45, 99, 111, 110, 102, 105, 103, 3, 0, 84, 214, 231, 87, 10, 0, 0, 0},
-					},
 					Data: map[string]string{
 						"VERSION": "12345",
 					},
@@ -958,6 +959,9 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 						"VERSION":      "12345",
 					},
 				},
+			},
+			expectedGzipData: map[string]map[string]string{
+				"config": {"config.yaml": "new-config"},
 			},
 			config: &plugins.ConfigUpdater{
 				GZIP: true,
@@ -1000,9 +1004,6 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 							"app.kubernetes.io/component": "updateconfig-plugin",
 						},
 					},
-					BinaryData: map[string][]byte{
-						"config.yaml": {31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 0, 10, 0, 245, 255, 110, 101, 119, 45, 99, 111, 110, 102, 105, 103, 3, 0, 84, 214, 231, 87, 10, 0, 0, 0},
-					},
 					Data: map[string]string{
 						"VERSION": "12345",
 					},
@@ -1021,6 +1022,9 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 						"VERSION":      "12345",
 					},
 				},
+			},
+			expectedGzipData: map[string]map[string]string{
+				"config": {"config.yaml": "new-config"},
 			},
 			config: &plugins.ConfigUpdater{
 				GZIP: false,
@@ -1329,13 +1333,13 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 							"app.kubernetes.io/component": "updateconfig-plugin",
 						},
 					},
-					BinaryData: map[string][]byte{
-						"config.yaml": {31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 0, 10, 0, 245, 255, 110, 101, 119, 45, 99, 111, 110, 102, 105, 103, 3, 0, 84, 214, 231, 87, 10, 0, 0, 0},
-					},
 					Data: map[string]string{
 						"VERSION": "12345",
 					},
 				},
+			},
+			expectedGzipData: map[string]map[string]string{
+				"config": {"config.yaml": "new-config"},
 			},
 			config: &plugins.ConfigUpdater{
 				GZIP: true,
@@ -1369,7 +1373,7 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 						},
 					},
 					BinaryData: map[string][]byte{
-						"config.yaml": {31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 202, 75, 45, 215, 77, 206, 207, 75, 203, 76, 7, 4, 0, 0, 255, 255, 84, 214, 231, 87, 10, 0, 0, 0},
+						"config.yaml": gzipBytes(t, []byte("old-config")),
 					},
 				},
 			},
@@ -1612,11 +1616,58 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 			actual, err := fkc.CoreV1().ConfigMaps(expected.Namespace).Get(context.TODO(), expected.Name, metav1.GetOptions{})
 			if err != nil && errors.IsNotFound(err) {
 				t.Errorf("%s: Should have updated or created configmap for '%s'", tc.name, expected)
-			} else if !equality.Semantic.DeepEqual(expected, actual) {
-				t.Errorf("%s: incorrect ConfigMap state after update: %v", tc.name, diff.Diff(expected, actual))
+				continue
+			} else if err != nil {
+				t.Errorf("%s: failed to get ConfigMap '%s': %v", tc.name, expected.Name, err)
+				continue
+			}
+
+			actualForComparison := actual.DeepCopy()
+			for key, expectedPayload := range tc.expectedGzipData[expected.Name] {
+				compressed, ok := actualForComparison.BinaryData[key]
+				if !ok {
+					t.Errorf("%s: ConfigMap '%s' is missing compressed binary key %q", tc.name, expected.Name, key)
+					continue
+				}
+
+				reader, err := gzip.NewReader(bytes.NewReader(compressed))
+				if err != nil {
+					t.Errorf("%s: ConfigMap '%s' key %q is not valid gzip data: %v", tc.name, expected.Name, key, err)
+				} else {
+					payload, readErr := io.ReadAll(reader)
+					if readErr != nil {
+						t.Errorf("%s: failed to read gzip data from ConfigMap '%s' key %q: %v", tc.name, expected.Name, key, readErr)
+					} else if string(payload) != expectedPayload {
+						t.Errorf("%s: ConfigMap '%s' key %q has gzip payload %q, want %q", tc.name, expected.Name, key, payload, expectedPayload)
+					}
+					if closeErr := reader.Close(); closeErr != nil {
+						t.Errorf("%s: failed to close gzip reader for ConfigMap '%s' key %q: %v", tc.name, expected.Name, key, closeErr)
+					}
+				}
+				delete(actualForComparison.BinaryData, key)
+			}
+			if len(actualForComparison.BinaryData) == 0 {
+				actualForComparison.BinaryData = nil
+			}
+			if !equality.Semantic.DeepEqual(expected, actualForComparison) {
+				t.Errorf("%s: incorrect ConfigMap state after update: %v", tc.name, diff.Diff(expected, actualForComparison))
 			}
 		}
 	}
+}
+
+func gzipBytes(t *testing.T, payload []byte) []byte {
+	t.Helper()
+
+	var compressed bytes.Buffer
+	writer := gzip.NewWriter(&compressed)
+	if _, err := writer.Write(payload); err != nil {
+		t.Fatalf("failed to write gzip fixture: %v", err)
+	}
+	if err := writer.Close(); err != nil {
+		t.Fatalf("failed to close gzip fixture: %v", err)
+	}
+	return compressed.Bytes()
 }
 
 func TestHandleDefaultNamespace(t *testing.T) {

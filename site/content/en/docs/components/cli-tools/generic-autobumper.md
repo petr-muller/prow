@@ -25,6 +25,24 @@ Define Prow jobs to utilize this tool:
 a postsubmit job, e.g., [`post-k8sio-deploy-prow-build-trusted-resources`](https://github.com/kubernetes/test-infra/blob/master/config/jobs/kubernetes/sig-k8s-infra/trusted/sig-k8s-infra-prow.yaml)
     for [prow.k8s.io](https://prow.k8s.io/) is defined for deploying the yaml files.
 
+### Dry run
+
+Pass `--dry-run` to try the bump without changing any git history or remote state.
+The tool applies the changes to the working tree, logs the PR title and body it
+would have used, and then skips committing, pushing, and creating a PR. Read-only
+lookups, such as upstream versions and the on-call address, still happen. GitHub
+token, GitHub App, and Gerrit cookie-file requirements are not validated in
+fork, branch, or Gerrit mode. Note that this differs from `--skip-pullrequest`,
+which still commits and pushes and only skips PR creation.
+
+For example, from the repository root, validate a base-image bump and then
+inspect the result with `git diff`:
+
+```bash
+go run ./cmd/generic-autobumper --config=hack/autobump.yaml --dry-run
+git diff .ko.yaml
+```
+
 ### Requirement
 
 We need to fulfil those requirements to use this tool:

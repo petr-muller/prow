@@ -17,6 +17,7 @@ limitations under the License.
 package io
 
 import (
+	"strings"
 	"testing"
 
 	"sigs.k8s.io/prow/pkg/testutil"
@@ -24,9 +25,10 @@ import (
 
 func TestGoogleCredentialsFileOption(t *testing.T) {
 	testcases := []struct {
-		name    string
-		file    func(t *testing.T) string
-		wantErr bool
+		name        string
+		file        func(t *testing.T) string
+		wantErr     bool
+		errContains string
 	}{
 		{
 			name: "authorized_user credentials are accepted",
@@ -38,6 +40,14 @@ func TestGoogleCredentialsFileOption(t *testing.T) {
 				return testutil.WriteCredentialsFile(t, `{"type": "user"}`)
 			},
 			wantErr: true,
+		},
+		{
+			name: "unrecognized credentials type is rejected",
+			file: func(t *testing.T) string {
+				return testutil.WriteCredentialsFile(t, `{"type": "unrecognized_credentials_type"}`)
+			},
+			wantErr:     true,
+			errContains: `unsupported credentials type "unrecognized_credentials_type"`,
 		},
 		{
 			name: "invalid json is rejected",
@@ -52,6 +62,11 @@ func TestGoogleCredentialsFileOption(t *testing.T) {
 			_, err := GoogleCredentialsFileOption(tc.file(t), "https://www.googleapis.com/auth/cloud-platform")
 			if (err != nil) != tc.wantErr {
 				t.Fatalf("GoogleCredentialsFileOption() error = %v, wantErr %t", err, tc.wantErr)
+			}
+			if tc.errContains != "" {
+				if err == nil || !strings.Contains(err.Error(), tc.errContains) {
+					t.Fatalf("GoogleCredentialsFileOption() error = %v, want it to contain %q", err, tc.errContains)
+				}
 			}
 		})
 	}

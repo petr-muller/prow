@@ -352,67 +352,136 @@ func (ca *Agent) StartWatch(prowConfig string, jobConfigs []string, supplemental
 	return nil
 }
 
-func lastConfigModTime(prowConfig string, jobConfigs []string) (time.Time, error) {
-	// Check if the file changed to see if it needs to be re-read.
+// configInputModification is the modification state of one config input that
+// polling can observe. Changes that do not alter this metadata are left to the
+// periodic fallback reload.
+type configInputModification struct {
+	modTime time.Time
+	size    int64
+}
+
+func (m configInputModification) equal(other configInputModification) bool {
+	return m.modTime.Equal(other.modTime) && m.size == other.size
+}
+
+// configInputModifications is a snapshot of every config input, keyed by path.
+type configInputModifications map[string]configInputModification
+
+func observeConfigInputs(prowConfig string, jobConfigs []string) (configInputModifications, error) {
+	// Check if the files changed to see if they need to be re-read.
 	// os.Stat follows symbolic links, which is how ConfigMaps work.
+	modifications := make(configInputModifications, 1+len(jobConfigs))
 	prowStat, err := os.Stat(prowConfig)
 	if err != nil {
 		logrus.WithField("prowConfig", prowConfig).WithError(err).Error("Error loading prow config.")
-		return time.Time{}, err
+		return nil, err
 	}
-	recentModTime := prowStat.ModTime()
+	modifications[prowConfig] = configInputModification{modTime: prowStat.ModTime(), size: prowStat.Size()}
 	// TODO(krzyzacy): allow empty jobConfigs till fully migrate config to subdirs
 	for _, jobConfig := range jobConfigs {
 		jobConfigStat, err := os.Stat(jobConfig)
 		if err != nil {
 			logrus.WithField("jobConfig", jobConfig).WithError(err).Error("Error loading job configs.")
-			return time.Time{}, err
+			return nil, err
 		}
+		modifications[jobConfig] = configInputModification{modTime: jobConfigStat.ModTime(), size: jobConfigStat.Size()}
+	}
+	return modifications, nil
+}
 
-		if jobConfigStat.ModTime().After(recentModTime) {
-			recentModTime = jobConfigStat.ModTime()
+// changed reports whether any input was added, removed, or has different
+// modification metadata. It compares the state instead of requiring one
+// timestamp to increase: a source can change while remaining older than
+// another source, and timestamps can move backwards.
+func (m configInputModifications) changed(previous configInputModifications) bool {
+	if len(m) != len(previous) {
+		return true
+	}
+	for input, current := range m {
+		before, ok := previous[input]
+		if !ok || !current.equal(before) {
+			return true
 		}
 	}
-	return recentModTime, nil
+	return false
+}
+
+// configPoller polls the config inputs and reloads when any of them changes.
+// A nil last snapshot means there is no trustworthy baseline, so the next
+// successful observation reloads the config.
+type configPoller struct {
+	observe func() (configInputModifications, error)
+	load    func() (*Config, error)
+	accept  func(*Config)
+
+	last  configInputModifications
+	skips int
+}
+
+// configReloadFallbackSkips is the number of one-second polls without an
+// observable change after which a reload is forced.
+const configReloadFallbackSkips = 600
+
+func newConfigPoller(prowConfig string, jobConfigs []string, supplementalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals []func(*Config) error, last configInputModifications, accept func(*Config)) *configPoller {
+	return &configPoller{
+		last: last,
+		observe: func() (configInputModifications, error) {
+			return observeConfigInputs(prowConfig, jobConfigs)
+		},
+		load: func() (*Config, error) {
+			return Load(prowConfig, jobConfigs, supplementalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
+		},
+		accept: accept,
+	}
+}
+
+func (p *configPoller) poll() error {
+	if p.skips < configReloadFallbackSkips {
+		current, err := p.observe()
+		if err != nil {
+			// Do not accept a partial state. Forget the baseline so that
+			// recovery of the missing input triggers a complete reload even if
+			// its metadata looks unchanged afterwards.
+			p.last = nil
+			return nil
+		}
+		if !current.changed(p.last) {
+			p.skips++
+			return nil
+		}
+		p.last = current
+	}
+	c, err := p.load()
+	if err != nil {
+		return err
+	}
+	p.skips = 0
+	p.accept(c)
+	return nil
 }
 
 // Start will begin polling the config file at the path. If the first load
 // fails, Start will return the error and abort. Future load failures will log
 // the failure message but continue attempting to load.
 func (ca *Agent) Start(prowConfig string, jobConfigs []string, additionalProwConfigDirs []string, supplementalProwConfigsFileNameSuffix string, additionals ...func(*Config) error) error {
-	lastModTime, err := lastConfigModTime(prowConfig, jobConfigs)
+	last, err := observeConfigInputs(prowConfig, jobConfigs)
 	if err != nil {
-		lastModTime = time.Time{}
+		last = nil
 	}
 	c, err := Load(prowConfig, jobConfigs, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...)
 	if err != nil {
 		return err
 	}
 	ca.Set(c)
+	poller := newConfigPoller(prowConfig, jobConfigs, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals, last, ca.Set)
 	go func() {
-		// Rarely, if two changes happen in the same second, mtime will
-		// be the same for the second change, and an mtime-based check would
-		// fail. Reload periodically just in case.
-		skips := 0
+		// Rarely, a change will not alter the observed metadata (for example,
+		// two changes in the same second), so reload periodically just in case.
 		for range time.Tick(1 * time.Second) {
-			if skips < 600 {
-				recentModTime, err := lastConfigModTime(prowConfig, jobConfigs)
-				if err != nil {
-					continue
-				}
-				if !recentModTime.After(lastModTime) {
-					skips++
-					continue // file hasn't been modified
-				}
-				lastModTime = recentModTime
-			}
-			if c, err := Load(prowConfig, jobConfigs, additionalProwConfigDirs, supplementalProwConfigsFileNameSuffix, additionals...); err != nil {
+			if err := poller.poll(); err != nil {
 				logrus.WithField("prowConfig", prowConfig).
 					WithField("jobConfigs", jobConfigs).
 					WithError(err).Error("Error loading config.")
-			} else {
-				skips = 0
-				ca.Set(c)
 			}
 		}
 	}()

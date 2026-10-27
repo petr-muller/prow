@@ -608,6 +608,19 @@ type Trigger struct {
 	// This is a security mitigation to only allow testing from trusted users.
 	IgnoreOkToTest bool `json:"ignore_ok_to_test,omitempty"`
 	// TriggerGitHubWorkflows enables workflows run by github to be triggered by prow.
+	//
+	// When enabled, an honored /ok-to-test command from a trusted user also
+	// attempts to approve pending GitHub Actions workflow runs for the PR head.
+	// Runs of a same-repo PR are re-run instead, because GitHub's approve
+	// endpoint only applies to fork PRs. For other PRs, a 403 response from
+	// the approve endpoint falls back to a re-run only when the PR's head and
+	// base repositories cannot be compared (for example, a deleted fork); a
+	// 403 for a confirmed fork is reported as a permission error and the run is
+	// not started. A re-run does not grant the original actor any privileges
+	// and may still fail. These workflow API calls complete asynchronously,
+	// and their failures are reported in the hook/plugin logs. The /retest and
+	// /test all commands separately re-run failed workflows when this option
+	// is enabled.
 	TriggerGitHubWorkflows bool `json:"trigger_github_workflows,omitempty"`
 	// OrgInvite holds configuration for the org invite message
 	// shown to non-org members when they open a PR.

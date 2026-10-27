@@ -110,7 +110,8 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 <br>Trusted status granted by '/ok-to-test' can be revoked by a trusted user with '/ok-to-test cancel', which restores the 'needs-ok-to-test' label.
 <br>Trigger will not automatically start jobs for a PR in draft state, and if a PR is changed to draft it cancels pending jobs.
 <br>If jobs are not run automatically for a PR because it is not trusted or is in draft state, a trusted user can still start jobs manually via the '/test' command.
-<br>The '/retest' command can be used to rerun jobs that have reported failure.
+<br>When the 'trigger_github_workflows' option is enabled, an honored '/ok-to-test' command from a trusted user also attempts to approve pending GitHub Actions workflow runs for the PR head. Runs of a same-repo PR are re-run instead, because GitHub's approve endpoint only applies to fork PRs. For other PRs, a 403 response from the approve endpoint falls back to a re-run only when the PR's head and base repositories cannot be compared (for example, a deleted fork); a 403 for a confirmed fork is reported as a permission error and the run is not started. A re-run does not grant the original actor any privileges and may still fail. These workflow API calls complete asynchronously, and their failures are reported in the hook/plugin logs.
+<br>The '/retest' command can be used to rerun Prow jobs that have reported failure. When 'trigger_github_workflows' is enabled, '/retest' and '/test all' from a trusted user also re-run failed GitHub Actions workflows.
 <br>The '/test-manual-required' command can be used to start required manually triggered presubmit jobs.
 <br>Trigger starts postsubmit jobs when commits are pushed if the filters on the job match files and branches affected by that push.`,
 		Config:  configInfo,
@@ -118,7 +119,7 @@ func helpProvider(config *plugins.Configuration, enabledRepos []config.OrgRepo) 
 	}
 	pluginHelp.AddCommand(pluginhelp.Command{
 		Usage:       "/ok-to-test",
-		Description: "Marks a PR as 'trusted' and starts tests.",
+		Description: "Marks a PR as 'trusted' and starts tests. When 'trigger_github_workflows' is enabled, a trusted user's command also approves pending GitHub Actions workflow runs for the PR head; see the plugin description for how same-repo PRs and 403 responses are handled.",
 		Featured:    false,
 		WhoCanUse:   "Members of the trusted organization for the repo.",
 		Examples:    []string{"/ok-to-test"},

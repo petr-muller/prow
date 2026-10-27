@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"os/exec"
 	"path"
 	"path/filepath"
 	"strings"
@@ -198,10 +199,14 @@ func TestValidateOptions(t *testing.T) {
 
 type fakePRHandler struct {
 	changeErr      error
+	changeFunc     func(context.Context) (string, error)
 	titleBodyCalls int
 }
 
 func (f *fakePRHandler) Changes() []func(context.Context) (string, error) {
+	if f.changeFunc != nil {
+		return []func(context.Context) (string, error){f.changeFunc}
+	}
 	return []func(context.Context) (string, error){
 		func(context.Context) (string, error) { return "", f.changeErr },
 	}
@@ -212,7 +217,36 @@ func (f *fakePRHandler) PRTitleBody() (string, string) {
 	return "title", "body"
 }
 
+func useTempGitRepo(t *testing.T) string {
+	t.Helper()
+	dir := t.TempDir()
+	oldDir, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("Failed getting current directory: %v", err)
+	}
+	if err := os.Chdir(dir); err != nil {
+		t.Fatalf("Failed changing to %q: %v", dir, err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(oldDir); err != nil {
+			t.Errorf("Failed restoring working directory to %q: %v", oldDir, err)
+		}
+	})
+	runGit(t, "init", "-q")
+	return dir
+}
+
+func runGit(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("git", args...).CombinedOutput()
+	if err != nil {
+		t.Fatalf("git %s failed: %v: %s", strings.Join(args, " "), err, out)
+	}
+	return string(out)
+}
+
 func TestRunDryRun(t *testing.T) {
+	useTempGitRepo(t)
 	sentinel := errors.New("sentinel")
 	prh := &fakePRHandler{changeErr: sentinel}
 	o := &Options{
@@ -227,6 +261,56 @@ func TestRunDryRun(t *testing.T) {
 	}
 	if prh.titleBodyCalls != 0 {
 		t.Errorf("Expected PRTitleBody not to be called, got %d calls", prh.titleBodyCalls)
+	}
+}
+
+func TestRunDryRunDirtyTree(t *testing.T) {
+	dir := useTempGitRepo(t)
+	writeToFile(t, filepath.Join(dir, "pre-existing"), "dirt")
+
+	prh := &fakePRHandler{
+		changeFunc: func(context.Context) (string, error) { return "", nil },
+	}
+	o := &Options{
+		GitHubOrg:  "whatever-org",
+		GitHubRepo: "whatever-repo",
+		DryRun:     true,
+	}
+
+	err := Run(context.Background(), o, prh)
+	if err == nil {
+		t.Fatal("Expected Run to fail on a dirty working tree, got nil")
+	}
+	if !strings.Contains(err.Error(), "dirty working tree") {
+		t.Errorf("Expected a dirty working tree error, got %v", err)
+	}
+	if prh.titleBodyCalls != 0 {
+		t.Errorf("Expected PRTitleBody not to be called, got %d calls", prh.titleBodyCalls)
+	}
+}
+
+func TestRunDryRunCleanTreeChanges(t *testing.T) {
+	dir := useTempGitRepo(t)
+
+	prh := &fakePRHandler{
+		changeFunc: func(context.Context) (string, error) {
+			return "", os.WriteFile(filepath.Join(dir, "bumped"), []byte("new"), 0644)
+		},
+	}
+	o := &Options{
+		GitHubOrg:  "whatever-org",
+		GitHubRepo: "whatever-repo",
+		DryRun:     true,
+	}
+
+	if err := Run(context.Background(), o, prh); err != nil {
+		t.Fatalf("Expected Run to succeed, got %v", err)
+	}
+	if prh.titleBodyCalls != 1 {
+		t.Errorf("Expected PRTitleBody to be called once, got %d calls", prh.titleBodyCalls)
+	}
+	if out, err := exec.Command("git", "rev-parse", "--verify", "HEAD").CombinedOutput(); err == nil {
+		t.Errorf("Expected no commit to be created, but HEAD exists: %s", out)
 	}
 }
 

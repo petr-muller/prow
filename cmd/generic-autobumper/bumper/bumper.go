@@ -64,7 +64,8 @@ type Options struct {
 	AssignTo string `json:"assign_to"`
 	// Whether to skip creating the pull request for this bump.
 	SkipPullRequest bool `json:"skipPullRequest"`
-	// Apply the changes to the working tree and log the PR title/body, without committing, pushing, or creating a PR/CR.
+	// Apply the changes to a clean working tree and log the PR title/body, without committing, pushing, or creating a PR/CR.
+	// Fails if the working tree is dirty before any change function runs.
 	// Read-only lookups (upstream versions, oncall) still happen.
 	DryRun bool `json:"dryRun"`
 	// Whether to signoff the commits.
@@ -249,13 +250,21 @@ func Run(ctx context.Context, o *Options, prh PRHandler) error {
 }
 
 func processDryRun(ctx context.Context, prh PRHandler) error {
+	changed, err := HasChanges()
+	if err != nil {
+		return fmt.Errorf("checking working tree status before dry-run: %w", err)
+	}
+	if changed {
+		return errors.New("refusing to dry-run on a dirty working tree; commit or stash first")
+	}
+
 	for i, changeFunc := range prh.Changes() {
 		if _, err := changeFunc(ctx); err != nil {
 			return fmt.Errorf("process function %d: %w", i, err)
 		}
 	}
 
-	changed, err := HasChanges()
+	changed, err = HasChanges()
 	if err != nil {
 		return fmt.Errorf("checking changes: %w", err)
 	}

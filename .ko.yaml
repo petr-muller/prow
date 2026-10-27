@@ -1,7 +1,9 @@
 # Distroless images:
 # defaultBaseImage: gcr.io/distroless/static:nonroot
-# Prow uses 2 bases images, a custom built alpine image with important extras installed and 
-# git-custom-k8s-auth which the same alpine image with kubernetes auth clients installed for AWS/GCP
+# Prow also uses these custom base images via baseImageOverrides:
+# - alpine: Alpine with ca-certificates; use for components that don't need git or Kubernetes auth.
+# - git: the alpine image plus git, git-daemon, openssh, and SSH configuration/known hosts; use for components that need git.
+# - git-custom-k8s-auth: the git image plus the AWS IAM authenticator, GKE gcloud auth plugin, and Azure kubelogin.
 # git-custom-k8s-auth should only be used for components that talk to Kubernetes Clusters.
 baseImageOverrides:
   sigs.k8s.io/prow/cmd/branchprotector: gcr.io/k8s-staging-test-infra/alpine:v20261023-49052c49ef

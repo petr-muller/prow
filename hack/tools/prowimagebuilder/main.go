@@ -140,6 +140,10 @@ type imageDefs struct {
 	Defs []imageDef `json:"images"`
 }
 
+type koConfig struct {
+	BaseImageOverrides map[string]string `json:"baseImageOverrides"`
+}
+
 func loadImageDefs(p string) ([]imageDef, error) {
 	b, err := os.ReadFile(p)
 	if err != nil {
@@ -150,6 +154,32 @@ func loadImageDefs(p string) ([]imageDef, error) {
 		return nil, err
 	}
 	return res.Defs, nil
+}
+
+func loadKoConfig(p string) (koConfig, error) {
+	b, err := os.ReadFile(p)
+	if err != nil {
+		return koConfig{}, err
+	}
+	var res koConfig
+	if err := yaml.Unmarshal(b, &res); err != nil {
+		return koConfig{}, err
+	}
+	return res, nil
+}
+
+func validateBaseImageOverrides(defs []imageDef, config koConfig) error {
+	var missing []string
+	for _, def := range defs {
+		key := path.Join("sigs.k8s.io/prow", def.Dir)
+		if _, ok := config.BaseImageOverrides[key]; !ok {
+			missing = append(missing, def.Dir)
+		}
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing .ko.yaml baseImageOverrides entries for images: %s", strings.Join(missing, ", "))
+	}
+	return nil
 }
 
 func allBaseTags() ([]string, error) {
@@ -320,6 +350,15 @@ func main() {
 	ids, err := loadImageDefs(o.prowImageListFile)
 	if err != nil {
 		logrus.WithError(err).WithField("prow-image-file", o.prowImageListFile).Error("Failed loading")
+		os.Exit(1)
+	}
+	config, err := loadKoConfig(path.Join(rootDir, ".ko.yaml"))
+	if err != nil {
+		logrus.WithError(err).Error("Failed loading .ko.yaml")
+		os.Exit(1)
+	}
+	if err := validateBaseImageOverrides(ids, config); err != nil {
+		logrus.WithError(err).Error("Failed validating image base overrides")
 		os.Exit(1)
 	}
 

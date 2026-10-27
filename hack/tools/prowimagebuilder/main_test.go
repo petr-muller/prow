@@ -160,6 +160,78 @@ func TestLoadImageDefs(t *testing.T) {
 	}
 }
 
+func TestValidateBaseImageOverrides(t *testing.T) {
+	tests := []struct {
+		name         string
+		prowImages   string
+		koConfig     string
+		wantValidate string
+	}{
+		{
+			name: "all-present",
+			prowImages: `images:
+- dir: cmd/admission
+- dir: cmd/clonerefs`,
+			koConfig: `baseImageOverrides:
+  sigs.k8s.io/prow/cmd/admission: gcr.io/k8s-staging-test-infra/alpine:latest
+  sigs.k8s.io/prow/cmd/clonerefs: gcr.io/k8s-staging-test-infra/git:latest
+  sigs.k8s.io/prow/test/integration/cmd/fakeghserver: gcr.io/k8s-staging-test-infra/alpine:latest`,
+		},
+		{
+			name: "missing-entry",
+			prowImages: `images:
+- dir: cmd/admission
+- dir: cmd/clonerefs`,
+			koConfig: `baseImageOverrides:
+  sigs.k8s.io/prow/cmd/admission: gcr.io/k8s-staging-test-infra/alpine:latest`,
+			wantValidate: "missing .ko.yaml baseImageOverrides entries for images: cmd/clonerefs",
+		},
+		{
+			name: "multiple-missing-entries",
+			prowImages: `images:
+- dir: cmd/admission
+- dir: cmd/clonerefs
+- dir: cmd/missing`,
+			koConfig: `baseImageOverrides:
+  sigs.k8s.io/prow/cmd/admission: gcr.io/k8s-staging-test-infra/alpine:latest`,
+			wantValidate: "missing .ko.yaml baseImageOverrides entries for images: cmd/clonerefs, cmd/missing",
+		},
+	}
+
+	for _, tc := range tests {
+		tc := tc
+		t.Run(tc.name, func(t *testing.T) {
+			dir := t.TempDir()
+			prowImagesFile := path.Join(dir, ".prow-images.yaml")
+			koConfigFile := path.Join(dir, ".ko.yaml")
+			if err := os.WriteFile(prowImagesFile, []byte(tc.prowImages), 0644); err != nil {
+				t.Fatalf("Failed writing Prow images fixture: %v", err)
+			}
+			if err := os.WriteFile(koConfigFile, []byte(tc.koConfig), 0644); err != nil {
+				t.Fatalf("Failed writing ko config fixture: %v", err)
+			}
+
+			defs, err := loadImageDefs(prowImagesFile)
+			if err != nil {
+				t.Fatalf("Failed loading image defs: %v", err)
+			}
+			config, err := loadKoConfig(koConfigFile)
+			if err != nil {
+				t.Fatalf("Failed loading ko config: %v", err)
+			}
+
+			err = validateBaseImageOverrides(defs, config)
+			got := ""
+			if err != nil {
+				got = err.Error()
+			}
+			if diff := cmp.Diff(tc.wantValidate, got); diff != "" {
+				t.Fatalf("Validation mismatch. Want(-), got(+):\n%s", diff)
+			}
+		})
+	}
+}
+
 func TestAllTags(t *testing.T) {
 	date, gitHash := "20220222", "a1b2c3d4"
 	oldRunCmdInDirFunc := runCmdInDirFunc

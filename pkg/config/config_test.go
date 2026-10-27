@@ -3964,6 +3964,133 @@ func TestReadJobConfigsFileAndDirectory(t *testing.T) {
 	}
 }
 
+func jobConfigPathDuplicateError(a, b string) string {
+	if a == b {
+		return fmt.Sprintf("job config path %q is configured more than once", a)
+	}
+	first, second := a, b
+	if second < first {
+		first, second = second, first
+	}
+	return fmt.Sprintf("job config paths %q and %q refer to the same path; configured paths must be unique", first, second)
+}
+
+func jobConfigPathOverlapError(ancestor, descendant string) string {
+	return fmt.Sprintf("job config paths %q and %q overlap; one must not contain the other and configured paths must be disjoint", ancestor, descendant)
+}
+
+func assertJobConfigPathError(t *testing.T, roots []string, expectedError string) {
+	t.Helper()
+	actual, err := ReadJobConfigs(roots)
+	if err == nil {
+		t.Fatalf("expected an error for roots %q, got none", roots)
+	}
+	if diff := cmp.Diff(expectedError, err.Error()); diff != "" {
+		t.Fatalf("unexpected error for roots %q (-want +got):\n%s", roots, diff)
+	}
+	if !reflect.DeepEqual(JobConfig{}, actual) {
+		t.Errorf("expected an empty JobConfig on error, got %+v", actual)
+	}
+}
+
+func TestReadJobConfigsRejectsNonDisjointPaths(t *testing.T) {
+	t.Run("repeated directory root", func(t *testing.T) {
+		root := t.TempDir()
+		writeJobConfigFiles(t, root, map[string]string{"jobs.yaml": periodicJobConfig("a")})
+		assertJobConfigPathError(t, []string{root, root}, jobConfigPathDuplicateError(root, root))
+	})
+
+	t.Run("repeated file root", func(t *testing.T) {
+		root := t.TempDir()
+		writeJobConfigFiles(t, root, map[string]string{"jobs.yaml": periodicJobConfig("a")})
+		file := filepath.Join(root, "jobs.yaml")
+		assertJobConfigPathError(t, []string{file, file}, jobConfigPathDuplicateError(file, file))
+	})
+
+	t.Run("relative and absolute aliases in either order", func(t *testing.T) {
+		root := t.TempDir()
+		writeJobConfigFiles(t, root, map[string]string{"jobs.yaml": periodicJobConfig("a")})
+		cwd, err := os.Getwd()
+		if err != nil {
+			t.Fatalf("failed to get the working directory: %v", err)
+		}
+		relativeRoot, err := filepath.Rel(cwd, root)
+		if err != nil {
+			t.Fatalf("failed to make %q relative: %v", root, err)
+		}
+
+		expectedError := jobConfigPathDuplicateError(root, relativeRoot)
+		assertJobConfigPathError(t, []string{root, relativeRoot}, expectedError)
+		assertJobConfigPathError(t, []string{relativeRoot, root}, expectedError)
+	})
+
+	t.Run("cleaned spelling alias in either order", func(t *testing.T) {
+		root := t.TempDir()
+		writeJobConfigFiles(t, root, map[string]string{"jobs.yaml": periodicJobConfig("a")})
+		spelling := root + string(filepath.Separator) + "."
+
+		expectedError := jobConfigPathDuplicateError(root, spelling)
+		assertJobConfigPathError(t, []string{root, spelling}, expectedError)
+		assertJobConfigPathError(t, []string{spelling, root}, expectedError)
+	})
+
+	t.Run("nested empty directory roots in either order", func(t *testing.T) {
+		root := t.TempDir()
+		nested := filepath.Join(root, "nested")
+		if err := os.Mkdir(nested, 0777); err != nil {
+			t.Fatalf("failed to create nested directory: %v", err)
+		}
+
+		expectedError := jobConfigPathOverlapError(root, nested)
+		assertJobConfigPathError(t, []string{root, nested}, expectedError)
+		assertJobConfigPathError(t, []string{nested, root}, expectedError)
+	})
+
+	t.Run("file inside configured directory in either order", func(t *testing.T) {
+		root := t.TempDir()
+		writeJobConfigFiles(t, root, map[string]string{"single.yaml": periodicJobConfig("a")})
+		file := filepath.Join(root, "single.yaml")
+
+		expectedError := jobConfigPathOverlapError(root, file)
+		assertJobConfigPathError(t, []string{root, file}, expectedError)
+		assertJobConfigPathError(t, []string{file, root}, expectedError)
+	})
+
+	t.Run("overlap is rejected even when prowignore excludes the contents", func(t *testing.T) {
+		root := t.TempDir()
+		nested := filepath.Join(root, "nested")
+		if err := os.Mkdir(nested, 0777); err != nil {
+			t.Fatalf("failed to create nested directory: %v", err)
+		}
+		writeJobConfigFiles(t, root, map[string]string{
+			ProwIgnoreFileName: "*.yaml\nnested/\n",
+			"single.yaml":      periodicJobConfig("a"),
+		})
+		file := filepath.Join(root, "single.yaml")
+
+		assertJobConfigPathError(t, []string{root, nested}, jobConfigPathOverlapError(root, nested))
+		assertJobConfigPathError(t, []string{root, file}, jobConfigPathOverlapError(root, file))
+	})
+
+	t.Run("disjoint sibling directories in either order", func(t *testing.T) {
+		base := t.TempDir()
+		jobs := filepath.Join(base, "jobs")
+		jobsExtra := filepath.Join(base, "jobs-extra")
+		writeJobConfigFiles(t, jobs, map[string]string{"a.yaml": periodicJobConfig("a")})
+		writeJobConfigFiles(t, jobsExtra, map[string]string{"b.yaml": periodicJobConfig("b")})
+
+		for _, roots := range [][]string{{jobs, jobsExtra}, {jobsExtra, jobs}} {
+			actual, err := ReadJobConfigs(roots)
+			if err != nil {
+				t.Fatalf("unexpected error for disjoint roots %q: %v", roots, err)
+			}
+			if diff := cmp.Diff(sets.New("a", "b"), periodicNames(actual.Periodics)); diff != "" {
+				t.Errorf("unexpected jobs for roots %q (-want +got):\n%s", roots, diff)
+			}
+		}
+	})
+}
+
 func TestReadJobConfigsSymlinkRoots(t *testing.T) {
 	targetDir := t.TempDir()
 	writeJobConfigFiles(t, targetDir, map[string]string{"in-target.yaml": periodicJobConfig("in-target")})

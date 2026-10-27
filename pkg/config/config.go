@@ -1700,7 +1700,10 @@ func loadWithYamlOpts(yamlOpts []yaml.JSONOpt, prowConfig string, jobConfigs []s
 // ReadJobConfigs reads the JobConfig yaml from all the given paths and merges
 // it, but does not expand or validate the result. Every path is either a single
 // file or a directory that is searched recursively. File basenames must be
-// unique across all the paths, and the paths must not overlap.
+// unique across all the paths. The configured paths must be disjoint: a path
+// may not be repeated, and neither a directory nor a file may be contained in
+// another configured directory. Relative and absolute paths are normalized
+// before they are compared, and containment is evaluated per path component.
 // A path that is a symlink to a directory is not supported and is rejected,
 // because directory symlinks are not followed. Symlinks to files are loaded as
 // files.
@@ -1714,6 +1717,10 @@ func ReadJobConfigs(jobConfigs []string, yamlOpts ...yaml.JSONOpt) (JobConfig, e
 
 // readJobConfigs is ReadJobConfigs with the walk injected, so that the tests can make it fail.
 func readJobConfigs(jobConfigs []string, walk func(string, filepath.WalkFunc) error, yamlOpts ...yaml.JSONOpt) (JobConfig, error) {
+	if err := utilerrors.NewAggregate(validateJobConfigPaths(jobConfigs)); err != nil {
+		return JobConfig{}, err
+	}
+
 	r := &jobConfigReader{
 		yamlOpts: yamlOpts,
 		// we need to ensure all config files have unique basenames, even across
@@ -1731,6 +1738,78 @@ func readJobConfigs(jobConfigs []string, walk func(string, filepath.WalkFunc) er
 	logrus.WithField("count", r.count).WithField("duration", time.Since(allStart)).Traceln("jobConfigs loaded successfully")
 
 	return r.jc, nil
+}
+
+type configuredJobConfigPath struct {
+	original   string
+	normalized string
+}
+
+// validateJobConfigPaths rejects configured paths that are not disjoint. A
+// directory is walked recursively, so loading a nested path would merge the
+// same files twice, and loading the same path twice would merge them twice as
+// well. Paths are normalized to absolute, cleaned spellings before comparison,
+// and containment is evaluated per path component so that paths such as "jobs"
+// and "jobs-extra" do not collide.
+func validateJobConfigPaths(jobConfigs []string) []error {
+	paths := make([]configuredJobConfigPath, 0, len(jobConfigs))
+	for _, original := range jobConfigs {
+		if original == "" {
+			// Leave an empty, invalid path as-is instead of resolving it to
+			// the working directory and potentially reporting a false overlap.
+			paths = append(paths, configuredJobConfigPath{original: original, normalized: original})
+			continue
+		}
+		abs, err := filepath.Abs(original)
+		if err != nil {
+			return []error{fmt.Errorf("failed to resolve job config path %q: %w", original, err)}
+		}
+		paths = append(paths, configuredJobConfigPath{original: original, normalized: filepath.Clean(abs)})
+	}
+
+	var errs []error
+	for i := range paths {
+		for j := i + 1; j < len(paths); j++ {
+			if err := jobConfigPathsConflict(paths[i], paths[j]); err != nil {
+				errs = append(errs, err)
+			}
+		}
+	}
+	return errs
+}
+
+func jobConfigPathsConflict(a, b configuredJobConfigPath) error {
+	if a.normalized == b.normalized {
+		if a.original == b.original {
+			return fmt.Errorf("job config path %q is configured more than once", a.original)
+		}
+		first, second := a.original, b.original
+		if second < first {
+			first, second = second, first
+		}
+		return fmt.Errorf("job config paths %q and %q refer to the same path; configured paths must be unique", first, second)
+	}
+
+	var ancestor, descendant configuredJobConfigPath
+	switch {
+	case jobConfigPathContains(a.normalized, b.normalized):
+		ancestor, descendant = a, b
+	case jobConfigPathContains(b.normalized, a.normalized):
+		ancestor, descendant = b, a
+	default:
+		return nil
+	}
+	return fmt.Errorf("job config paths %q and %q overlap; one must not contain the other and configured paths must be disjoint", ancestor.original, descendant.original)
+}
+
+// jobConfigPathContains reports whether child is inside parent, based on path
+// components rather than a string prefix.
+func jobConfigPathContains(parent, child string) bool {
+	rel, err := filepath.Rel(parent, child)
+	if err != nil || rel == "." || rel == ".." {
+		return false
+	}
+	return !strings.HasPrefix(rel, ".."+string(filepath.Separator))
 }
 
 // jobConfigReader accumulates the job config of all the paths it reads.

@@ -71,8 +71,11 @@ keys (different files once mounted to a container).
 `--job-config-path` can be passed multiple times when the job configs are not
 all in one place, for example when they are stored on different volumes. The
 job configs of all the paths are merged. A path is either a file or a directory
-that is searched recursively, the paths must not overlap, and the base names of
-the files must be unique across all the paths, not only within each of them.
+that is searched recursively. The configured paths must be disjoint: a path may
+not be repeated, and neither a directory nor a file may be contained in another
+configured directory. Relative and absolute paths are compared after
+normalization, and containment is evaluated per path component. The base names
+of the files must be unique across all the paths, not only within each of them.
 Directory symlinks are not followed, so a path that is a symlink to a directory
 is rejected; configure the actual directory path instead. A path that is a
 symlink to a file is loaded as that file.

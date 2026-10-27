@@ -211,11 +211,7 @@ func selectBestReviewer(
 	rand.Shuffle(len(ranked), func(i, j int) {
 		ranked[i], ranked[j] = ranked[j], ranked[i]
 	})
-	for i := 1; i < len(ranked); i++ {
-		for j := i; j > 0 && ranked[j].score > ranked[j-1].score; j-- {
-			ranked[j], ranked[j-1] = ranked[j-1], ranked[j]
-		}
-	}
+	sort.SliceStable(ranked, func(i, j int) bool { return ranked[i].score > ranked[j].score })
 
 	for _, c := range ranked {
 		if !isReviewerAvailable(c.login, busyReviewers, ghc, log, useStatusAvailability) {

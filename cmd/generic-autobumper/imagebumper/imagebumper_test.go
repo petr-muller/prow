@@ -18,7 +18,10 @@ package imagebumper
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 )
 
@@ -277,11 +280,13 @@ func TestPickBestTag(t *testing.T) {
 
 func TestUpdateAllTags(t *testing.T) {
 	tests := []struct {
-		name           string
-		content        string
-		expectedResult string
-		imageFilter    *regexp.Regexp
-		newTags        map[string]string
+		name            string
+		content         string
+		expectedResult  string
+		imageFilter     *regexp.Regexp
+		newTags         map[string]string
+		wantErr         bool
+		wantErrContains []string
 	}{
 		{
 			name:           "file with no images does nothing",
@@ -319,6 +324,18 @@ func TestUpdateAllTags(t *testing.T) {
 			expectedResult: `{"images": ["gcr.io/k8s-staging-test-infra/some-image:0.2", "gcr.io/k8s-staging-test-infra/some-image:v20190405-123456789"]}`,
 			newTags: map[string]string{
 				"gcr.io/k8s-staging-test-infra/some-image:v20190404-12345678": "v20190405-123456789",
+			},
+			wantErr:         true,
+			wantErrContains: []string{"gcr.io/k8s-staging-test-infra/some-image:0.2", "unknown image"},
+		},
+		{
+			name:           "error names every image that failed",
+			content:        `{"images": ["gcr.io/k8s-staging-test-infra/some-image:0.2", "gcr.io/k8s-staging-test-infra/other-image:0.3"]}`,
+			expectedResult: `{"images": ["gcr.io/k8s-staging-test-infra/some-image:0.2", "gcr.io/k8s-staging-test-infra/other-image:0.3"]}`,
+			wantErr:        true,
+			wantErrContains: []string{
+				"gcr.io/k8s-staging-test-infra/some-image:0.2",
+				"gcr.io/k8s-staging-test-infra/other-image:0.3",
 			},
 		},
 		{
@@ -367,10 +384,50 @@ func TestUpdateAllTags(t *testing.T) {
 				return result, nil
 			}
 
-			newContent := updateAllTags(tagPicker, []byte(test.content), test.imageFilter)
+			newContent, err := updateAllTags(tagPicker, []byte(test.content), test.imageFilter)
+			if test.wantErr != (err != nil) {
+				t.Fatalf("Expected error: %t, got: %v", test.wantErr, err)
+			}
+			for _, want := range test.wantErrContains {
+				if !strings.Contains(err.Error(), want) {
+					t.Errorf("Expected error to contain %q, got: %v", want, err)
+				}
+			}
 			if test.expectedResult != string(newContent) {
 				t.Fatalf("Expected content:\n%s\n\nActual content:\n%s\n\n", test.expectedResult, string(newContent))
 			}
 		})
+	}
+}
+
+func TestUpdateFileReportsPartialUpdate(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "images.yaml")
+	content := `{"images": ["gcr.io/k8s-staging-test-infra/some-image:0.2", "gcr.io/k8s-staging-test-infra/some-image:v20190404-12345678"]}`
+	if err := os.WriteFile(path, []byte(content), 0644); err != nil {
+		t.Fatalf("Failed to write test file: %v", err)
+	}
+
+	tagPicker := func(imageHost, imageName, imageTag string) (string, error) {
+		if imageTag == "v20190404-12345678" {
+			return "v20190405-123456789", nil
+		}
+		return "", fmt.Errorf("unknown image %s/%s:%s", imageHost, imageName, imageTag)
+	}
+
+	err := (&Client{}).UpdateFile(tagPicker, path, nil)
+	if err == nil {
+		t.Fatal("Expected an error for the failed image lookup, got nil")
+	}
+	if !strings.Contains(err.Error(), "gcr.io/k8s-staging-test-infra/some-image:0.2") {
+		t.Errorf("Expected error to name the failing image, got: %v", err)
+	}
+
+	updated, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("Failed to read test file: %v", err)
+	}
+	expected := `{"images": ["gcr.io/k8s-staging-test-infra/some-image:0.2", "gcr.io/k8s-staging-test-infra/some-image:v20190405-123456789"]}`
+	if expected != string(updated) {
+		t.Errorf("Expected written content:\n%s\n\nActual content:\n%s", expected, string(updated))
 	}
 }

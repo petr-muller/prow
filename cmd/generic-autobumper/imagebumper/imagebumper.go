@@ -18,6 +18,7 @@ package imagebumper
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -224,13 +225,15 @@ func (cli *Client) AddToCache(image, newTag string) {
 	cli.tagCache[image] = newTag
 }
 
-func updateAllTags(tagPicker func(host, image, tag string) (string, error), content []byte, imageFilter *regexp.Regexp) []byte {
+func updateAllTags(tagPicker func(host, image, tag string) (string, error), content []byte, imageFilter *regexp.Regexp) ([]byte, error) {
 	indexes := imageRegexp.FindAllSubmatchIndex(content, -1)
 	// Not finding any images is not an error.
 	if indexes == nil {
-		return content
+		return content, nil
 	}
 
+	var errs []error
+	failed := make(map[string]struct{})
 	newContent := make([]byte, 0, len(content))
 	lastIndex := 0
 	for _, m := range indexes {
@@ -247,7 +250,12 @@ func updateAllTags(tagPicker func(host, image, tag string) (string, error), cont
 
 		latest, err := tagPicker(host, image, tag)
 		if err != nil {
-			log.Printf("Failed to update %s/%s:%s: %v.\n", host, image, tag, err)
+			ref := host + "/" + image + ":" + tag
+			log.Printf("Failed to update %s: %v.\n", ref, err)
+			if _, ok := failed[ref]; !ok {
+				failed[ref] = struct{}{}
+				errs = append(errs, fmt.Errorf("failed to update %s: %w", ref, err))
+			}
 			newContent = append(newContent, content[m[imageTagPart*2]:m[1]]...)
 			continue
 		}
@@ -255,7 +263,7 @@ func updateAllTags(tagPicker func(host, image, tag string) (string, error), cont
 	}
 	newContent = append(newContent, content[lastIndex:]...)
 
-	return newContent
+	return newContent, errors.Join(errs...)
 }
 
 // UpdateFile updates a file in place.
@@ -266,10 +274,13 @@ func (cli *Client) UpdateFile(tagPicker func(imageHost, imageName, currentTag st
 		return fmt.Errorf("failed to read %s: %w", path, err)
 	}
 
-	newContent := updateAllTags(tagPicker, content, imageFilter)
+	newContent, tagErr := updateAllTags(tagPicker, content, imageFilter)
 
 	if err := os.WriteFile(path, newContent, 0644); err != nil {
 		return fmt.Errorf("failed to write %s: %w", path, err)
+	}
+	if tagErr != nil {
+		return fmt.Errorf("failed to update %s: %w", path, tagErr)
 	}
 	return nil
 }

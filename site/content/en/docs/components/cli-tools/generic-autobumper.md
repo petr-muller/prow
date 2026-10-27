@@ -89,3 +89,17 @@ prefixes:
     summarise: false
     consistentImages: false
 ```
+
+### Preview changes locally
+
+Use `--dry-run` to see what a bump would do without publishing anything:
+
+```bash
+generic-autobumper --config=config.yaml --dry-run
+```
+
+In this mode the bump is applied to the working tree and the PR title and body that would be used are logged, but nothing is committed, pushed, or created as a PR/CR. No GitHub token or GitHub App credentials are required; read-only lookups, such as upstream image versions and oncall information, are still performed. The working tree is left dirty, so `git diff` shows the change.
+
+`--dry-run` differs from `--skip-pullrequest`: the latter commits the changes locally and then stops before pushing the branch and creating or updating the PR (for GitHub-based bumps), so it still needs the GitHub token and the org/repo/remote settings. `--dry-run` does not commit at all.
+
+`--dry-run` is a command-line flag, not a YAML config key. In general, CLI flags take precedence over YAML config values.

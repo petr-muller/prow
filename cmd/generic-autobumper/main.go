@@ -186,7 +186,7 @@ func parseOptions() (*options, *bumper.Options, error) {
 
 	flag.StringVar(&config, "config", "", "The path to the config file for the autobumber.")
 	flag.StringSliceVar(&labelsOverride, "labels-override", nil, "Override labels to be added to PR.")
-	flag.BoolVar(&skipPullRequest, "skip-pullrequest", false, "")
+	flag.BoolVar(&skipPullRequest, "skip-pullrequest", false, "Commit the changes locally but do not push the branch or create/update the PR.")
 	flag.BoolVar(&dryRun, "dry-run", false, "Apply the changes to the working tree without committing, pushing or creating a PR.")
 	flag.BoolVar(&signoff, "signoff", false, "Signoff the commits.")
 	flag.BoolVar(&o.SkipIfNoOncall, "skip-if-no-oncall", false, "Don't run anything if no oncall is discovered")

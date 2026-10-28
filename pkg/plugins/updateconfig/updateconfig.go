@@ -175,19 +175,14 @@ func Update(fg FileGetter, kc corev1.ConfigMapInterface, name, namespace string,
 		value := content
 		if upd.GZIP {
 			buff := bytes.NewBuffer([]byte{})
-			// TODO: this error is wildly unlikely for anything that
-			// would actually fit in a configmap, we could just as well return
-			// the error instead of falling back to the raw content
 			z := gzip.NewWriter(buff)
 			if _, err := z.Write(content); err != nil {
-				logger.WithError(err).Error("failed to gzip content, falling back to raw")
-			} else {
-				if err := z.Close(); err != nil {
-					logger.WithError(err).Error("failed to flush gzipped content (!?), falling back to raw")
-				} else {
-					value = buff.Bytes()
-				}
+				return fmt.Errorf("gzip %s: %w", upd.Filename, err)
 			}
+			if err := z.Close(); err != nil {
+				return fmt.Errorf("gzip %s: %w", upd.Filename, err)
+			}
+			value = buff.Bytes()
 		}
 		if utf8.ValidString(string(value)) {
 			delete(cm.BinaryData, upd.Key)

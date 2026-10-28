@@ -26,6 +26,7 @@ import (
 	"path/filepath"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -1069,63 +1070,174 @@ func TestGetConfigMapSize(t *testing.T) {
 	}
 }
 
+func writeJobConfigFile(t *testing.T, path, contents string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0750); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte(contents), 0666); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// createConfigMapMount creates the directory layout that Kubernetes uses when
+// mounting a ConfigMap to disk.
+func createConfigMapMount(t *testing.T, dir string, keys map[string]string) {
+	t.Helper()
+	if err := os.MkdirAll(dir, 0750); err != nil {
+		t.Fatal(err)
+	}
+
+	timestampDir := filepath.Join(dir, "..2024_01_01_00_00_00.1704067200")
+	if err := os.Mkdir(timestampDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	for key, contents := range keys {
+		writeJobConfigFile(t, filepath.Join(timestampDir, key), contents)
+	}
+	if err := os.Symlink(timestampDir, getDataDir(dir)); err != nil {
+		t.Fatal(err)
+	}
+	for key := range keys {
+		if err := os.Symlink(filepath.Join("..data", key), filepath.Join(dir, key)); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
+
 func TestGetConfigMapDirs(t *testing.T) {
-	toplevel, err := os.MkdirTemp("", "job-config")
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer os.RemoveAll(toplevel)
+	tests := []struct {
+		name string
+		// setup returns the job config paths to monitor.
+		setup func(t *testing.T, root string) []string
+		// want maps directories, relative to root, to their ConfigMap sizes.
+		want map[string]int64
+	}{
+		{
+			name: "direct ConfigMap mount",
+			setup: func(t *testing.T, root string) []string {
+				mount := filepath.Join(root, "configmap")
+				createConfigMapMount(t, mount, map[string]string{
+					"key1": "one",
+					"key2": "two-two",
+				})
+				return []string{mount}
+			},
+			want: map[string]int64{"configmap": 10},
+		},
+		{
+			name: "partitioned ConfigMap mounts",
+			setup: func(t *testing.T, root string) []string {
+				createConfigMapMount(t, filepath.Join(root, "part-1"), map[string]string{"key": "1234"})
+				createConfigMapMount(t, filepath.Join(root, "part-2"), map[string]string{"key1": "1234", "key2": "5678"})
+				createConfigMapMount(t, filepath.Join(root, "part-3"), map[string]string{"key1": "1234", "key2": "5678", "key3": "9012"})
+				return []string{root}
+			},
+			want: map[string]int64{
+				"part-1": 4,
+				"part-2": 8,
+				"part-3": 12,
+			},
+		},
+		{
+			name: "ConfigMap mount nested among ordinary directories",
+			setup: func(t *testing.T, root string) []string {
+				writeJobConfigFile(t, filepath.Join(root, "jobs", "ordinary", "jobs.yaml"), "kind: JobConfig")
+				createConfigMapMount(t, filepath.Join(root, "jobs", "ordinary", "nested", "configmap"), map[string]string{"key": "1234"})
+				return []string{filepath.Join(root, "jobs")}
+			},
+			want: map[string]int64{"jobs/ordinary/nested/configmap": 4},
+		},
+		{
+			name: "plain file source",
+			setup: func(t *testing.T, root string) []string {
+				path := filepath.Join(root, "jobs.yaml")
+				writeJobConfigFile(t, path, "kind: JobConfig")
+				return []string{path}
+			},
+			want: map[string]int64{},
+		},
+		{
+			name: "flat ordinary directory",
+			setup: func(t *testing.T, root string) []string {
+				writeJobConfigFile(t, filepath.Join(root, "jobs.yaml"), "kind: JobConfig")
+				writeJobConfigFile(t, filepath.Join(root, "more-jobs.yaml"), "kind: JobConfig")
+				return []string{root}
+			},
+			want: map[string]int64{},
+		},
+		{
+			name: "nested ordinary directories",
+			setup: func(t *testing.T, root string) []string {
+				writeJobConfigFile(t, filepath.Join(root, "a", "b", "jobs.yaml"), "kind: JobConfig")
+				return []string{root}
+			},
+			want: map[string]int64{},
+		},
+		{
+			name: "mixed ordinary and ConfigMap sources",
+			setup: func(t *testing.T, root string) []string {
+				directMount := filepath.Join(root, "direct")
+				createConfigMapMount(t, directMount, map[string]string{"key": "1234"})
 
-	subdir1 := filepath.Join(toplevel, "part-1")
-	if err := os.Mkdir(subdir1, 0750); err != nil && !os.IsExist(err) {
-		t.Fatal(err)
+				partition := filepath.Join(root, "partition")
+				createConfigMapMount(t, filepath.Join(partition, "part-1"), map[string]string{"key1": "1234", "key2": "5678"})
+				writeJobConfigFile(t, filepath.Join(partition, "ordinary", "jobs.yaml"), "kind: JobConfig")
+
+				plain := filepath.Join(root, "plain")
+				writeJobConfigFile(t, filepath.Join(plain, "jobs.yaml"), "kind: JobConfig")
+
+				file := filepath.Join(root, "standalone.yaml")
+				writeJobConfigFile(t, file, "kind: JobConfig")
+				return []string{directMount, partition, plain, file}
+			},
+			want: map[string]int64{
+				"direct":           4,
+				"partition/part-1": 8,
+			},
+		},
 	}
 
-	subdir2 := filepath.Join(toplevel, "part-2")
-	if err := os.Mkdir(subdir2, 0750); err != nil && !os.IsExist(err) {
-		t.Fatal(err)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			root := t.TempDir()
+			got := map[string]int64{}
+			for _, jobConfigPath := range tc.setup(t, root) {
+				dirs, err := getConfigMapDirs(jobConfigPath)
+				if err != nil {
+					t.Fatalf("getConfigMapDirs(%q): %v", jobConfigPath, err)
+				}
+				for _, dir := range dirs {
+					rel, err := filepath.Rel(root, dir)
+					if err != nil {
+						t.Fatal(err)
+					}
+					size, err := getConfigMapSize(dir)
+					if err != nil {
+						t.Fatalf("getConfigMapSize(%q): %v", dir, err)
+					}
+					got[rel] = size
+				}
+			}
 
-	subdir3 := filepath.Join(toplevel, "part-3")
-	if err := os.Mkdir(subdir3, 0750); err != nil && !os.IsExist(err) {
-		t.Fatal(err)
+			if diff := cmp.Diff(tc.want, got); diff != "" {
+				t.Fatalf("unexpected ConfigMap mounts (-want +got):\n%s", diff)
+			}
+		})
 	}
+}
 
-	expected := []string{subdir1, subdir2, subdir3}
-	dirs, err := getConfigMapDirs(toplevel)
-	if err != nil {
-		t.Fatal(err)
+func TestGetConfigMapDirsReportsFilesystemErrors(t *testing.T) {
+	missing := filepath.Join(t.TempDir(), "missing")
+	_, err := getConfigMapDirs(missing)
+	if err == nil {
+		t.Fatal("expected an error for a missing job config path")
 	}
-
-	if diff := cmp.Diff(dirs, expected); diff != "" {
-		t.Fatal(diff)
+	if !errors.Is(err, os.ErrNotExist) {
+		t.Errorf("expected a not-exist error, got %v", err)
 	}
-
-	// Now create a "..data" symlink inside the toplevel dir. We now expect
-	// getConfigMapDirs() to only give us back the toplevel directory itself,
-	// because it should see the "..data" and treat the toplevel directory as
-	// the only ConfigMap-mounted directory (that it is not partitioned into
-	// multiple ConfigMap-mounted subdirectories).
-	//
-	// For purposes of this test the target of the symlink doesn't matter (we
-	// just check that getConfigMapDirs() sees the "..data" symlink and treats
-	// the toplevel folder as a single ConfigMap). However, getConfigMapDirs()
-	// uses os.Stat() (instead of os.Lstat()) so in order to pass/fail the
-	// existence check, we have to create a valid symlink with a target that
-	// exists.
-	dataDir := getDataDir(toplevel)
-	if err := os.Symlink(toplevel, dataDir); err != nil {
-		t.Fatal(err)
-	}
-
-	expectedToplevelOnly := []string{toplevel}
-	dirs, err = getConfigMapDirs(toplevel)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if diff := cmp.Diff(dirs, expectedToplevelOnly); diff != "" {
-		t.Fatal(diff)
+	if !strings.Contains(err.Error(), missing) {
+		t.Errorf("expected error to mention %q, got %v", missing, err)
 	}
 }
 

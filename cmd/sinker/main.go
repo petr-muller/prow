@@ -572,11 +572,12 @@ func podNeedsKubernetesFinalizerCleanup(log *logrus.Entry, pj *prowapi.ProwJob, 
 }
 
 // jobConfigMapMonitor reports metrics for the size of the ConfigMap(s) found
-// under the the directory specified with --job-config-path (example:
-// "--job-config-path=/etc/job-config"). There are two possibilities --- either
-// the job ConfigMap is mounted directly at that path, or the ConfigMap was
-// partitioned (see https://github.com/kubernetes/test-infra/pull/28835) and
-// there are multiple subdirs underneath this one.
+// under the paths specified with --job-config-path (example:
+// "--job-config-path=/etc/job-config"). A path may be a ConfigMap mount, a
+// partition holding multiple ConfigMap mounts (see
+// https://github.com/kubernetes/test-infra/pull/28835), an ordinary file or
+// directory, or a mix of ordinary and ConfigMap-mounted directories. Ordinary
+// sources are not measured.
 func jobConfigMapMonitor(interval time.Duration, jobConfigPaths []string) {
 	logger := logrus.WithField("sync-loop", "job-configmap-monitor")
 	ticker := time.NewTicker(interval)
@@ -585,7 +586,7 @@ func jobConfigMapMonitor(interval time.Duration, jobConfigPaths []string) {
 		for _, jobConfigPath := range jobConfigPaths {
 			dirs, err := getConfigMapDirs(jobConfigPath)
 			if err != nil {
-				logger.WithField("dir", jobConfigPath).Error("could not resolve ConfigMap dirs")
+				logger.WithField("dir", jobConfigPath).WithError(err).Error("could not resolve ConfigMap dirs")
 				continue
 			}
 			for _, dir := range dirs {
@@ -607,30 +608,43 @@ func getDataDir(toplevel string) string {
 }
 
 func getConfigMapDirs(toplevel string) ([]string, error) {
-	dataDir := getDataDir(toplevel)
-	dirs := []string{}
+	info, err := os.Stat(toplevel)
+	if err != nil {
+		return nil, fmt.Errorf("failed to stat job config path %q: %w", toplevel, err)
+	}
+	if !info.IsDir() {
+		// A plain file source is not a ConfigMap mount.
+		return nil, nil
+	}
 
-	// If the data dir (symlink) does not exist directly, then assume that this
-	// path is a partition holding multiple ConfigMap-mounted dirs. We use
-	// os.Stat(), which means that both the "..data" symlink and its target
-	// folder must exist. Of course, nothing stops the folder from having
-	// "..data" as a folder or regular file, which would count as false
-	// positives, but we ignore these cases because exhaustive checking here is
-	// not our concern. We just want metrics.
-	if _, err := os.Stat(dataDir); errors.Is(err, os.ErrNotExist) {
-		files, err := os.ReadDir(toplevel)
+	var dirs []string
+	if err := filepath.WalkDir(toplevel, func(configPath string, entry fs.DirEntry, err error) error {
 		if err != nil {
-			return nil, err
+			return fmt.Errorf("failed to walk job config path %q: %w", configPath, err)
+		}
+		if !entry.IsDir() {
+			return nil
 		}
 
-		for _, file := range files {
-			if !file.IsDir() {
-				continue
+		// We use os.Stat(), which means that both the "..data" symlink and its
+		// target folder must exist. Of course, nothing stops a folder from
+		// having "..data" as a folder or regular file, which would count as a
+		// false positive, but we ignore these cases because exhaustive checking
+		// here is not our concern. We just want metrics.
+		dataDir := getDataDir(configPath)
+		if _, err := os.Stat(dataDir); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return nil
 			}
-			dirs = append(dirs, filepath.Join(toplevel, file.Name()))
+			return fmt.Errorf("failed to stat %q: %w", dataDir, err)
 		}
-	} else {
-		dirs = append(dirs, toplevel)
+
+		dirs = append(dirs, configPath)
+		// Do not descend into a ConfigMap mount; its contents are managed by
+		// Kubernetes and are not job config sources.
+		return filepath.SkipDir
+	}); err != nil {
+		return nil, err
 	}
 
 	return dirs, nil
@@ -669,8 +683,11 @@ func getConfigMapSize(configmapDir string) (int64, error) {
 	// Look into the "..data" symlinked folder, which should contain the actual
 	// files where each file is a key in the ConfigMap.
 	dataDir := getDataDir(configmapDir)
-	if _, err := os.Stat(dataDir); errors.Is(err, os.ErrNotExist) {
-		return 0, fmt.Errorf("%q is not a ConfigMap-mounted dir", configmapDir)
+	if _, err := os.Stat(dataDir); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return 0, fmt.Errorf("%q is not a ConfigMap-mounted dir", configmapDir)
+		}
+		return 0, fmt.Errorf("failed to stat %q: %w", dataDir, err)
 	}
 
 	logger := logrus.NewEntry(logrus.StandardLogger())
@@ -700,7 +717,7 @@ func getConfigMapSize(configmapDir string) (int64, error) {
 	}
 
 	if err := filepath.WalkDir(configmapDir, walkDirFunc); err != nil {
-		return 0, nil
+		return 0, fmt.Errorf("failed to walk ConfigMap mount %q: %w", configmapDir, err)
 	}
 
 	return total, nil

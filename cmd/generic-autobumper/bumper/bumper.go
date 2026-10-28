@@ -258,17 +258,11 @@ func processDryRun(ctx context.Context, prh PRHandler) error {
 		return errors.New("refusing to dry-run on a dirty working tree; commit or stash first")
 	}
 
-	for i, changeFunc := range prh.Changes() {
-		if _, err := changeFunc(ctx); err != nil {
-			return fmt.Errorf("process function %d: %w", i, err)
-		}
-	}
-
-	changed, err = HasChanges()
+	anyChange, err := applyChanges(ctx, prh, func(int, string) error { return nil })
 	if err != nil {
-		return fmt.Errorf("checking changes: %w", err)
+		return err
 	}
-	if !changed {
+	if !anyChange {
 		logrus.Info("[Dryrun] Nothing changed from all functions.")
 		return nil
 	}
@@ -276,6 +270,35 @@ func processDryRun(ctx context.Context, prh PRHandler) error {
 	summary, body := prh.PRTitleBody()
 	logrus.Infof("[Dryrun] Changes left uncommitted in the working tree; skipping commit, push and PR creation.\nPR title: %s\nPR body:\n%s", summary, body)
 	return nil
+}
+
+// applyChanges runs all change functions in order and invokes onChanged for
+// each function that left changes in the working tree. It reports whether any
+// function produced changes.
+func applyChanges(ctx context.Context, prh PRHandler, onChanged func(i int, msg string) error) (bool, error) {
+	var anyChange bool
+	for i, changeFunc := range prh.Changes() {
+		msg, err := changeFunc(ctx)
+		if err != nil {
+			return false, fmt.Errorf("process function %d: %w", i, err)
+		}
+
+		changed, err := HasChanges()
+		if err != nil {
+			return false, fmt.Errorf("checking changes: %w", err)
+		}
+
+		if !changed {
+			logrus.WithField("function", i).Info("Nothing changed, skip commit ...")
+			continue
+		}
+
+		anyChange = true
+		if err := onChanged(i, msg); err != nil {
+			return false, err
+		}
+	}
+	return anyChange, nil
 }
 
 func processGitHub(ctx context.Context, o *Options, prh PRHandler) error {
@@ -307,27 +330,14 @@ func processGitHub(ctx context.Context, o *Options, prh PRHandler) error {
 	}
 
 	// Make change, commit and push
-	var anyChange bool
-	for i, changeFunc := range prh.Changes() {
-		msg, err := changeFunc(ctx)
-		if err != nil {
-			return fmt.Errorf("process function %d: %w", i, err)
-		}
-
-		changed, err := HasChanges()
-		if err != nil {
-			return fmt.Errorf("checking changes: %w", err)
-		}
-
-		if !changed {
-			logrus.WithField("function", i).Info("Nothing changed, skip commit ...")
-			continue
-		}
-
-		anyChange = true
+	anyChange, err := applyChanges(ctx, prh, func(_ int, msg string) error {
 		if err := gitCommit(o.GitName, o.GitEmail, msg, stdout, stderr, o.Signoff); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	if !anyChange {
 		logrus.Info("Nothing changed from all functions, skip PR ...")
@@ -381,27 +391,14 @@ func processGitHubAppAuth(ctx context.Context, o *Options, prh PRHandler) error 
 		}
 	}
 
-	var anyChange bool
-	for i, changeFunc := range prh.Changes() {
-		msg, err := changeFunc(ctx)
-		if err != nil {
-			return fmt.Errorf("process function %d: %w", i, err)
-		}
-
-		changed, err := HasChanges()
-		if err != nil {
-			return fmt.Errorf("checking changes: %w", err)
-		}
-
-		if !changed {
-			logrus.WithField("function", i).Info("Nothing changed, skip commit ...")
-			continue
-		}
-
-		anyChange = true
+	anyChange, err := applyChanges(ctx, prh, func(_ int, msg string) error {
 		if err := gitCommit(o.GitName, o.GitEmail, msg, stdout, stderr, o.Signoff); err != nil {
 			return fmt.Errorf("git commit: %w", err)
 		}
+		return nil
+	})
+	if err != nil {
+		return err
 	}
 	if !anyChange {
 		logrus.Info("Nothing changed from all functions, skip PR ...")
@@ -470,23 +467,8 @@ func processGerrit(ctx context.Context, o *Options, prh PRHandler) error {
 	}
 
 	// Make change, commit and push
-	for i, changeFunc := range prh.Changes() {
-		msg, err := changeFunc(ctx)
-		if err != nil {
-			return fmt.Errorf("process function %d: %w", i, err)
-		}
-
-		changed, err := HasChanges()
-		if err != nil {
-			return fmt.Errorf("checking changes: %w", err)
-		}
-
-		if !changed {
-			logrus.WithField("function", i).Info("Nothing changed, skip commit ...")
-			continue
-		}
-
-		if err = gerritCommitandPush(msg, o.Gerrit.AutobumpPRIdentifier, changeId, nil, nil, stdout, stderr); err != nil {
+	_, err = applyChanges(ctx, prh, func(_ int, msg string) error {
+		if err := gerritCommitandPush(msg, o.Gerrit.AutobumpPRIdentifier, changeId, nil, nil, stdout, stderr); err != nil {
 			// If push because a closed PR already exists with this
 			// change ID (the PR was abandoned). Hash the ID again and try one
 			// more time.
@@ -494,16 +476,19 @@ func processGerrit(ctx context.Context, o *Options, prh PRHandler) error {
 				return err
 			}
 			logrus.Warn("Error pushing CR due to already used ChangeID. PR may have been abandoned. Trying again with new ChangeID.")
-			if changeId, err = getChangeId(o.Gerrit.Author, o.Gerrit.AutobumpPRIdentifier, changeId); err != nil {
+			newChangeId, err := getChangeId(o.Gerrit.Author, o.Gerrit.AutobumpPRIdentifier, changeId)
+			if err != nil {
 				return err
 			}
+			changeId = newChangeId
 			if err := Call(stdout, stderr, gitCmd, []string{"reset", "HEAD^"}); err != nil {
 				return fmt.Errorf("unable to call git reset: %w", err)
 			}
 			return gerritCommitandPush(msg, o.Gerrit.AutobumpPRIdentifier, changeId, nil, nil, stdout, stderr)
 		}
-	}
-	return nil
+		return nil
+	})
+	return err
 }
 
 func gerritCommitandPush(summary, autobumpId, changeId string, reviewers, cc []string, stdout, stderr io.Writer) error {

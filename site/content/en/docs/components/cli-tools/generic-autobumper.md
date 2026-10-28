@@ -53,7 +53,6 @@ gitHubToken: "/etc/github-token/oauth"
 gitName: "Kubernetes Prow Robot"
 gitEmail: "k8s.ci.robot@gmail.com"
 onCallAddress: "https://storage.googleapis.com/kubernetes-jenkins/oncall.json"
-skipPullRequest: false
 gitHubOrg: "kubernetes"
 gitHubRepo: "test-infra"
 remoteName: "test-infra"
@@ -89,6 +88,8 @@ prefixes:
     summarise: false
     consistentImages: false
 ```
+
+`--skip-pullrequest`, `--dry-run`, and `--signoff` are CLI flags only and cannot be set in the YAML config.
 
 ### Preview changes locally
 

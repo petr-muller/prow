@@ -62,14 +62,16 @@ type Options struct {
 	GitEmail string `json:"gitEmail"`
 	// AssignTo specifies who to assign the created PR to. Takes precedence over onCallAddress and onCallGroup if set.
 	AssignTo string `json:"assign_to"`
-	// Whether to skip creating the pull request for this bump.
-	SkipPullRequest bool `json:"skipPullRequest"`
+	// Whether to skip creating the pull request for this bump. Set via the --skip-pullrequest
+	// CLI flag; not settable from YAML config.
+	SkipPullRequest bool `json:"-"`
 	// Apply the changes to a clean working tree and log the PR title/body, without committing, pushing, or creating a PR/CR.
 	// Fails if the working tree is dirty before any change function runs.
 	// Read-only lookups (upstream versions, oncall) still happen.
-	DryRun bool `json:"dryRun"`
-	// Whether to signoff the commits.
-	Signoff bool `json:"signoff"`
+	// Set via the --dry-run CLI flag; not settable from YAML config.
+	DryRun bool `json:"-"`
+	// Whether to signoff the commits. Set via the --signoff CLI flag; not settable from YAML config.
+	Signoff bool `json:"-"`
 	// Information needed to do a gerrit bump. Do not include if doing github bump
 	Gerrit *Gerrit `json:"gerrit"`
 	// The name used in the address when creating remote. This should be the same name as the fork. If fork does not exist this will be the name of the fork that is created.

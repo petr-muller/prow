@@ -29,7 +29,18 @@ import (
 	"sigs.k8s.io/prow/pkg/config/secret"
 	"sigs.k8s.io/prow/pkg/flagutil"
 	"sigs.k8s.io/prow/pkg/github"
+	"sigs.k8s.io/yaml"
 )
+
+func TestOptionsFlagOnlyFieldsNotSettableFromYAML(t *testing.T) {
+	var opts Options
+	if err := yaml.Unmarshal([]byte("dryRun: true\nskipPullRequest: true\nsignoff: true\n"), &opts); err != nil {
+		t.Fatalf("failed to unmarshal config: %v", err)
+	}
+	if opts.DryRun || opts.SkipPullRequest || opts.Signoff {
+		t.Errorf("expected flag-only fields to remain false, got DryRun=%t SkipPullRequest=%t Signoff=%t", opts.DryRun, opts.SkipPullRequest, opts.Signoff)
+	}
+}
 
 func TestValidateOptions(t *testing.T) {
 	emptyStr := ""

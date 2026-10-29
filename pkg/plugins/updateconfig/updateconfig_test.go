@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -159,6 +160,20 @@ func mustGzip(t *testing.T, content string) []byte {
 	return buffer.Bytes()
 }
 
+func mustGunzip(t *testing.T, data []byte) string {
+	t.Helper()
+	reader, err := gzip.NewReader(bytes.NewReader(data))
+	if err != nil {
+		t.Fatalf("create gzip reader: %v", err)
+	}
+	defer reader.Close()
+	content, err := io.ReadAll(reader)
+	if err != nil {
+		t.Fatalf("read gzip content: %v", err)
+	}
+	return string(content)
+}
+
 func TestUpdateConfigV2(t *testing.T) {
 	testUpdateConfig(localgit.NewV2, t)
 }
@@ -187,7 +202,11 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 		changes            []github.PullRequestChange
 		existConfigMaps    []runtime.Object
 		expectedConfigMaps []*coreapi.ConfigMap
-		config             *plugins.ConfigUpdater
+		// expectedBinaryPlaintext maps gzipped ConfigMap keys to their expected
+		// decompressed content, asserting semantics independently of the gzip
+		// encoder's exact byte output.
+		expectedBinaryPlaintext map[string]string
+		config                  *plugins.ConfigUpdater
 	}{
 		{
 			name:     "Opened PR, no update",
@@ -881,10 +900,11 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 			},
 		},
 		{
-			name:        "gzips all content if the top level gzip flag is set",
-			prAction:    github.PullRequestActionClosed,
-			merged:      true,
-			mergeCommit: "12345",
+			name:                    "gzips all content if the top level gzip flag is set",
+			expectedBinaryPlaintext: map[string]string{"config.yaml": "new-config"},
+			prAction:                github.PullRequestActionClosed,
+			merged:                  true,
+			mergeCommit:             "12345",
 			changes: []github.PullRequestChange{
 				{
 					Filename:  "prow/config.yaml",
@@ -925,10 +945,11 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 			},
 		},
 		{
-			name:        "gzips all content except one marked false if the top level gzip flag is set",
-			prAction:    github.PullRequestActionClosed,
-			merged:      true,
-			mergeCommit: "12345",
+			name:                    "gzips all content except one marked false if the top level gzip flag is set",
+			expectedBinaryPlaintext: map[string]string{"config.yaml": "new-config"},
+			prAction:                github.PullRequestActionClosed,
+			merged:                  true,
+			mergeCommit:             "12345",
 			changes: []github.PullRequestChange{
 				{
 					Filename:  "prow/config.yaml",
@@ -988,10 +1009,11 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 			},
 		},
 		{
-			name:        "gzips only one marked file if the top level gzip flag is set to false",
-			prAction:    github.PullRequestActionClosed,
-			merged:      true,
-			mergeCommit: "12345",
+			name:                    "gzips only one marked file if the top level gzip flag is set to false",
+			expectedBinaryPlaintext: map[string]string{"config.yaml": "new-config"},
+			prAction:                github.PullRequestActionClosed,
+			merged:                  true,
+			mergeCommit:             "12345",
 			changes: []github.PullRequestChange{
 				{
 					Filename:  "prow/config.yaml",
@@ -1308,10 +1330,11 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 			},
 		},
 		{
-			name:        "correctly converts to binary when gzipping",
-			prAction:    github.PullRequestActionClosed,
-			merged:      true,
-			mergeCommit: "12345",
+			name:                    "correctly converts to binary when gzipping",
+			expectedBinaryPlaintext: map[string]string{"config.yaml": "new-config"},
+			prAction:                github.PullRequestActionClosed,
+			merged:                  true,
+			mergeCommit:             "12345",
 			changes: []github.PullRequestChange{
 				{
 					Filename:  "prow/config.yaml",
@@ -1629,6 +1652,16 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 				t.Errorf("%s: Should have updated or created configmap for '%s'", tc.name, expected)
 			} else if !equality.Semantic.DeepEqual(expected, actual) {
 				t.Errorf("%s: incorrect ConfigMap state after update: %v", tc.name, diff.Diff(expected, actual))
+			}
+			if err == nil {
+				for key, expectedPlaintext := range tc.expectedBinaryPlaintext {
+					if _, ok := expected.BinaryData[key]; !ok {
+						continue
+					}
+					if actualPlaintext := mustGunzip(t, actual.BinaryData[key]); actualPlaintext != expectedPlaintext {
+						t.Errorf("%s: incorrect plaintext for gzipped key %q in ConfigMap %q: got %q, want %q", tc.name, key, expected.Name, actualPlaintext, expectedPlaintext)
+					}
+				}
 			}
 		}
 	}

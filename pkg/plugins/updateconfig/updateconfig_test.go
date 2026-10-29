@@ -1384,7 +1384,7 @@ func testUpdateConfig(clients localgit.Clients, t *testing.T) {
 						},
 					},
 					BinaryData: map[string][]byte{
-						"config.yaml": {31, 139, 8, 0, 0, 0, 0, 0, 0, 255, 202, 75, 45, 215, 77, 206, 207, 75, 203, 76, 7, 4, 0, 0, 255, 255, 84, 214, 231, 87, 10, 0, 0, 0},
+						"config.yaml": mustGzip(t, "new-config"),
 					},
 				},
 			},

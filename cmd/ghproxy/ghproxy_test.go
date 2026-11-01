@@ -18,6 +18,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/rand"
 	"crypto/rsa"
 	"encoding/json"
@@ -76,7 +77,7 @@ func TestDiskCachePruning(t *testing.T) {
 		t.Fatalf("Failed to generate RSA key: %v", err)
 	}
 
-	server := httptest.NewServer(proxy(o, httpRoundTripper(roundTripper), time.Hour))
+	server := httptest.NewServer(proxy(context.Background(), o, httpRoundTripper(roundTripper), time.Hour))
 	t.Cleanup(server.Close)
 	_, _, client, err := github.NewClientFromOptions(logrus.Fields{}, github.ClientOptions{
 		MaxRetries:      1,

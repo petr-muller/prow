@@ -17,6 +17,7 @@ limitations under the License.
 package main
 
 import (
+	"context"
 	"errors"
 	"flag"
 	"fmt"
@@ -202,6 +203,7 @@ func main() {
 	}
 
 	pprof.Instrument(o.instrumentationOptions)
+	ctx := interrupts.Context()
 	defer interrupts.WaitForGracefulShutdown()
 	metrics.ExposeMetrics("ghproxy", config.PushGateway{
 		Endpoint: o.pushGateway,
@@ -211,7 +213,7 @@ func main() {
 		ServeMetrics: o.serveMetrics,
 	}, o.instrumentationOptions.MetricsPort)
 
-	proxy := proxy(o, http.DefaultTransport, time.Hour)
+	proxy := proxy(ctx, o, http.DefaultTransport, time.Hour)
 	server := &http.Server{Addr: ":" + strconv.Itoa(o.port), Handler: proxy}
 
 	health := pjutil.NewHealthOnPort(o.instrumentationOptions.HealthPort)
@@ -220,11 +222,11 @@ func main() {
 	interrupts.ListenAndServe(server, time.Duration(o.timeout)*time.Second)
 }
 
-func proxy(o *options, upstreamTransport http.RoundTripper, diskCachePruneInterval time.Duration) http.Handler {
+func proxy(ctx context.Context, o *options, upstreamTransport http.RoundTripper, diskCachePruneInterval time.Duration) http.Handler {
 	var cache http.RoundTripper
 	throttlingTimes := ghcache.NewRequestThrottlingTimes(o.requestThrottlingTime, o.requestThrottlingTimeV4, o.requestThrottlingTimeForGET, o.requestThrottlingMaxDelayTime, o.requestThrottlingMaxDelayTimeV4)
 	if o.redisAddress != "" {
-		cache = ghcache.NewRedisCache(apptokenequalizer.New(upstreamTransport), o.redisAddress, o.redisUsername, o.redisSecretFile, o.maxConcurrency, throttlingTimes)
+		cache = ghcache.NewRedisCache(ctx, apptokenequalizer.New(upstreamTransport), o.redisAddress, o.redisUsername, o.redisSecretFile, o.maxConcurrency, throttlingTimes)
 	} else if o.dir == "" {
 		cache = ghcache.NewMemCache(apptokenequalizer.New(upstreamTransport), o.maxConcurrency, throttlingTimes)
 	} else {

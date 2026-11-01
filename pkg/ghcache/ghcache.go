@@ -85,6 +85,10 @@ const (
 	apiV4 = "v4"
 )
 
+// redisDialTimeout bounds the initial connection to Redis when the caller's
+// context carries no deadline, so an unreachable server cannot block forever.
+const redisDialTimeout = 10 * time.Second
+
 // RequestThrottlingTimes keeps the information about throttling times per API and request methods
 type RequestThrottlingTimes struct {
 	// throttlingTime is applied for all non-GET request methods for apiV3 and apiV4
@@ -538,7 +542,7 @@ func NewFromCache(roundTripper http.RoundTripper, cache CachePartitionCreator, m
 // Important note: The redis implementation does not support partitioning the cache
 // which means that requests to the same path from different tokens will invalidate
 // each other.
-func NewRedisCache(roundTripper http.RoundTripper, redisAddress string, redisUsername string, redisSecretFile string, maxConcurrency int, throttlingTimes RequestThrottlingTimes) http.RoundTripper {
+func NewRedisCache(ctx context.Context, roundTripper http.RoundTripper, redisAddress string, redisUsername string, redisSecretFile string, maxConcurrency int, throttlingTimes RequestThrottlingTimes) http.RoundTripper {
 
 	var conn redis.Conn
 	var err error
@@ -555,8 +559,16 @@ func NewRedisCache(roundTripper http.RoundTripper, redisAddress string, redisUse
 		dialOpts = append(dialOpts, redis.DialPassword(string(redisPassword)))
 	}
 
-	// Connect with whatever options were added (could be none)
-	conn, err = redis.Dial("tcp", redisAddress, dialOpts...)
+	// Connect with whatever options were added (could be none). Bound the dial
+	// if the caller did not already provide a deadline, so an unreachable
+	// Redis cannot block startup forever.
+	dialCtx := ctx
+	cancel := func() {}
+	if _, hasDeadline := ctx.Deadline(); !hasDeadline {
+		dialCtx, cancel = context.WithTimeout(ctx, redisDialTimeout)
+	}
+	conn, err = redis.DialContext(dialCtx, "tcp", redisAddress, dialOpts...)
+	cancel()
 
 	if err != nil {
 		logrus.WithError(err).Fatal("Error connecting to Redis")

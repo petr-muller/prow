@@ -494,6 +494,19 @@ func newTestReporter(t *testing.T, opts ...pstest.ServerReactorOption) (*Client,
 	reporter.newPubSubClient = func(ctx context.Context, project string) (*pubsub.Client, error) {
 		return pubsub.NewClient(ctx, project, option.WithGRPCConn(conn))
 	}
+	reporter.resetCache()
+	t.Cleanup(func() {
+		reporter.mu.Lock()
+		defer reporter.mu.Unlock()
+		for _, publisher := range reporter.publishers {
+			publisher.Stop()
+		}
+		for _, client := range reporter.clients {
+			client.Close()
+		}
+		reporter.clients = nil
+		reporter.publishers = nil
+	})
 	return reporter, srv
 }
 
@@ -565,5 +578,39 @@ func TestReport(t *testing.T) {
 				t.Errorf("published messages differ (-want +got):\n%s", diff)
 			}
 		})
+	}
+}
+
+func TestReportReusesClientForSameProject(t *testing.T) {
+	topicName := "projects/" + testPubSubProjectName + "/topics/" + testPubSubTopicName
+	reporter, srv := newTestReporter(t)
+	if _, err := srv.GServer.CreateTopic(context.Background(), &pubsubpb.Topic{Name: topicName}); err != nil {
+		t.Fatalf("create topic: %v", err)
+	}
+
+	var calls int
+	newClient := reporter.newPubSubClient
+	reporter.newPubSubClient = func(ctx context.Context, project string) (*pubsub.Client, error) {
+		calls++
+		return newClient(ctx, project)
+	}
+
+	pj := &prowapi.ProwJob{
+		ObjectMeta: metav1.ObjectMeta{
+			Labels: map[string]string{
+				PubSubProjectLabel: testPubSubProjectName,
+				PubSubTopicLabel:   testPubSubTopicName,
+				PubSubRunIDLabel:   testPubSubRunID,
+			},
+		},
+	}
+	for i := 0; i < 2; i++ {
+		if _, _, err := reporter.Report(context.Background(), logrus.NewEntry(logrus.StandardLogger()), pj); err != nil {
+			t.Fatalf("Report() #%d error: %v", i+1, err)
+		}
+	}
+
+	if calls != 1 {
+		t.Errorf("newPubSubClient called %d times for the same project, want 1", calls)
 	}
 }

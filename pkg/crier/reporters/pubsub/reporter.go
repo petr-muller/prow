@@ -23,6 +23,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"sync"
 	"time"
 
 	"cloud.google.com/go/pubsub/v2"
@@ -68,6 +69,18 @@ type Client struct {
 	// newPubSubClient creates the Pub/Sub client used to report to the given
 	// project. Tests override it to point at a fake server.
 	newPubSubClient func(ctx context.Context, project string) (*pubsub.Client, error)
+
+	// clients and publishers are cached per project/topic and reused for the
+	// lifetime of the process. Crier does not offer a shutdown hook where they
+	// could be closed, so we intentionally never call Close/Stop on them.
+	mu         sync.Mutex
+	clients    map[string]*pubsub.Client
+	publishers map[publisherKey]*pubsub.Publisher
+}
+
+type publisherKey struct {
+	project string
+	topic   string
 }
 
 // NewReporter creates a new Pub/Sub reporter
@@ -83,6 +96,56 @@ func NewReporter(cfg config.Getter) *Client {
 // GetName returns the name of the reporter
 func (c *Client) GetName() string {
 	return "pubsub-reporter"
+}
+
+// getClient returns the cached client for project, creating it on first use.
+// The returned client must not be closed by the caller.
+func (c *Client) getClient(ctx context.Context, project string) (*pubsub.Client, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	if client, ok := c.clients[project]; ok {
+		return client, nil
+	}
+
+	client, err := c.newPubSubClient(ctx, project)
+	if err != nil {
+		return nil, err
+	}
+	if c.clients == nil {
+		c.clients = make(map[string]*pubsub.Client)
+	}
+	c.clients[project] = client
+	return client, nil
+}
+
+// getPublisher returns the cached publisher for project/topic, creating it on
+// first use. The returned publisher must not be stopped by the caller.
+func (c *Client) getPublisher(client *pubsub.Client, project, topic string) *pubsub.Publisher {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	key := publisherKey{project: project, topic: topic}
+	if publisher, ok := c.publishers[key]; ok {
+		return publisher
+	}
+
+	publisher := client.Publisher(topic)
+	if c.publishers == nil {
+		c.publishers = make(map[publisherKey]*pubsub.Publisher)
+	}
+	c.publishers[key] = publisher
+	return publisher
+}
+
+// resetCache drops all cached clients and publishers. It exists so tests can
+// isolate reporter instances; production code keeps them for the process
+// lifetime.
+func (c *Client) resetCache() {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.clients = nil
+	c.publishers = nil
 }
 
 func findLabels(pj *prowapi.ProwJob, labels ...string) map[string]string {
@@ -111,14 +174,10 @@ func (c *Client) Report(ctx context.Context, l *logrus.Entry, pj *prowapi.ProwJo
 	defer cancel()
 
 	message := c.generateMessageFromPJ(pj)
-	// TODO: Consider caching the pubsub client.
-	client, err := c.newPubSubClient(ctx, message.Project)
+	client, err := c.getClient(ctx, message.Project)
 	if err != nil {
 		return nil, nil, fmt.Errorf("could not create pubsub Client: %w", err)
 	}
-	defer func() {
-		logrus.WithError(client.Close()).Debug("Closed pubsub client.")
-	}()
 
 	l = l.WithFields(logrus.Fields{"project": message.Project, "topic": message.Topic, "run-id": message.RunID, "status": pj.Status.State})
 	l.Debug("Reporting prowjob status to pubsub.")
@@ -129,8 +188,7 @@ func (c *Client) Report(ctx context.Context, l *logrus.Entry, pj *prowapi.ProwJo
 		return nil, nil, fmt.Errorf("could not marshal pubsub report: %w", err)
 	}
 
-	publisher := client.Publisher(message.Topic)
-	defer publisher.Stop() // Sends remaining messages then stops goroutines.
+	publisher := c.getPublisher(client, message.Project, message.Topic)
 	if _, err := publisher.Publish(ctx, &pubsub.Message{Data: d}).Get(ctx); err != nil {
 		wrappedError := fmt.Errorf(
 			"failed to publish pubsub message with run ID %q to topic: \"%s/%s\". %v",

@@ -95,8 +95,12 @@ func (c *pubSubClient) new(ctx context.Context, project string) (pubsubClientInt
 func (c *pubSubClient) subscription(id string, maxOutstandingMessages int) subscriptionInterface {
 	sub := c.client.Subscriber(id)
 	sub.ReceiveSettings.MaxOutstandingMessages = maxOutstandingMessages
-	// Use one pull stream so multiple subscriber replicas can share work fairly.
+	// Fairness across replicas comes from the shared, client-wide
+	// MaxOutstandingMessages flow controller. Keep EnablePerStreamFlowControl
+	// off: per-stream enforcement would multiply the effective cap by
+	// NumGoroutines, letting a single replica exhaust the shared budget.
 	sub.ReceiveSettings.NumGoroutines = 1
+	sub.ReceiveSettings.EnablePerStreamFlowControl = false
 	return &pubSubSubscription{
 		sub: sub,
 	}

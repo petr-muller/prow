@@ -26,7 +26,11 @@ import (
 	"time"
 
 	"cloud.google.com/go/pubsub/v2"
+	"cloud.google.com/go/pubsub/v2/pstest"
 	"github.com/sirupsen/logrus"
+	"google.golang.org/api/option"
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials/insecure"
 	"k8s.io/apimachinery/pkg/runtime"
 	clienttesting "k8s.io/client-go/testing"
 	"sigs.k8s.io/controller-runtime/pkg/reconcile"
@@ -881,4 +885,35 @@ func fakeProwYAMLGetter(
 		Presubmits: presubmits,
 	}
 	return &res, nil
+}
+
+func TestSubscription(t *testing.T) {
+	srv := pstest.NewServer()
+	t.Cleanup(func() { srv.Close() })
+	conn, err := grpc.NewClient(srv.Addr, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatalf("dial fake pubsub server: %v", err)
+	}
+	t.Cleanup(func() { conn.Close() })
+
+	client, err := pubsub.NewClient(context.Background(), "test-project", option.WithGRPCConn(conn))
+	if err != nil {
+		t.Fatalf("create pubsub client: %v", err)
+	}
+	t.Cleanup(func() { client.Close() })
+
+	got := (&pubSubClient{client: client}).subscription("sub", 7)
+	sub, ok := got.(*pubSubSubscription)
+	if !ok {
+		t.Fatalf("subscription returned %T, want *pubSubSubscription", got)
+	}
+	if got, want := sub.sub.ReceiveSettings.MaxOutstandingMessages, 7; got != want {
+		t.Errorf("MaxOutstandingMessages = %d, want %d", got, want)
+	}
+	if got, want := sub.sub.ReceiveSettings.NumGoroutines, 1; got != want {
+		t.Errorf("NumGoroutines = %d, want %d", got, want)
+	}
+	if sub.sub.ReceiveSettings.EnablePerStreamFlowControl {
+		t.Error("EnablePerStreamFlowControl = true, want false")
+	}
 }

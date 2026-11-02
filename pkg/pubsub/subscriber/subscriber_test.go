@@ -181,6 +181,19 @@ func TestProwJobEvent_ToFromMessage(t *testing.T) {
 	}
 }
 
+func newInRepoConfigCache(t *testing.T, ca *config.Agent) *config.InRepoConfigCache {
+	t.Helper()
+	gitClient, err := (&flagutil.GitHubOptions{}).GitClientFactory("abc", nil, true, false)
+	if err != nil {
+		t.Fatalf("create git client factory: %v", err)
+	}
+	cache, err := config.NewInRepoConfigCache(100, ca, gitClient)
+	if err != nil {
+		t.Fatalf("create in-repo config cache: %v", err)
+	}
+	return cache
+}
+
 func TestHandleMessage(t *testing.T) {
 	for _, tc := range []struct {
 		name, eventType string
@@ -341,8 +354,7 @@ func TestHandleMessage(t *testing.T) {
 			tc.config.ProwJobNamespace = "prowjobs"
 			ca.Set(tc.config)
 			fr := fakeReporter{}
-			gitClient, _ := (&flagutil.GitHubOptions{}).GitClientFactory("abc", nil, true, false)
-			cache, _ := config.NewInRepoConfigCache(100, ca, gitClient)
+			cache := newInRepoConfigCache(t1, ca)
 			s := Subscriber{
 				Metrics:            NewMetrics(),
 				ProwJobClient:      fakeProwJobClient.ProwV1().ProwJobs(tc.config.ProwJobNamespace),
@@ -587,8 +599,7 @@ func TestHandlePeriodicJob(t *testing.T) {
 			tc.config.ProwJobNamespace = "prowjobs"
 			ca.Set(tc.config)
 			fr := fakeReporter{}
-			gitClient, _ := (&flagutil.GitHubOptions{}).GitClientFactory("abc", nil, true, false)
-			cache, _ := config.NewInRepoConfigCache(100, ca, gitClient)
+			cache := newInRepoConfigCache(t1, ca)
 			s := Subscriber{
 				Metrics:            NewMetrics(),
 				ProwJobClient:      fakeProwJobClient.ProwV1().ProwJobs(ca.Config().ProwJobNamespace),

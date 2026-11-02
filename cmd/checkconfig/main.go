@@ -675,23 +675,24 @@ func validateTideRequirements(cfg *config.Config, pcfg *plugins.Configuration, i
 		// label; this container is populated conditionally from queries
 		// using the matcher
 		config *orgRepoConfig
+		// oneWay marks the relationship as one-directional: only the
+		// direction "tide honors the label => plugin is enabled" is
+		// validated, since enabling the plugin without having tide honor
+		// the label is not a misconfiguration. Two-way relationships
+		// require the plugin to be enabled wherever tide honors the
+		// label, and tide to honor the label wherever the plugin is
+		// enabled.
+		oneWay bool
 	}
 	// configs list relationships between tide config and plugin enablement
-	// that we want to validate in both directions: the plugin must be
-	// enabled wherever tide honors the label, and tide must honor the label
-	// wherever the plugin is enabled.
+	// that we want to validate. Unless marked oneWay, a relationship is
+	// validated in both directions: the plugin must be enabled wherever
+	// tide honors the label, and tide must honor the label wherever the
+	// plugin is enabled.
 	configs := []plugin{
 		{name: lgtm.PluginName, label: labels.LGTM, matcher: requires},
 		{name: approve.PluginName, label: labels.Approved, matcher: requires},
 	}
-	// needsRebaseConfig is validated in one direction only: a query that
-	// forbids the needs-rebase label must have the plugin enabled. The
-	// reverse is not checked, since enabling the plugin without forbidding
-	// the label in tide is not a misconfiguration -- tide already refuses
-	// to merge any PR with a merge conflict regardless of the query (see
-	// mergeChecker.isAllowedToMerge in pkg/tide/github.go), so requiring
-	// the query to also forbid the label would be redundant.
-	needsRebaseConfig := plugin{name: needsrebase.PluginName, label: labels.NeedsRebase, external: true, matcher: forbids}
 	if includeForbidden {
 		configs = append(configs,
 			plugin{name: hold.PluginName, label: labels.Hold, matcher: forbids},
@@ -701,6 +702,14 @@ func validateTideRequirements(cfg *config.Config, pcfg *plugins.Configuration, i
 			plugin{name: releasenote.PluginName, label: labels.ReleaseNoteLabelNeeded, matcher: forbids},
 			plugin{name: cherrypickunapproved.PluginName, label: labels.CpUnapproved, matcher: forbids},
 			plugin{name: blockade.PluginName, label: labels.BlockedPaths, matcher: forbids},
+			// needs-rebase is validated in one direction only: a query that
+			// forbids the needs-rebase label must have the plugin enabled. The
+			// reverse is not checked, since enabling the plugin without forbidding
+			// the label in tide is not a misconfiguration -- tide already refuses
+			// to merge any PR with a merge conflict regardless of the query (see
+			// mergeChecker.isAllowedToMerge in pkg/tide/github.go), so requiring
+			// the query to also forbid the label would be redundant.
+			plugin{name: needsrebase.PluginName, label: labels.NeedsRebase, external: true, matcher: forbids, oneWay: true},
 		)
 	}
 
@@ -718,33 +727,32 @@ func validateTideRequirements(cfg *config.Config, pcfg *plugins.Configuration, i
 	for i := range configs {
 		populateConfig(&configs[i])
 	}
-	if includeForbidden {
-		populateConfig(&needsRebaseConfig)
-	}
 
 	overallTideConfig := newOrgRepoConfig(cfg.Tide.Queries.OrgExceptionsAndRepos())
 
 	// Now actually execute the checks we just configured.
 	var validationErrs []error
 	for _, pluginConfig := range configs {
-		err := ensureValidConfiguration(
-			pluginConfig.name,
-			pluginConfig.label,
-			pluginConfig.matcher.verb,
-			pluginConfig.config,
-			overallTideConfig,
-			enabledOrgReposForPlugin(pcfg, pluginConfig.name, pluginConfig.external),
-		)
+		var err error
+		if pluginConfig.oneWay {
+			err = ensureLabelPluginEnabled(
+				pluginConfig.name,
+				pluginConfig.label,
+				pluginConfig.matcher.verb,
+				pluginConfig.config,
+				enabledOrgReposForPlugin(pcfg, pluginConfig.name, pluginConfig.external),
+			)
+		} else {
+			err = ensureValidConfiguration(
+				pluginConfig.name,
+				pluginConfig.label,
+				pluginConfig.matcher.verb,
+				pluginConfig.config,
+				overallTideConfig,
+				enabledOrgReposForPlugin(pcfg, pluginConfig.name, pluginConfig.external),
+			)
+		}
 		validationErrs = append(validationErrs, err)
-	}
-	if includeForbidden {
-		validationErrs = append(validationErrs, ensureLabelPluginEnabled(
-			needsRebaseConfig.name,
-			needsRebaseConfig.label,
-			needsRebaseConfig.matcher.verb,
-			needsRebaseConfig.config,
-			enabledOrgReposForPlugin(pcfg, needsRebaseConfig.name, needsRebaseConfig.external),
-		))
 	}
 
 	return utilerrors.NewAggregate(validationErrs)

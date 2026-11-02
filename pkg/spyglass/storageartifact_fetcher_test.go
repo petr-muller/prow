@@ -20,7 +20,6 @@ import (
 	"context"
 	"encoding/base64"
 	"fmt"
-	"os"
 	"slices"
 	"strings"
 	"testing"
@@ -31,6 +30,7 @@ import (
 	prowv1 "sigs.k8s.io/prow/pkg/apis/prowjobs/v1"
 	"sigs.k8s.io/prow/pkg/config"
 	"sigs.k8s.io/prow/pkg/io"
+	"sigs.k8s.io/prow/pkg/testutil"
 )
 
 func TestNewGCSJobSource(t *testing.T) {
@@ -440,20 +440,7 @@ RU5EIFBSSVZBVEUgS0VZLS0tLS1cbgo=`)
 		t.Run(tc.name, func(t *testing.T) {
 			var path string
 			if tc.fakeCreds != "" {
-				fp, err := os.CreateTemp("", "fake-creds")
-				if err != nil {
-					t.Fatalf("Failed to create fake creds: %v", err)
-				}
-
-				path = fp.Name()
-				defer os.Remove(path)
-				if _, err := fp.Write([]byte(tc.fakeCreds)); err != nil {
-					t.Fatalf("Failed to write fake creds %s: %v", path, err)
-				}
-
-				if err := fp.Close(); err != nil {
-					t.Fatalf("Failed to close fake creds %s: %v", path, err)
-				}
+				path = testutil.WriteCredentialsFile(t, tc.fakeCreds)
 			}
 			// We're testing the combination of NewOpener and signURL here
 			// to make sure that the behaviour is more or less the same as before

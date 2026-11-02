@@ -131,20 +131,7 @@ RU5EIFBSSVZBVEUgS0VZLS0tLS1cbgo=`)
 		t.Run(tt.name, func(t *testing.T) {
 			var gcsCredentialsFile string
 			if tt.fakeCreds != "" {
-				fp, err := os.CreateTemp("", "fake-creds")
-				if err != nil {
-					t.Fatalf("Failed to create fake creds: %v", err)
-				}
-
-				gcsCredentialsFile = fp.Name()
-				defer os.Remove(gcsCredentialsFile)
-				if _, err := fp.Write([]byte(tt.fakeCreds)); err != nil {
-					t.Fatalf("Failed to write fake creds %s: %v", gcsCredentialsFile, err)
-				}
-
-				if err := fp.Close(); err != nil {
-					t.Fatalf("Failed to close fake creds %s: %v", gcsCredentialsFile, err)
-				}
+				gcsCredentialsFile = testutil.WriteCredentialsFile(t, tt.fakeCreds)
 			}
 			o, _ := NewOpener(context.Background(), gcsCredentialsFile, "")
 			got, err := o.SignedURL(tt.args.ctx, tt.args.p, tt.args.opts)

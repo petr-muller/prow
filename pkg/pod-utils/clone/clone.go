@@ -250,7 +250,7 @@ func (g *gitCtx) commandsForBaseRef(refs prowapi.Refs, gitUserName, gitUserEmail
 		depthArgs = append(depthArgs, "--depth", strconv.Itoa(cloneDepth))
 	}
 	var filterArgs []string
-	if (refs.BloblessFetch != nil && *refs.BloblessFetch) || sparseCheckoutSet {
+	if isPartialClone(refs) {
 		filterArgs = append(filterArgs, "--filter=blob:none")
 	}
 
@@ -306,6 +306,10 @@ func isSparseCheckoutSet(refs prowapi.Refs) bool {
 	return len(refs.SparseCheckoutFiles) > 0
 }
 
+func isPartialClone(refs prowapi.Refs) bool {
+	return (refs.BloblessFetch != nil && *refs.BloblessFetch) || isSparseCheckoutSet(refs)
+}
+
 // gitHeadTimestamp returns the timestamp of the HEAD commit as seconds from the
 // UNIX epoch. If unable to read the timestamp for any reason (such as missing
 // the git, or not using a git repo), it returns 0 and an error.
@@ -354,7 +358,7 @@ func (g *gitCtx) gitRevParse() (string, error) {
 // set of base and pull refs are used.
 func (g *gitCtx) commandsForPullRefs(refs prowapi.Refs, fakeTimestamp int) []runnable {
 	var commands []runnable
-	partialClone := (refs.BloblessFetch != nil && *refs.BloblessFetch) || isSparseCheckoutSet(refs)
+	partialClone := isPartialClone(refs)
 	for _, prRef := range refs.Pulls {
 		var fetchArgs []string
 		if partialClone {

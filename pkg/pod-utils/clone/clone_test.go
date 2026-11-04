@@ -882,6 +882,58 @@ type staticRunnable struct {
 	err      error
 }
 
+func TestIsPartialClone(t *testing.T) {
+	tests := []struct {
+		name string
+		refs prowapi.Refs
+		want bool
+	}{
+		{
+			name: "neither blobless fetch nor sparse checkout",
+			refs: prowapi.Refs{},
+			want: false,
+		},
+		{
+			name: "blobless fetch unset",
+			refs: prowapi.Refs{BloblessFetch: nil},
+			want: false,
+		},
+		{
+			name: "blobless fetch true",
+			refs: prowapi.Refs{BloblessFetch: new(true)},
+			want: true,
+		},
+		{
+			name: "blobless fetch false",
+			refs: prowapi.Refs{BloblessFetch: new(false)},
+			want: false,
+		},
+		{
+			name: "sparse checkout only",
+			refs: prowapi.Refs{SparseCheckoutFiles: []string{"pkg/operator"}},
+			want: true,
+		},
+		{
+			name: "empty sparse checkout files",
+			refs: prowapi.Refs{SparseCheckoutFiles: []string{}},
+			want: false,
+		},
+		{
+			name: "both blobless fetch and sparse checkout",
+			refs: prowapi.Refs{BloblessFetch: new(true), SparseCheckoutFiles: []string{"pkg/operator"}},
+			want: true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isPartialClone(test.refs); got != test.want {
+				t.Errorf("isPartialClone() = %t, want %t", got, test.want)
+			}
+		})
+	}
+}
+
 func (s staticRunnable) run() (string, string, error) {
 	return s.cmd, s.out, s.err
 }

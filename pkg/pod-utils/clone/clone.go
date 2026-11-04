@@ -72,37 +72,8 @@ func Run(refs prowapi.Refs, dir, gitUserName, gitUserEmail, cookiePath string, e
 	}
 	logrus.WithFields(logrus.Fields{"refs": refs}).Info("Cloning refs")
 
-	// This function runs the provided commands in order, logging them as they run,
-	// aborting early and returning if any command fails.
-	runCommands := func(commands []runnable) error {
-		for _, command := range commands {
-			startTime := time.Now()
-			formattedCommand, output, err := command.run()
-			log := logrus.WithFields(logrus.Fields{"command": formattedCommand, "output": output})
-			if err != nil {
-				log = log.WithField("error", err)
-			}
-			log.Info("Ran command")
-			message := ""
-			if err != nil {
-				message = err.Error()
-				record.Failed = true
-			}
-			record.Commands = append(record.Commands, Command{
-				Command:  censorToken(string(secret.Censor([]byte(formattedCommand))), token),
-				Output:   censorToken(string(secret.Censor([]byte(output))), token),
-				Error:    censorToken(string(secret.Censor([]byte(message))), token),
-				Duration: time.Since(startTime),
-			})
-			if err != nil {
-				return err
-			}
-		}
-		return nil
-	}
-
 	g := gitCtxForRefs(refs, dir, env, user, token)
-	if err := runCommands(g.commandsForBaseRef(refs, gitUserName, gitUserEmail, cookiePath)); err != nil {
+	if err := runCommands(&record, g.commandsForBaseRef(refs, gitUserName, gitUserEmail, cookiePath), token); err != nil {
 		return record
 	}
 
@@ -110,7 +81,7 @@ func Run(refs prowapi.Refs, dir, gitUserName, gitUserEmail, cookiePath string, e
 	if err != nil {
 		timestamp = int(time.Now().Unix())
 	}
-	if err := runCommands(g.commandsForPullRefs(refs, timestamp)); err != nil {
+	if err := runCommands(&record, g.commandsForPullRefs(refs, timestamp), token); err != nil {
 		return record
 	}
 
@@ -124,6 +95,35 @@ func Run(refs prowapi.Refs, dir, gitUserName, gitUserEmail, cookiePath string, e
 	record.Duration = time.Since(startTime)
 
 	return record
+}
+
+// runCommands runs the provided commands in order, logging them as they run,
+// recording each in record, and aborting early and returning if any command fails.
+func runCommands(record *Record, commands []runnable, token string) error {
+	for _, command := range commands {
+		startTime := time.Now()
+		formattedCommand, output, err := command.run()
+		log := logrus.WithFields(logrus.Fields{"command": formattedCommand, "output": output})
+		if err != nil {
+			log = log.WithField("error", err)
+		}
+		log.Info("Ran command")
+		message := ""
+		if err != nil {
+			message = err.Error()
+			record.Failed = true
+		}
+		record.Commands = append(record.Commands, Command{
+			Command:  censorToken(string(secret.Censor([]byte(formattedCommand))), token),
+			Output:   censorToken(string(secret.Censor([]byte(output))), token),
+			Error:    censorToken(string(secret.Censor([]byte(message))), token),
+			Duration: time.Since(startTime),
+		})
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func censorToken(msg, token string) string {
@@ -421,8 +421,10 @@ func (rc retryCommand) run() (string, string, error) {
 	return cmd, out, err
 }
 
-// bestEffortCommand runs a command whose failure must not fail the clone. Its
-// output stays out of the clone record, and is only logged if it fails.
+// bestEffortCommand runs a command whose failure must not fail the clone. On
+// success its output stays out of the clone record. On failure it records a
+// short marker instead, so the clone record shows the command did not succeed,
+// and logs the full output at debug level.
 type bestEffortCommand struct {
 	runnable
 }
@@ -433,7 +435,8 @@ func (c bestEffortCommand) run() (string, string, error) {
 		logrus.WithError(err).WithFields(logrus.Fields{
 			"command": cmd,
 			"output":  out,
-		}).Info("Ignoring failure of best-effort command")
+		}).Debug("Ignoring failure of best-effort command")
+		return cmd, fmt.Sprintf("best-effort command failed; continuing: %v", err), nil
 	}
 	return cmd, "", nil
 }

@@ -17,6 +17,7 @@ limitations under the License.
 package clone
 
 import (
+	"bytes"
 	"fmt"
 	"os"
 	"os/exec"
@@ -30,6 +31,7 @@ import (
 	"sigs.k8s.io/prow/pkg/git/localgit"
 
 	"github.com/google/go-cmp/cmp"
+	"github.com/sirupsen/logrus"
 )
 
 func TestPathForRefs(t *testing.T) {
@@ -870,6 +872,81 @@ func TestCommandsForRefs(t *testing.T) {
 			actualPull := g.commandsForPullRefs(testCase.refs, fakeTimestamp)
 			if diff := cmp.Diff(actualPull, testCase.expectedPull, allow); diff != "" {
 				t.Errorf("commandsForPullRefs() got unexpected diff (-got, +want):\n%s", diff)
+			}
+		})
+	}
+}
+
+type staticRunnable struct {
+	cmd, out string
+	err      error
+}
+
+func (s staticRunnable) run() (string, string, error) {
+	return s.cmd, s.out, s.err
+}
+
+// TestBestEffortCommandFailureReporting verifies that a failing best-effort
+// command (such as merge-tree on git without --write-tree support, or on a
+// genuine conflict) is visible in the clone record without failing the clone,
+// and that its output is only logged at debug level.
+func TestBestEffortCommandFailureReporting(t *testing.T) {
+	const (
+		conflict = "CONFLICT (content): merge conflict in file.txt"
+		marker   = "best-effort command failed; continuing"
+	)
+	failing := bestEffortCommand{staticRunnable{
+		cmd: "PWD=/tmp git merge-tree --write-tree HEAD FETCH_HEAD",
+		out: conflict + "\n",
+		err: fmt.Errorf("exit status 1"),
+	}}
+	following := staticRunnable{cmd: "PWD=/tmp git merge --no-ff FETCH_HEAD"}
+
+	origOut := logrus.StandardLogger().Out
+	origLevel := logrus.GetLevel()
+	t.Cleanup(func() {
+		logrus.SetOutput(origOut)
+		logrus.SetLevel(origLevel)
+	})
+
+	for _, tc := range []struct {
+		name         string
+		level        logrus.Level
+		wantConflict bool
+	}{
+		{name: "info", level: logrus.InfoLevel, wantConflict: false},
+		{name: "debug", level: logrus.DebugLevel, wantConflict: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var logs bytes.Buffer
+			logrus.SetOutput(&logs)
+			logrus.SetLevel(tc.level)
+
+			var record Record
+			if err := runCommands(&record, []runnable{failing, following}, ""); err != nil {
+				t.Fatalf("best-effort failure must not fail the clone, got error: %v", err)
+			}
+			if record.Failed {
+				t.Error("record.Failed = true after a best-effort failure")
+			}
+			if len(record.Commands) != 2 {
+				t.Fatalf("expected the command after the failure to run, got %d recorded commands:\n%s", len(record.Commands), FormatRecord(record))
+			}
+			entry := record.Commands[0]
+			if !strings.Contains(entry.Command, "merge-tree") {
+				t.Errorf("first recorded command is not merge-tree: %q", entry.Command)
+			}
+			if !strings.Contains(entry.Output, marker) {
+				t.Errorf("recorded output %q does not contain marker %q", entry.Output, marker)
+			}
+			if entry.Error != "" {
+				t.Errorf("recorded error = %q, want empty", entry.Error)
+			}
+			if !strings.Contains(record.Commands[1].Command, "merge --no-ff") {
+				t.Errorf("run did not continue to git merge: %q", record.Commands[1].Command)
+			}
+			if got := strings.Contains(logs.String(), conflict); got != tc.wantConflict {
+				t.Errorf("log at %s contains conflict detail = %t, want %t:\n%s", tc.level, got, tc.wantConflict, logs.String())
 			}
 		})
 	}

@@ -3210,7 +3210,162 @@ func validatePodSpec(jobType prowapi.ProwJobType, spec *v1.PodSpec, decorationCo
 		}
 	}
 
+	errs = append(errs, validateAffinity(spec.Affinity)...)
+
 	return utilerrors.NewAggregate(errs)
+}
+
+// validateAffinity validates the affinity rules in a pod spec. The conditions
+// checked here are the ones rejected by the Kubernetes API server, so catching
+// them at config load time avoids a failed pod creation later on.
+func validateAffinity(affinity *v1.Affinity) []error {
+	if affinity == nil {
+		return nil
+	}
+
+	var errs []error
+	if na := affinity.NodeAffinity; na != nil {
+		const requiredPath = "affinity.nodeAffinity.requiredDuringSchedulingIgnoredDuringExecution"
+		if required := na.RequiredDuringSchedulingIgnoredDuringExecution; required != nil {
+			if len(required.NodeSelectorTerms) == 0 {
+				errs = append(errs, fmt.Errorf("%s.nodeSelectorTerms: must have at least one node selector term", requiredPath))
+			}
+			for i, term := range required.NodeSelectorTerms {
+				errs = append(errs, validateNodeSelectorTerm(term, fmt.Sprintf("%s.nodeSelectorTerms[%d]", requiredPath, i))...)
+			}
+		}
+
+		for i, term := range na.PreferredDuringSchedulingIgnoredDuringExecution {
+			termPath := fmt.Sprintf("affinity.nodeAffinity.preferredDuringSchedulingIgnoredDuringExecution[%d]", i)
+			if term.Weight < 1 || term.Weight > 100 {
+				errs = append(errs, fmt.Errorf("%s.weight: must be in the range 1-100", termPath))
+			}
+			if len(term.Preference.MatchExpressions) == 0 && len(term.Preference.MatchFields) == 0 {
+				errs = append(errs, fmt.Errorf("%s.preference: must have at least one node selector term", termPath))
+			}
+			errs = append(errs, validateNodeSelectorTerm(term.Preference, termPath+".preference")...)
+		}
+	}
+
+	if pa := affinity.PodAffinity; pa != nil {
+		errs = append(errs, validatePodAffinityTerms(pa.RequiredDuringSchedulingIgnoredDuringExecution, "affinity.podAffinity.requiredDuringSchedulingIgnoredDuringExecution")...)
+		errs = append(errs, validateWeightedPodAffinityTerms(pa.PreferredDuringSchedulingIgnoredDuringExecution, "affinity.podAffinity.preferredDuringSchedulingIgnoredDuringExecution")...)
+	}
+
+	if paa := affinity.PodAntiAffinity; paa != nil {
+		errs = append(errs, validatePodAffinityTerms(paa.RequiredDuringSchedulingIgnoredDuringExecution, "affinity.podAntiAffinity.requiredDuringSchedulingIgnoredDuringExecution")...)
+		errs = append(errs, validateWeightedPodAffinityTerms(paa.PreferredDuringSchedulingIgnoredDuringExecution, "affinity.podAntiAffinity.preferredDuringSchedulingIgnoredDuringExecution")...)
+	}
+
+	return errs
+}
+
+func validateNodeSelectorTerm(term v1.NodeSelectorTerm, fldPath string) []error {
+	var errs []error
+	for i, req := range term.MatchExpressions {
+		errs = append(errs, validateNodeSelectorRequirement(req, fmt.Sprintf("%s.matchExpressions[%d]", fldPath, i))...)
+	}
+	for i, req := range term.MatchFields {
+		errs = append(errs, validateNodeFieldSelectorRequirement(req, fmt.Sprintf("%s.matchFields[%d]", fldPath, i))...)
+	}
+	return errs
+}
+
+func validateNodeSelectorRequirement(req v1.NodeSelectorRequirement, fldPath string) []error {
+	var errs []error
+	if req.Key == "" {
+		errs = append(errs, fmt.Errorf("%s.key: must not be empty", fldPath))
+	}
+	switch req.Operator {
+	case v1.NodeSelectorOpIn, v1.NodeSelectorOpNotIn:
+		if len(req.Values) == 0 {
+			errs = append(errs, fmt.Errorf("%s.values: must be specified when operator is 'In' or 'NotIn'", fldPath))
+		}
+	case v1.NodeSelectorOpExists, v1.NodeSelectorOpDoesNotExist:
+		if len(req.Values) > 0 {
+			errs = append(errs, fmt.Errorf("%s.values: may not be specified when operator is 'Exists' or 'DoesNotExist'", fldPath))
+		}
+	case v1.NodeSelectorOpGt, v1.NodeSelectorOpLt:
+		if len(req.Values) != 1 {
+			errs = append(errs, fmt.Errorf("%s.values: must be specified with a single value when operator is 'Gt' or 'Lt'", fldPath))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("%s.operator: %q is not a valid selector operator", fldPath, req.Operator))
+	}
+	return errs
+}
+
+func validateNodeFieldSelectorRequirement(req v1.NodeSelectorRequirement, fldPath string) []error {
+	var errs []error
+	if req.Key == "" {
+		errs = append(errs, fmt.Errorf("%s.key: must not be empty", fldPath))
+	}
+	switch req.Operator {
+	case v1.NodeSelectorOpIn, v1.NodeSelectorOpNotIn:
+		if len(req.Values) != 1 {
+			errs = append(errs, fmt.Errorf("%s.values: must be specified with a single value when operator is 'In' or 'NotIn'", fldPath))
+		}
+	default:
+		errs = append(errs, fmt.Errorf("%s.operator: %q is not a valid selector operator", fldPath, req.Operator))
+	}
+	return errs
+}
+
+func validatePodAffinityTerms(terms []v1.PodAffinityTerm, fldPath string) []error {
+	var errs []error
+	for i, term := range terms {
+		errs = append(errs, validatePodAffinityTerm(term, fmt.Sprintf("%s[%d]", fldPath, i))...)
+	}
+	return errs
+}
+
+func validateWeightedPodAffinityTerms(terms []v1.WeightedPodAffinityTerm, fldPath string) []error {
+	var errs []error
+	for i, term := range terms {
+		termPath := fmt.Sprintf("%s[%d]", fldPath, i)
+		if term.Weight < 1 || term.Weight > 100 {
+			errs = append(errs, fmt.Errorf("%s.weight: must be in the range 1-100", termPath))
+		}
+		errs = append(errs, validatePodAffinityTerm(term.PodAffinityTerm, termPath+".podAffinityTerm")...)
+	}
+	return errs
+}
+
+func validatePodAffinityTerm(term v1.PodAffinityTerm, fldPath string) []error {
+	var errs []error
+	if term.TopologyKey == "" {
+		errs = append(errs, fmt.Errorf("%s.topologyKey: must not be empty", fldPath))
+	}
+	errs = append(errs, validateLabelSelector(term.LabelSelector, fldPath+".labelSelector")...)
+	errs = append(errs, validateLabelSelector(term.NamespaceSelector, fldPath+".namespaceSelector")...)
+	return errs
+}
+
+func validateLabelSelector(selector *metav1.LabelSelector, fldPath string) []error {
+	if selector == nil {
+		return nil
+	}
+
+	var errs []error
+	for i, req := range selector.MatchExpressions {
+		reqPath := fmt.Sprintf("%s.matchExpressions[%d]", fldPath, i)
+		if req.Key == "" {
+			errs = append(errs, fmt.Errorf("%s.key: must not be empty", reqPath))
+		}
+		switch req.Operator {
+		case metav1.LabelSelectorOpIn, metav1.LabelSelectorOpNotIn:
+			if len(req.Values) == 0 {
+				errs = append(errs, fmt.Errorf("%s.values: must be specified when operator is 'In' or 'NotIn'", reqPath))
+			}
+		case metav1.LabelSelectorOpExists, metav1.LabelSelectorOpDoesNotExist:
+			if len(req.Values) > 0 {
+				errs = append(errs, fmt.Errorf("%s.values: may not be specified when operator is 'Exists' or 'DoesNotExist'", reqPath))
+			}
+		default:
+			errs = append(errs, fmt.Errorf("%s.operator: %q is not a valid selector operator", reqPath, req.Operator))
+		}
+	}
+	return errs
 }
 
 func validateAlwaysRun(job Postsubmit) error {

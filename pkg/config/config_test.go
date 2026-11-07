@@ -1634,6 +1634,201 @@ func TestValidatePodSpec(t *testing.T) {
 				s.Containers[0].VolumeMounts = append(s.Containers[0].VolumeMounts, v1.VolumeMount{Name: "foo", MountPath: "/not-used-by-decoration-utils"})
 			},
 		},
+		{
+			name: "accept valid affinity",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{
+					NodeAffinity: &v1.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+							NodeSelectorTerms: []v1.NodeSelectorTerm{{
+								MatchExpressions: []v1.NodeSelectorRequirement{{
+									Key:      "kubernetes.io/arch",
+									Operator: v1.NodeSelectorOpIn,
+									Values:   []string{"amd64"},
+								}},
+								MatchFields: []v1.NodeSelectorRequirement{{
+									Key:      "metadata.name",
+									Operator: v1.NodeSelectorOpNotIn,
+									Values:   []string{"node-0"},
+								}},
+							}},
+						},
+						PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{{
+							Weight: 50,
+							Preference: v1.NodeSelectorTerm{
+								MatchExpressions: []v1.NodeSelectorRequirement{{
+									Key:      "topology.kubernetes.io/zone",
+									Operator: v1.NodeSelectorOpExists,
+								}},
+							},
+						}},
+					},
+					PodAffinity: &v1.PodAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{{
+							LabelSelector: &metav1.LabelSelector{
+								MatchLabels: map[string]string{"app": "foo"},
+							},
+							TopologyKey: "kubernetes.io/hostname",
+						}},
+					},
+					PodAntiAffinity: &v1.PodAntiAffinity{
+						PreferredDuringSchedulingIgnoredDuringExecution: []v1.WeightedPodAffinityTerm{{
+							Weight: 100,
+							PodAffinityTerm: v1.PodAffinityTerm{
+								LabelSelector: &metav1.LabelSelector{
+									MatchExpressions: []metav1.LabelSelectorRequirement{{
+										Key:      "app",
+										Operator: metav1.LabelSelectorOpIn,
+										Values:   []string{"bar"},
+									}},
+								},
+								NamespaceSelector: &metav1.LabelSelector{
+									MatchExpressions: []metav1.LabelSelectorRequirement{{
+										Key:      "team",
+										Operator: metav1.LabelSelectorOpDoesNotExist,
+									}},
+								},
+								TopologyKey: "kubernetes.io/hostname",
+							},
+						}},
+					},
+				}
+			},
+			pass: true,
+		},
+		{
+			name: "reject preferred node affinity weight below range",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{{
+						Weight: 0,
+						Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{{
+							Key:      "kubernetes.io/arch",
+							Operator: v1.NodeSelectorOpExists,
+						}}},
+					}},
+				}}
+			},
+		},
+		{
+			name: "reject preferred node affinity weight above range",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{{
+						Weight: 101,
+						Preference: v1.NodeSelectorTerm{MatchExpressions: []v1.NodeSelectorRequirement{{
+							Key:      "kubernetes.io/arch",
+							Operator: v1.NodeSelectorOpExists,
+						}}},
+					}},
+				}}
+			},
+		},
+		{
+			name: "reject empty preferred node affinity term",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.PreferredSchedulingTerm{{
+						Weight: 1,
+					}},
+				}}
+			},
+		},
+		{
+			name: "reject required node affinity without node selector terms",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{},
+				}}
+			},
+		},
+		{
+			name: "reject node selector requirement with invalid operator",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{{
+							MatchExpressions: []v1.NodeSelectorRequirement{{
+								Key:      "kubernetes.io/arch",
+								Operator: v1.NodeSelectorOperator("Bogus"),
+								Values:   []string{"amd64"},
+							}},
+						}},
+					},
+				}}
+			},
+		},
+		{
+			name: "reject node selector In requirement without values",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{NodeAffinity: &v1.NodeAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: &v1.NodeSelector{
+						NodeSelectorTerms: []v1.NodeSelectorTerm{{
+							MatchExpressions: []v1.NodeSelectorRequirement{{
+								Key:      "kubernetes.io/arch",
+								Operator: v1.NodeSelectorOpIn,
+							}},
+						}},
+					},
+				}}
+			},
+		},
+		{
+			name: "reject required pod affinity term without topology key",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{PodAffinity: &v1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{{
+						LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "foo"}},
+					}},
+				}}
+			},
+		},
+		{
+			name: "reject preferred pod anti-affinity term with invalid weight",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{PodAntiAffinity: &v1.PodAntiAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []v1.WeightedPodAffinityTerm{{
+						Weight: 0,
+						PodAffinityTerm: v1.PodAffinityTerm{
+							LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": "foo"}},
+							TopologyKey:   "kubernetes.io/hostname",
+						},
+					}},
+				}}
+			},
+		},
+		{
+			name: "reject pod affinity label selector In requirement without values",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{PodAffinity: &v1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{{
+						LabelSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "app",
+								Operator: metav1.LabelSelectorOpIn,
+							}},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					}},
+				}}
+			},
+		},
+		{
+			name: "reject pod affinity namespace selector with invalid operator",
+			spec: func(s *v1.PodSpec) {
+				s.Affinity = &v1.Affinity{PodAffinity: &v1.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution: []v1.PodAffinityTerm{{
+						NamespaceSelector: &metav1.LabelSelector{
+							MatchExpressions: []metav1.LabelSelectorRequirement{{
+								Key:      "team",
+								Operator: metav1.LabelSelectorOperator("Bogus"),
+							}},
+						},
+						TopologyKey: "kubernetes.io/hostname",
+					}},
+				}}
+			},
+		},
 	}
 
 	spec := v1.PodSpec{
@@ -3039,6 +3234,75 @@ periodics:
 						Value: "fejtaverse",
 					},
 				},
+			},
+		},
+		{
+			name:       "preset with invalid affinity is rejected",
+			prowConfig: ``,
+			jobConfigs: []string{
+				`
+presets:
+- labels:
+    preset-affinity: "true"
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 0
+        preference:
+          matchExpressions:
+          - key: kubernetes.io/arch
+            operator: In
+            values:
+            - amd64
+periodics:
+- interval: 10m
+  agent: kubernetes
+  name: foo
+  labels:
+    preset-affinity: "true"
+  spec:
+    containers:
+    - image: alpine`,
+			},
+			expectError: true,
+		},
+		{
+			name:       "preset with valid affinity is applied to the job",
+			prowConfig: ``,
+			jobConfigs: []string{
+				`
+presets:
+- labels:
+    preset-affinity: "true"
+  affinity:
+    podAntiAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+      - labelSelector:
+          matchLabels:
+            app: foo
+        topologyKey: kubernetes.io/hostname
+periodics:
+- interval: 10m
+  agent: kubernetes
+  name: foo
+  labels:
+    preset-affinity: "true"
+  spec:
+    containers:
+    - image: alpine`,
+			},
+			verify: func(c *Config) error {
+				if len(c.Periodics) != 1 {
+					return fmt.Errorf("expected one periodic, got %d", len(c.Periodics))
+				}
+				affinity := c.Periodics[0].Spec.Affinity
+				if affinity == nil || affinity.PodAntiAffinity == nil || len(affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution) != 1 {
+					return fmt.Errorf("expected preset pod anti-affinity to be merged into the job, got %+v", affinity)
+				}
+				if got, want := affinity.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution[0].TopologyKey, "kubernetes.io/hostname"; got != want {
+					return fmt.Errorf("expected topology key %q, got %q", want, got)
+				}
+				return nil
 			},
 		},
 		{

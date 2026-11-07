@@ -3028,9 +3028,13 @@ func resolvePresets(name string, labels map[string]string, spec *v1.PodSpec, pre
 	}
 	job := spec.DeepCopy()
 	log := logrus.WithField("job", name)
+	// Presets reached through an include may be shared by several included
+	// presets (a diamond); apply each one only once so the shared values are
+	// not treated as a conflict between presets.
+	appliedIncludes := sets.NewInt()
 	for _, preset := range presets {
 		if presetMatches(preset, labels) {
-			if err := applyPresetWithIncludes(preset, presets, spec, job, log, nil); err != nil {
+			if err := applyPresetWithIncludes(preset, presets, spec, job, log, nil, appliedIncludes); err != nil {
 				return fmt.Errorf("job %s failed to merge presets for podspec: %w", name, err)
 			}
 		}
@@ -3041,7 +3045,8 @@ func resolvePresets(name string, labels map[string]string, spec *v1.PodSpec, pre
 
 // applyPresetWithIncludes applies the preset and, recursively, all presets it includes.
 // chain holds the label pairs of the include path leading here and is used to detect cycles.
-func applyPresetWithIncludes(preset Preset, all []Preset, spec, job *v1.PodSpec, log *logrus.Entry, chain []string) error {
+// appliedIncludes records the presets already applied through an include in this resolve.
+func applyPresetWithIncludes(preset Preset, all []Preset, spec, job *v1.PodSpec, log *logrus.Entry, chain []string, appliedIncludes sets.Int) error {
 	if err := applyPreset(preset, spec, job, log.WithField("preset", labels.FormatLabels(preset.Labels))); err != nil {
 		return err
 	}
@@ -3056,24 +3061,28 @@ func applyPresetWithIncludes(preset Preset, all []Preset, spec, job *v1.PodSpec,
 		if slices.Contains(chain, pair) {
 			return fmt.Errorf("preset include cycle: %s", strings.Join(append(slices.Clone(chain), pair), " -> "))
 		}
-		included, ok := findPresetByLabel(all, l, preset.IncludePresets[l])
+		included, index, ok := findPresetByLabel(all, l, preset.IncludePresets[l])
 		if !ok {
 			return fmt.Errorf("included preset with label %q not found", pair)
 		}
-		if err := applyPresetWithIncludes(included, all, spec, job, log, append(slices.Clone(chain), pair)); err != nil {
+		if appliedIncludes.Has(index) {
+			continue
+		}
+		appliedIncludes.Insert(index)
+		if err := applyPresetWithIncludes(included, all, spec, job, log, append(slices.Clone(chain), pair), appliedIncludes); err != nil {
 			return err
 		}
 	}
 	return nil
 }
 
-func findPresetByLabel(presets []Preset, label, value string) (Preset, bool) {
-	for _, p := range presets {
+func findPresetByLabel(presets []Preset, label, value string) (Preset, int, bool) {
+	for i, p := range presets {
 		if v, ok := p.Labels[label]; ok && v == value {
-			return p, true
+			return p, i, true
 		}
 	}
-	return Preset{}, false
+	return Preset{}, -1, false
 }
 
 var ReProwExtraRef = regexp.MustCompile(`PROW_EXTRA_GIT_REF_(\d+)`)

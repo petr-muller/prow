@@ -41,6 +41,8 @@ go build -o "${clientgen}" k8s.io/code-generator/cmd/client-gen
 deepcopygen=${REPO_ROOT}/_bin/deepcopy-gen
 # Generate against the module's minimum Go version, including standard-library
 # aliases that can resolve differently in newer Go releases.
+# Read the root go.mod because its module is being generated; hack/tools/go.mod,
+# the toolchain directive, and .go-version are not the source of truth.
 deepcopy_go_version="$(awk '$1 == "go" { print $2; exit }' "${REPO_ROOT}/go.mod")"
 if [[ ! "${deepcopy_go_version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
   echo "ERROR: hack/make-rules/update/codegen.sh: missing or invalid go directive in go.mod" >&2
@@ -103,6 +105,9 @@ gen-prow-config-documented() {
 
 gen-deepcopy() {
   echo "Generating DeepCopy() methods..." >&2
+  # gengo's parser uses go/packages, which runs go list, so runtime must match
+  # the build-time toolchain too; removing this pin reintroduces
+  # encoding/json/jsontext (see #1055).
   GOTOOLCHAIN="${deepcopy_toolchain}" "$deepcopygen" \
     --go-header-file hack/boilerplate/boilerplate.generated.go.txt \
     --output-file zz_generated.deepcopy.go \

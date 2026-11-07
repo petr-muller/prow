@@ -41,8 +41,13 @@ go build -o "${clientgen}" k8s.io/code-generator/cmd/client-gen
 deepcopygen=${REPO_ROOT}/_bin/deepcopy-gen
 # Generate against the module's minimum Go version, including standard-library
 # aliases that can resolve differently in newer Go releases.
-deepcopy_go_version="$(awk '$1 == "go" { print "go" $2; exit }' "${REPO_ROOT}/go.mod")"
-GOTOOLCHAIN="${deepcopy_go_version}" go build -o "${deepcopygen}" k8s.io/code-generator/cmd/deepcopy-gen
+deepcopy_go_version="$(awk '$1 == "go" { print $2; exit }' "${REPO_ROOT}/go.mod")"
+if [[ ! "${deepcopy_go_version}" =~ ^[0-9]+\.[0-9]+(\.[0-9]+)?$ ]]; then
+  echo "ERROR: hack/make-rules/update/codegen.sh: missing or invalid go directive in go.mod" >&2
+  exit 1
+fi
+deepcopy_toolchain="go${deepcopy_go_version}"
+GOTOOLCHAIN="${deepcopy_toolchain}" go build -o "${deepcopygen}" k8s.io/code-generator/cmd/deepcopy-gen
 informergen=${REPO_ROOT}/_bin/informer-gen
 go build -o "${informergen}" k8s.io/code-generator/cmd/informer-gen
 listergen=${REPO_ROOT}/_bin/lister-gen
@@ -98,7 +103,7 @@ gen-prow-config-documented() {
 
 gen-deepcopy() {
   echo "Generating DeepCopy() methods..." >&2
-  GOTOOLCHAIN="${deepcopy_go_version}" "$deepcopygen" \
+  GOTOOLCHAIN="${deepcopy_toolchain}" "$deepcopygen" \
     --go-header-file hack/boilerplate/boilerplate.generated.go.txt \
     --output-file zz_generated.deepcopy.go \
     sigs.k8s.io/prow/pkg/apis/prowjobs/v1 \

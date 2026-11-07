@@ -35,6 +35,18 @@ go test ./pkg/plugins/lgtm
 (Note: `deck` depends on non-go static files, these were tested by integration
 tests, and for e2e test use [`runlocal`](https://github.com/kubernetes-sigs/prow/blob/main/cmd/deck/runlocal) if desired.)
 
+### Go version policy
+
+Prow tracks three Go versions for different purposes:
+
+- `.go-version` selects the default toolchain used by `hack/build/setup-go.sh` for development and CI builds and tests.
+- The root `go.mod` `go` directive defines the minimum supported Go language and standard-library version.
+- `hack/tools/go.mod` defines the separate tools module and its own minimum Go version; it does not define Prow's minimum.
+
+`make update-codegen` builds and runs `deepcopy-gen` with the minimum Go version from the root `go.mod`
+so its output stays buildable on that version. Other generators use the `.go-version` toolchain by default.
+Generated code must not depend on standard-library APIs introduced after Prow's minimum supported Go version.
+
 ### How to test a plugin
 
 If you are making changes to a Prow plugin you can test the new behavior by sending fake webhooks to [`hook`](/docs/components/core/hook/) with [`phony`](/docs/components/cli-tools/phony/).

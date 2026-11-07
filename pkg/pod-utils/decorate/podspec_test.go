@@ -25,6 +25,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/sirupsen/logrus"
+	logrustest "github.com/sirupsen/logrus/hooks/test"
 	coreapi "k8s.io/api/core/v1"
 	"k8s.io/apimachinery/pkg/api/equality"
 	"k8s.io/apimachinery/pkg/api/resource"
@@ -557,6 +559,106 @@ func TestCloneRefs(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDecorateMergesSchedulingOptionsAffinity(t *testing.T) {
+	hook := logrustest.NewGlobal()
+	defer hook.Reset()
+
+	requiredNode := func(arch string) *coreapi.NodeSelector {
+		return &coreapi.NodeSelector{NodeSelectorTerms: []coreapi.NodeSelectorTerm{{
+			MatchExpressions: []coreapi.NodeSelectorRequirement{{Key: "kubernetes.io/arch", Operator: coreapi.NodeSelectorOpIn, Values: []string{arch}}},
+		}}}
+	}
+	preferredZone := func(zone string) coreapi.PreferredSchedulingTerm {
+		return coreapi.PreferredSchedulingTerm{Weight: 1, Preference: coreapi.NodeSelectorTerm{
+			MatchExpressions: []coreapi.NodeSelectorRequirement{{Key: "topology.kubernetes.io/zone", Operator: coreapi.NodeSelectorOpIn, Values: []string{zone}}},
+		}}
+	}
+	podTerm := func(app string) coreapi.PodAffinityTerm {
+		return coreapi.PodAffinityTerm{
+			LabelSelector: &metav1.LabelSelector{MatchLabels: map[string]string{"app": app}},
+			TopologyKey:   "kubernetes.io/hostname",
+		}
+	}
+
+	spec := &coreapi.PodSpec{
+		Containers: []coreapi.Container{{Name: "test", Command: []string{"/bin/ls"}, Args: []string{"-l"}}},
+		Affinity: &coreapi.Affinity{
+			NodeAffinity: &coreapi.NodeAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution:  requiredNode("amd64"),
+				PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("job-zone")},
+			},
+			PodAntiAffinity: &coreapi.PodAntiAffinity{
+				RequiredDuringSchedulingIgnoredDuringExecution: []coreapi.PodAffinityTerm{podTerm("job-anti")},
+			},
+		},
+	}
+	pj := &prowapi.ProwJob{Spec: prowapi.ProwJobSpec{
+		Job: "affinity-job",
+		DecorationConfig: &prowapi.DecorationConfig{
+			Timeout:     &prowapi.Duration{Duration: time.Minute},
+			GracePeriod: &prowapi.Duration{Duration: time.Hour},
+			UtilityImages: &prowapi.UtilityImages{
+				CloneRefs:  "cloneimage",
+				InitUpload: "initimage",
+				Entrypoint: "entrypointimage",
+				Sidecar:    "sidecarimage",
+			},
+			GCSConfiguration:          &prowapi.GCSConfiguration{Bucket: "bucket", PathStrategy: "single", DefaultOrg: "org", DefaultRepo: "repo"},
+			GCSCredentialsSecret:      new("gcs-secret"),
+			DefaultServiceAccountName: new("default-sa"),
+			SchedulingOptions: &prowapi.SchedulingOptions{
+				Affinity: &coreapi.Affinity{
+					NodeAffinity: &coreapi.NodeAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution:  requiredNode("arm64"),
+						PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("configured-zone")},
+					},
+					PodAffinity: &coreapi.PodAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: []coreapi.PodAffinityTerm{podTerm("configured")},
+					},
+					PodAntiAffinity: &coreapi.PodAntiAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution: []coreapi.PodAffinityTerm{podTerm("configured-anti")},
+					},
+				},
+				Tolerations: []coreapi.Toleration{{Key: "existing-toleration", Operator: coreapi.TolerationOpExists}},
+			},
+		},
+		Refs: &prowapi.Refs{Org: "org", Repo: "repo", BaseRef: "main", BaseSHA: "abcd1234"},
+	}}
+
+	if err := decorate(spec, pj, map[string]string{}, ""); err != nil {
+		t.Fatalf("got an error from decorate(): %v", err)
+	}
+
+	want := &coreapi.Affinity{
+		NodeAffinity: &coreapi.NodeAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution:  requiredNode("amd64"),
+			PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("job-zone"), preferredZone("configured-zone")},
+		},
+		PodAffinity: &coreapi.PodAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []coreapi.PodAffinityTerm{podTerm("configured")},
+		},
+		PodAntiAffinity: &coreapi.PodAntiAffinity{
+			RequiredDuringSchedulingIgnoredDuringExecution: []coreapi.PodAffinityTerm{podTerm("job-anti"), podTerm("configured-anti")},
+		},
+	}
+	if !equality.Semantic.DeepEqual(want, spec.Affinity) {
+		t.Errorf("unexpected affinity after decoration:\n%s", diff.Diff(want, spec.Affinity))
+	}
+	if len(spec.Tolerations) != 1 || spec.Tolerations[0].Key != "existing-toleration" {
+		t.Errorf("scheduling_options.tolerations should still be applied when affinity exists, got %#v", spec.Tolerations)
+	}
+
+	var warned bool
+	for _, entry := range hook.AllEntries() {
+		if entry.Level == logrus.WarnLevel && entry.Data["job"] == "affinity-job" && strings.Contains(entry.Message, "scheduling_options.affinity") {
+			warned = true
+		}
+	}
+	if !warned {
+		t.Errorf("expected a warning about the ignored required node affinity from scheduling_options.affinity, got: %#v", hook.AllEntries())
 	}
 }
 

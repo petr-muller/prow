@@ -21,11 +21,13 @@ import (
 	"maps"
 	"path"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
 
+	"github.com/google/go-cmp/cmp"
 	"github.com/sirupsen/logrus"
 	coreapi "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -844,8 +846,12 @@ func decorate(spec *coreapi.PodSpec, pj *prowapi.ProwJob, rawEnv map[string]stri
 	}
 
 	if pj.Spec.DecorationConfig != nil && pj.Spec.DecorationConfig.SchedulingOptions != nil {
-		if pj.Spec.DecorationConfig.SchedulingOptions.Affinity != nil && spec.Affinity == nil {
-			spec.Affinity = pj.Spec.DecorationConfig.SchedulingOptions.Affinity
+		if affinity := pj.Spec.DecorationConfig.SchedulingOptions.Affinity; affinity != nil {
+			if spec.Affinity == nil {
+				spec.Affinity = affinity
+			} else {
+				mergeAffinity(spec.Affinity, affinity, logrus.WithField("job", pj.Spec.Job))
+			}
 		}
 		if pj.Spec.DecorationConfig.SchedulingOptions.Tolerations != nil && spec.Tolerations == nil {
 			spec.Tolerations = pj.Spec.DecorationConfig.SchedulingOptions.Tolerations
@@ -883,6 +889,66 @@ func decorate(spec *coreapi.PodSpec, pj *prowapi.ProwJob, rawEnv map[string]stri
 	}
 
 	return nil
+}
+
+// mergeAffinity merges src into dst, keeping the constraints already present in dst.
+// Preferred terms and pod affinity/anti-affinity terms are appended, while a required
+// node affinity already present in dst takes precedence and is reported as a warning.
+func mergeAffinity(dst, src *coreapi.Affinity, log *logrus.Entry) {
+	src = src.DeepCopy()
+
+	if src.NodeAffinity != nil {
+		if dst.NodeAffinity == nil {
+			dst.NodeAffinity = src.NodeAffinity
+		} else {
+			if src.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution != nil {
+				if dst.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution == nil {
+					dst.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution = src.NodeAffinity.RequiredDuringSchedulingIgnoredDuringExecution
+				} else {
+					log.Warn("Ignoring the required node affinity from decoration_config.scheduling_options.affinity because the job or a preset already sets required node affinity.")
+				}
+			}
+			dst.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = appendMissingTerms(
+				dst.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+				src.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+		}
+	}
+
+	if src.PodAffinity != nil {
+		if dst.PodAffinity == nil {
+			dst.PodAffinity = src.PodAffinity
+		} else {
+			dst.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = appendMissingTerms(
+				dst.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution,
+				src.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			dst.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution = appendMissingTerms(
+				dst.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+				src.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+		}
+	}
+
+	if src.PodAntiAffinity != nil {
+		if dst.PodAntiAffinity == nil {
+			dst.PodAntiAffinity = src.PodAntiAffinity
+		} else {
+			dst.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = appendMissingTerms(
+				dst.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution,
+				src.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			dst.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = appendMissingTerms(
+				dst.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
+				src.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
+		}
+	}
+}
+
+// appendMissingTerms appends the terms in src that are not already present in dst.
+func appendMissingTerms[T any](dst, src []T) []T {
+	for _, term := range src {
+		if !slices.ContainsFunc(dst, func(existing T) bool { return cmp.Equal(term, existing) }) {
+			dst = append(dst, term)
+		}
+	}
+	return dst
 }
 
 // DetermineWorkDir determines the working directory to use for a given set of refs to clone

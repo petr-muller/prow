@@ -823,10 +823,14 @@ func TestMergePresetAffinity(t *testing.T) {
 			TopologyKey:   "kubernetes.io/hostname",
 		}
 	}
+	weightedTerm := func(app string) coreapi.WeightedPodAffinityTerm {
+		return coreapi.WeightedPodAffinityTerm{Weight: 1, PodAffinityTerm: antiTerm(app)}
+	}
 
 	tcs := []struct {
 		name        string
 		pod         *coreapi.PodSpec
+		jobLabels   map[string]string
 		presets     []Preset
 		expected    *coreapi.Affinity
 		shouldError bool
@@ -873,6 +877,79 @@ func TestMergePresetAffinity(t *testing.T) {
 			},
 		},
 		{
+			name: "identical preferred node affinity term from job and preset is not duplicated",
+			pod: &coreapi.PodSpec{Affinity: &coreapi.Affinity{NodeAffinity: &coreapi.NodeAffinity{
+				PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("a")},
+			}}},
+			presets: []Preset{{
+				Affinity: &coreapi.Affinity{NodeAffinity: &coreapi.NodeAffinity{
+					PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("a")},
+				}},
+			}},
+			expected: &coreapi.Affinity{NodeAffinity: &coreapi.NodeAffinity{
+				PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("a")},
+			}},
+		},
+		{
+			name:      "diamond include graph does not duplicate affinity term",
+			pod:       &coreapi.PodSpec{},
+			jobLabels: map[string]string{"left": "true", "right": "true"},
+			presets: []Preset{
+				{
+					Labels:         map[string]string{"left": "true"},
+					IncludePresets: map[string]string{"base": "true"},
+				},
+				{
+					Labels:         map[string]string{"right": "true"},
+					IncludePresets: map[string]string{"base": "true"},
+				},
+				{
+					Labels: map[string]string{"base": "true"},
+					Affinity: &coreapi.Affinity{NodeAffinity: &coreapi.NodeAffinity{
+						PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("shared")},
+					}},
+				},
+			},
+			expected: &coreapi.Affinity{NodeAffinity: &coreapi.NodeAffinity{
+				PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.PreferredSchedulingTerm{preferredZone("shared")},
+			}},
+		},
+		{
+			name: "identical pod affinity and anti-affinity terms from job and preset are not duplicated",
+			pod: &coreapi.PodSpec{Affinity: &coreapi.Affinity{
+				PodAffinity: &coreapi.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution:  []coreapi.PodAffinityTerm{antiTerm("required")},
+					PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.WeightedPodAffinityTerm{weightedTerm("preferred")},
+				},
+				PodAntiAffinity: &coreapi.PodAntiAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution:  []coreapi.PodAffinityTerm{antiTerm("anti-required")},
+					PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.WeightedPodAffinityTerm{weightedTerm("anti-preferred")},
+				},
+			}},
+			presets: []Preset{{
+				Affinity: &coreapi.Affinity{
+					PodAffinity: &coreapi.PodAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution:  []coreapi.PodAffinityTerm{antiTerm("required")},
+						PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.WeightedPodAffinityTerm{weightedTerm("preferred")},
+					},
+					PodAntiAffinity: &coreapi.PodAntiAffinity{
+						RequiredDuringSchedulingIgnoredDuringExecution:  []coreapi.PodAffinityTerm{antiTerm("anti-required")},
+						PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.WeightedPodAffinityTerm{weightedTerm("anti-preferred")},
+					},
+				},
+			}},
+			expected: &coreapi.Affinity{
+				PodAffinity: &coreapi.PodAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution:  []coreapi.PodAffinityTerm{antiTerm("required")},
+					PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.WeightedPodAffinityTerm{weightedTerm("preferred")},
+				},
+				PodAntiAffinity: &coreapi.PodAntiAffinity{
+					RequiredDuringSchedulingIgnoredDuringExecution:  []coreapi.PodAffinityTerm{antiTerm("anti-required")},
+					PreferredDuringSchedulingIgnoredDuringExecution: []coreapi.WeightedPodAffinityTerm{weightedTerm("anti-preferred")},
+				},
+			},
+		},
+		{
 			name: "affinity from included preset is merged",
 			pod:  &coreapi.PodSpec{},
 			presets: []Preset{
@@ -914,7 +991,7 @@ func TestMergePresetAffinity(t *testing.T) {
 			for i := range tc.presets {
 				tc.presets[i].DeepCopyInto(&original[i])
 			}
-			err := resolvePresets("foo", nil, tc.pod, tc.presets)
+			err := resolvePresets("foo", tc.jobLabels, tc.pod, tc.presets)
 			if tc.shouldError {
 				if err == nil {
 					t.Fatal("expected error but got none")

@@ -165,9 +165,9 @@ func mergeAffinity(affinity *v1.Affinity, podSpec, job *v1.PodSpec, log *logrus.
 					return errors.New("required node affinity duplicated in pod spec")
 				}
 			}
-			dst.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+			dst.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution = appendMissing(
 				dst.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
-				src.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution...)
+				src.NodeAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
 		}
 	}
 
@@ -175,12 +175,12 @@ func mergeAffinity(affinity *v1.Affinity, podSpec, job *v1.PodSpec, log *logrus.
 		if dst.PodAffinity == nil {
 			dst.PodAffinity = src.PodAffinity
 		} else {
-			dst.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
+			dst.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution = appendMissing(
 				dst.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution,
-				src.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution...)
-			dst.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+				src.PodAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			dst.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution = appendMissing(
 				dst.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
-				src.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution...)
+				src.PodAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
 		}
 	}
 
@@ -188,15 +188,25 @@ func mergeAffinity(affinity *v1.Affinity, podSpec, job *v1.PodSpec, log *logrus.
 		if dst.PodAntiAffinity == nil {
 			dst.PodAntiAffinity = src.PodAntiAffinity
 		} else {
-			dst.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = append(
+			dst.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution = appendMissing(
 				dst.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution,
-				src.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution...)
-			dst.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = append(
+				src.PodAntiAffinity.RequiredDuringSchedulingIgnoredDuringExecution)
+			dst.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution = appendMissing(
 				dst.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution,
-				src.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution...)
+				src.PodAntiAffinity.PreferredDuringSchedulingIgnoredDuringExecution)
 		}
 	}
 	return nil
+}
+
+// appendMissing appends the terms in src that are not already present in dst.
+func appendMissing[T any](dst, src []T) []T {
+	for _, term := range src {
+		if !slices.ContainsFunc(dst, func(existing T) bool { return cmp.Equal(term, existing) }) {
+			dst = append(dst, term)
+		}
+	}
+	return dst
 }
 
 // +k8s:deepcopy-gen=true

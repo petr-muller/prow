@@ -3026,7 +3026,10 @@ func resolvePresets(name string, labels map[string]string, spec *v1.PodSpec, pre
 	if spec == nil {
 		return nil
 	}
-	job := spec.DeepCopy()
+	// Snapshot the spec before applying the first matching preset so that job
+	// values take precedence over preset values. Take the snapshot lazily so
+	// that jobs no preset matches do not pay for a deep copy.
+	var job *v1.PodSpec
 	log := logrus.WithField("job", name)
 	// Presets reached through an include may be shared by several included
 	// presets (a diamond); apply each one only once so the shared values are
@@ -3034,6 +3037,9 @@ func resolvePresets(name string, labels map[string]string, spec *v1.PodSpec, pre
 	appliedIncludes := sets.NewInt()
 	for _, preset := range presets {
 		if presetMatches(preset, labels) {
+			if job == nil {
+				job = spec.DeepCopy()
+			}
 			if err := applyPresetWithIncludes(preset, presets, spec, job, log, nil, appliedIncludes); err != nil {
 				return fmt.Errorf("job %s failed to merge presets for podspec: %w", name, err)
 			}

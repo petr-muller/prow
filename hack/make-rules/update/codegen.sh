@@ -33,6 +33,10 @@ cd $REPO_ROOT
 echo "Ensuring go version."
 source ./hack/build/setup-go.sh
 
+export GO111MODULE=on
+export GOPROXY=https://proxy.golang.org
+export GOSUMDB=sum.golang.org
+
 # build codegen tools
 echo "Install codegen tools."
 cd "hack/tools"
@@ -239,10 +243,6 @@ gen-gangway-apidescriptorpb-for-cloud-endpoints() {
 }
 
 gen-prow-config-documented
-
-export GO111MODULE=on
-export GOPROXY=https://proxy.golang.org
-export GOSUMDB=sum.golang.org
 
 gen-deepcopy
 gen-client

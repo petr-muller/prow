@@ -154,15 +154,16 @@ type prowJobClient interface {
 type gerritClient interface {
 	ApplyGlobalConfig(orgRepoConfigGetter func() *config.GerritOrgRepoConfigs, lastSyncTracker *client.SyncTime, cookiefilePath, tokenPathOverride string, additionalFunc func())
 	Authenticate(cookiefilePath, tokenPath string)
-	QueryChangesForProject(instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error)
-	GetBranchRevision(instance, project, branch string) (string, error)
-	SetReview(instance, id, revision, message string, labels map[string]string) error
-	Account(instance string) (*gerrit.AccountInfo, error)
-	HasRelatedChanges(instance, id, revision string) (bool, error)
+	QueryChangesForProject(ctx context.Context, instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error)
+	GetBranchRevision(ctx context.Context, instance, project, branch string) (string, error)
+	SetReview(ctx context.Context, instance, id, revision, message string, labels map[string]string) error
+	Account(ctx context.Context, instance string) (*gerrit.AccountInfo, error)
+	HasRelatedChanges(ctx context.Context, instance, id, revision string) (bool, error)
 }
 
 // Controller manages gerrit changes.
 type Controller struct {
+	ctx                         context.Context
 	config                      config.Getter
 	prowJobClient               prowJobClient
 	gc                          gerritClient
@@ -202,6 +203,7 @@ func NewController(ctx context.Context, prowJobClient prowv1.ProwJobInterface, o
 		logrus.WithError(err).Fatal("Error creating gerrit client.")
 	}
 	c := &Controller{
+		ctx:                         ctx,
 		prowJobClient:               prowJobClient,
 		config:                      cfg,
 		gc:                          gerritClient,
@@ -248,7 +250,7 @@ type Change struct {
 	created    time.Time
 }
 
-func (c *Controller) processChange(latest client.LastSyncState, changeChan <-chan Change, log *logrus.Entry, wg *sync.WaitGroup, lastProjectSyncTime time.Time) {
+func (c *Controller) processChange(ctx context.Context, latest client.LastSyncState, changeChan <-chan Change, log *logrus.Entry, wg *sync.WaitGroup, lastProjectSyncTime time.Time) {
 	for changeStruct := range changeChan {
 		change := changeStruct.changeInfo
 		instance := changeStruct.instance
@@ -265,7 +267,7 @@ func (c *Controller) processChange(latest client.LastSyncState, changeChan <-cha
 
 		result := client.ResultSuccess
 		if c.shouldTriggerJobs(change, lastProjectSyncTime) {
-			if err := c.triggerJobs(log, instance, change); err != nil {
+			if err := c.triggerJobs(ctx, log, instance, change); err != nil {
 				result = client.ResultError
 				log.WithError(err).Info("Failed to trigger jobs based on change")
 			}
@@ -287,7 +289,7 @@ func (c *Controller) processChange(latest client.LastSyncState, changeChan <-cha
 	}
 }
 
-func (c *Controller) processSingleProject(instance, project string) {
+func (c *Controller) processSingleProject(ctx context.Context, instance, project string) {
 	// Assumes the passed in instance was already normalized with https:// prefix.
 	log := logrus.WithFields(logrus.Fields{"host": instance, "repo": project})
 	tracker := c.tracker.Current()
@@ -307,7 +309,7 @@ func (c *Controller) processSingleProject(instance, project string) {
 	timeQueryChangesForProject := time.Now()
 
 	// Ignore the error. It is already logged.
-	changes, err := c.gc.QueryChangesForProject(instance, project, syncTime, c.config().Gerrit.RateLimit)
+	changes, err := c.gc.QueryChangesForProject(ctx, instance, project, syncTime, c.config().Gerrit.RateLimit)
 	queryResult := func() string {
 		if err == nil {
 			return client.ResultSuccess
@@ -335,7 +337,7 @@ func (c *Controller) processSingleProject(instance, project string) {
 
 	poolSize := min(c.workerPoolSize, len(changes))
 	for range poolSize {
-		go c.processChange(latest, changeChan, log, &wg, syncTime)
+		go c.processChange(ctx, latest, changeChan, log, &wg, syncTime)
 	}
 	// We need to call time.Now() outside this loop since <- will block
 	// while there are no more available worker threads possibly causing
@@ -399,7 +401,7 @@ func (c *Controller) Sync() {
 						time.Sleep(timeDiff)
 					}
 					previousRun = time.Now()
-					c.processSingleProject(instance, project)
+					c.processSingleProject(c.ctx, instance, project)
 				}
 			}(instance, project, staggerPosition)
 			staggerPosition++
@@ -504,7 +506,7 @@ func failedJobs(account int, revision int, messages ...gerrit.ChangeMessageInfo)
 	return failures
 }
 
-func (c *Controller) handleInRepoConfigError(err error, instance string, change gerrit.ChangeInfo) error {
+func (c *Controller) handleInRepoConfigError(ctx context.Context, err error, instance string, change gerrit.ChangeInfo) error {
 	key := fmt.Sprintf("%s%s%s", instance, change.ID, change.CurrentRevision)
 	if err != nil {
 		// Only report back to Gerrit if we have not reported previously.
@@ -515,7 +517,7 @@ func (c *Controller) handleInRepoConfigError(err error, instance string, change 
 		skipIrrelevantComments := c.config().Gerrit.AllowedPresubmitTriggerReRawString != ""
 		if _, alreadyReported := c.inRepoConfigFailuresTracker[key]; !alreadyReported || skipIrrelevantComments {
 			msg := fmt.Sprintf("%s: %v", inRepoConfigFailed, err)
-			if setReviewWerr := c.gc.SetReview(instance, change.ID, change.CurrentRevision, msg, nil); setReviewWerr != nil {
+			if setReviewWerr := c.gc.SetReview(ctx, instance, change.ID, change.CurrentRevision, msg, nil); setReviewWerr != nil {
 				return fmt.Errorf("failed to get inRepoConfig and failed to set Review to notify user: %v and %v", err, setReviewWerr)
 			}
 			// The boolean value here is meaningless as we use the tracker as a
@@ -566,9 +568,9 @@ func (c *Controller) messageContainsJobTriggeringCommand(message gerrit.ChangeMe
 }
 
 // triggerJobs creates new presubmit/postsubmit prowjobs base off the gerrit changes
-func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, change client.ChangeInfo) error {
+func (c *Controller) triggerJobs(ctx context.Context, logger logrus.FieldLogger, instance string, change client.ChangeInfo) error {
 	cloneURI := source.CloneURIFromOrgRepo(instance, change.Project)
-	baseSHA, err := c.gc.GetBranchRevision(instance, change.Project, change.Branch)
+	baseSHA, err := c.gc.GetBranchRevision(ctx, instance, change.Project, change.Branch)
 	if err != nil {
 		return fmt.Errorf("GetBranchRevision: %w", err)
 	}
@@ -606,7 +608,7 @@ func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, cha
 			return change.CurrentRevision, nil
 		}
 		if hasRelatedChanges == nil {
-			if res, err := c.gc.HasRelatedChanges(instance, change.ChangeID, change.CurrentRevision); err != nil {
+			if res, err := c.gc.HasRelatedChanges(ctx, instance, change.ChangeID, change.CurrentRevision); err != nil {
 				logger.WithError(err).Info("Failed to get related changes for the purpose of prowYAML cache optimization. Skipping optimization.")
 				return change.CurrentRevision, nil
 			} else {
@@ -647,7 +649,7 @@ func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, cha
 			// Reports error back to Gerrit. handleInRepoConfigError is
 			// responsible for not sending the same message again and again on
 			// the same commit.
-			if postErr := c.handleInRepoConfigError(err, instance, change); postErr != nil {
+			if postErr := c.handleInRepoConfigError(ctx, err, instance, change); postErr != nil {
 				logger.WithError(postErr).Error("Failed reporting inrepoconfig processing error back to Gerrit.")
 			}
 			// Static postsubmit jobs are included as part of output from
@@ -684,7 +686,7 @@ func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, cha
 			// Reports error back to Gerrit. handleInRepoConfigError is
 			// responsible for not sending the same message again and again on
 			// the same commit.
-			if postErr := c.handleInRepoConfigError(err, instance, change); postErr != nil {
+			if postErr := c.handleInRepoConfigError(ctx, err, instance, change); postErr != nil {
 				logger.WithError(postErr).Error("Failed reporting inrepoconfig processing error back to Gerrit.")
 			}
 			// There is no need to keep going when failed to get inrepoconfig
@@ -704,7 +706,7 @@ func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, cha
 			return err
 		}
 
-		account, err := c.gc.Account(instance)
+		account, err := c.gc.Account(ctx, instance)
 		if err != nil {
 			// This would happen if authenticateOnce hasn't done register this instance yet
 			return fmt.Errorf("account not found for %q: %w", instance, err)
@@ -752,7 +754,7 @@ func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, cha
 					return err
 				}
 				message := pjutil.HelpMessage(instance, change.Project, change.Branch, note, runWithTestAllNames, optionalJobsCommands, requiredJobsCommands)
-				if err := c.gc.SetReview(instance, change.ID, change.CurrentRevision, message, nil); err != nil {
+				if err := c.gc.SetReview(ctx, instance, change.ID, change.CurrentRevision, message, nil); err != nil {
 					return err
 				}
 				gerritMetrics.triggerHelpLatency.WithLabelValues(instance).Observe(float64(time.Since(msg.Date.Time).Seconds()))
@@ -820,7 +822,7 @@ func (c *Controller) triggerJobs(logger logrus.FieldLogger, instance string, cha
 		} else {
 			message = message + jobList.String()
 		}
-		if err := c.gc.SetReview(instance, change.ID, change.CurrentRevision, message, nil); err != nil {
+		if err := c.gc.SetReview(ctx, instance, change.ID, change.CurrentRevision, message, nil); err != nil {
 			return err
 		}
 	}

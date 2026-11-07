@@ -140,7 +140,7 @@ func TestGerrit(t *testing.T) {
 			// Give some time for gerrit to pick up the change
 			wait.PollUntilContextTimeout(context.TODO(), 5*time.Second, 20*time.Second, true, expectedMessagesReceivedFunc(gerritClient, tc.change.ChangeID, tc.expectedMessages))
 
-			resp, err := gerritClient.GetChange(gerritServer, tc.change.ChangeID)
+			resp, err := gerritClient.GetChange(context.Background(), gerritServer, tc.change.ChangeID)
 			if err != nil {
 				reset()
 				t.Errorf("Failed getting gerrit change: %v", err)
@@ -161,7 +161,7 @@ func TestGerrit(t *testing.T) {
 
 func expectedMessagesReceivedFunc(gerritClient *client.Client, ChangeID string, expectedMessages []string) wait.ConditionWithContextFunc {
 	return func(ctx context.Context) (bool, error) {
-		resp, err := gerritClient.GetChange(gerritServer, ChangeID)
+		resp, err := gerritClient.GetChange(context.Background(), gerritServer, ChangeID)
 		if err != nil {
 			return false, nil
 		}

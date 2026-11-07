@@ -48,6 +48,7 @@ const (
 )
 
 type fgc struct {
+	checkContext  func(context.Context)
 	reportMessage string
 	reportLabel   map[string]string
 	instance      string
@@ -55,18 +56,21 @@ type fgc struct {
 	count         int
 }
 
-func (f *fgc) SetReview(instance, id, revision, message string, labels map[string]string) error {
+func (f *fgc) SetReview(ctx context.Context, instance, id, revision, message string, labels map[string]string) error {
+	if f.checkContext != nil {
+		f.checkContext(ctx)
+	}
 	if instance != f.instance {
 		return fmt.Errorf("wrong instance: %s", instance)
 	}
-	exist, err := f.ChangeExist(instance, id)
+	exist, err := f.ChangeExist(ctx, instance, id)
 	if err != nil {
 		return err
 	}
 	if !exist {
 		return errors.New("change not exist: 404")
 	}
-	change, err := f.GetChange(instance, id)
+	change, err := f.GetChange(ctx, instance, id)
 	if err != nil {
 		return err
 	}
@@ -88,7 +92,10 @@ func (f *fgc) SetReview(instance, id, revision, message string, labels map[strin
 	return nil
 }
 
-func (f *fgc) GetChange(instance, id string, additionalFields ...string) (*gerrit.ChangeInfo, error) {
+func (f *fgc) GetChange(ctx context.Context, instance, id string, additionalFields ...string) (*gerrit.ChangeInfo, error) {
+	if f.checkContext != nil {
+		f.checkContext(ctx)
+	}
 	if f.changes == nil {
 		return nil, errors.New("fake client changes is not initialized")
 	}
@@ -104,7 +111,7 @@ func (f *fgc) GetChange(instance, id string, additionalFields ...string) (*gerri
 	return nil, nil
 }
 
-func (f *fgc) ChangeExist(instance, id string) (bool, error) {
+func (f *fgc) ChangeExist(ctx context.Context, instance, id string) (bool, error) {
 	if f.changes == nil {
 		return false, errors.New("fake client changes is not initialized")
 	}
@@ -2033,6 +2040,22 @@ func TestReport(t *testing.T) {
 				return
 			}
 
+			started := time.Now()
+			var reportCtx context.Context
+			fgc.checkContext = func(ctx context.Context) {
+				t.Helper()
+				deadline, ok := ctx.Deadline()
+				if !ok || deadline.Before(started.Add(10*time.Second)) || deadline.After(time.Now().Add(10*time.Second)) {
+					t.Errorf("Gerrit call context deadline = %v, present = %v; want Report's 10s timeout", deadline, ok)
+				}
+				if ctx.Done() == nil {
+					t.Error("Gerrit call context has no cancellation channel")
+				}
+				if reportCtx != nil && reportCtx != ctx {
+					t.Error("Gerrit calls received different report contexts")
+				}
+				reportCtx = ctx
+			}
 			reportedJobs, _, err := reporter.Report(context.Background(), logrus.NewEntry(logrus.StandardLogger()), tc.pj)
 			if err != nil {
 				if !tc.expectError {

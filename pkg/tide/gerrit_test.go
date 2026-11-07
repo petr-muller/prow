@@ -51,7 +51,7 @@ func newFakeGerritClient() *fakeGerritClient {
 	}
 }
 
-func (f *fakeGerritClient) QueryChangesForProject(instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
+func (f *fakeGerritClient) QueryChangesForProject(ctx context.Context, instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
 	if f.changes == nil || f.changes[instance] == nil || f.changes[instance][project] == nil {
 		return nil, errors.New("queries project doesn't exist")
 	}
@@ -59,7 +59,7 @@ func (f *fakeGerritClient) QueryChangesForProject(instance, project string, last
 	return f.changes[instance][project], nil
 }
 
-func (f *fakeGerritClient) GetChange(instance, id string, additionalFields ...string) (*gerrit.ChangeInfo, error) {
+func (f *fakeGerritClient) GetChange(ctx context.Context, instance, id string, additionalFields ...string) (*gerrit.ChangeInfo, error) {
 	if f.changes == nil || f.changes[instance] == nil {
 		return nil, errors.New("instance not exist")
 	}
@@ -73,16 +73,16 @@ func (f *fakeGerritClient) GetChange(instance, id string, additionalFields ...st
 	return nil, errors.New("change not exist")
 }
 
-func (f *fakeGerritClient) GetBranchRevision(instance, project, branch string) (string, error) {
+func (f *fakeGerritClient) GetBranchRevision(ctx context.Context, instance, project, branch string) (string, error) {
 	return "abc", nil
 }
 
-func (f *fakeGerritClient) SubmitChange(instance, id string, wait bool) (*gerrit.ChangeInfo, error) {
-	return f.GetChange(instance, id)
+func (f *fakeGerritClient) SubmitChange(ctx context.Context, instance, id string, wait bool) (*gerrit.ChangeInfo, error) {
+	return f.GetChange(ctx, instance, id)
 }
 
-func (f *fakeGerritClient) SetReview(instance, id, revision, message string, _ map[string]string) error {
-	change, err := f.GetChange(instance, id)
+func (f *fakeGerritClient) SetReview(ctx context.Context, instance, id, revision, message string, _ map[string]string) error {
+	change, err := f.GetChange(ctx, instance, id)
 	if err != nil {
 		return fmt.Errorf("change not found: %v", err)
 	}
@@ -287,7 +287,7 @@ func TestQuery(t *testing.T) {
 				},
 			}
 
-			fc := newGerritProvider(logrus.WithContext(context.Background()), func() *config.Config { return &cfg }, nil, nil, "", "", 0, 0)
+			fc := newGerritProvider(context.Background(), logrus.WithContext(context.Background()), func() *config.Config { return &cfg }, nil, nil, "", "", 0, 0)
 			fgc := newFakeGerritClient()
 
 			for instance, projs := range tc.prs {
@@ -309,7 +309,7 @@ func TestQuery(t *testing.T) {
 }
 
 func TestBlocker(t *testing.T) {
-	fc := &GerritProvider{}
+	fc := &GerritProvider{ctx: context.Background()}
 	want := blockers.Blockers{}
 	var wantErr error
 	got, gotErr := fc.blockers()
@@ -341,7 +341,7 @@ func TestIsAllowedToMerge(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fc := &GerritProvider{}
+			fc := &GerritProvider{ctx: context.Background()}
 			got, gotErr := fc.isAllowedToMerge(&CodeReviewCommon{Mergeable: tc.mergeable})
 
 			if diff := cmp.Diff(tc.want, got); diff != "" {
@@ -356,7 +356,7 @@ func TestIsAllowedToMerge(t *testing.T) {
 
 func TestGetRef(t *testing.T) {
 	fgc := newFakeGerritClient()
-	fc := &GerritProvider{gc: fgc}
+	fc := &GerritProvider{ctx: context.Background(), gc: fgc}
 	got, _ := fc.GetRef("", "", "")
 
 	want := "abc"
@@ -575,7 +575,7 @@ func TestGerritHeadContexts(t *testing.T) {
 			}
 
 			fpjc := builder.Build()
-			fc := &GerritProvider{pjclientset: fpjc}
+			fc := &GerritProvider{ctx: context.Background(), pjclientset: fpjc}
 
 			got, gotErr := fc.headContexts(&CodeReviewCommon{
 				HeadRefOID: "abc123",
@@ -724,6 +724,7 @@ func TestMergePR(t *testing.T) {
 				},
 			}
 			fc := &GerritProvider{
+				ctx:    context.Background(),
 				logger: logrus.WithContext(context.Background()),
 				gc:     fgc,
 				cfg:    func() *config.Config { return &cfg },
@@ -808,7 +809,7 @@ func TestGetTideContextPolicy(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := config.Config{JobConfig: config.JobConfig{PresubmitsStatic: tc.presubmits}}
-			fc := &GerritProvider{cfg: func() *config.Config { return &cfg }}
+			fc := &GerritProvider{ctx: context.Background(), cfg: func() *config.Config { return &cfg }}
 
 			got, gotErr := fc.GetTideContextPolicy("foo1", tc.pr.Project, tc.pr.Branch, nil, CodeReviewCommonFromGerrit(&tc.pr, "foo1"))
 
@@ -874,7 +875,7 @@ func TestPrMergeMethod(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fc := &GerritProvider{}
+			fc := &GerritProvider{ctx: context.Background()}
 
 			got := fc.prMergeMethod(CodeReviewCommonFromGerrit(&tc.pr, "foo1"))
 			if got == nil {
@@ -933,7 +934,7 @@ func TestJobIsRequiredByTide(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			fc := &GerritProvider{}
+			fc := &GerritProvider{ctx: context.Background()}
 			if want, got := tc.want, fc.jobIsRequiredByTide(tc.ps, tc.crc); want != got {
 				t.Errorf("Wrong. Want: %v, got: %v", want, got)
 			}

@@ -17,6 +17,7 @@ limitations under the License.
 package adapter
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
@@ -73,7 +74,7 @@ type fgc struct {
 	instanceMap map[string]*gerrit.AccountInfo
 }
 
-func (f *fgc) HasRelatedChanges(instance, id, revision string) (bool, error) {
+func (f *fgc) HasRelatedChanges(ctx context.Context, instance, id, revision string) (bool, error) {
 	return false, nil
 }
 
@@ -85,24 +86,24 @@ func (f *fgc) Authenticate(cookiefilePath, tokenPath string) {
 
 }
 
-func (f *fgc) QueryChanges(lastUpdate client.LastSyncState, rateLimit int) map[string][]client.ChangeInfo {
+func (f *fgc) QueryChanges(ctx context.Context, lastUpdate client.LastSyncState, rateLimit int) map[string][]client.ChangeInfo {
 	return nil
 }
 
-func (f *fgc) QueryChangesForProject(instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
+func (f *fgc) QueryChangesForProject(ctx context.Context, instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
 	return nil, nil
 }
 
-func (f *fgc) SetReview(instance, id, revision, message string, labels map[string]string) error {
+func (f *fgc) SetReview(ctx context.Context, instance, id, revision, message string, labels map[string]string) error {
 	f.reviews++
 	return nil
 }
 
-func (f *fgc) GetBranchRevision(instance, project, branch string) (string, error) {
+func (f *fgc) GetBranchRevision(ctx context.Context, instance, project, branch string) (string, error) {
 	return "abc", nil
 }
 
-func (f *fgc) Account(instance string) (*gerrit.AccountInfo, error) {
+func (f *fgc) Account(ctx context.Context, instance string) (*gerrit.AccountInfo, error) {
 	res, ok := f.instanceMap[instance]
 	if !ok {
 		return nil, errors.New("not exit")
@@ -171,6 +172,7 @@ func TestShouldTriggerJobs(t *testing.T) {
 	project := "private-cloud"
 	var lastUpdateTime = now.Add(-time.Hour)
 	c := &Controller{
+		ctx:         context.Background(),
 		configAgent: &config.Agent{},
 	}
 	presubmitTriggerRawString := "(?mi)/test\\s.*"
@@ -364,12 +366,13 @@ func TestHandleInRepoConfigError(t *testing.T) {
 				t.Fatalf("Failed to default and validate the gerrit config: %v", err)
 			}
 			controller := &Controller{
+				ctx:                         context.Background(),
 				inRepoConfigFailuresTracker: tc.startingFailures,
 				gc:                          gc,
 				config:                      func() *config.Config { return &config.Config{ProwConfig: config.ProwConfig{Gerrit: gerritConfig}} },
 			}
 
-			ret := controller.handleInRepoConfigError(tc.err, instanceName, change)
+			ret := controller.handleInRepoConfigError(context.Background(), tc.err, instanceName, change)
 			if ret != nil {
 				t.Errorf("handleInRepoConfigError returned with non nil error")
 			}
@@ -3221,6 +3224,7 @@ func TestTriggerJobs(t *testing.T) {
 			var gc fgc
 			gc.instanceMap = tc.instancesMap
 			c := &Controller{
+				ctx:                         context.Background(),
 				config:                      fca.Config,
 				prowJobClient:               fakeProwJobClient.ProwV1().ProwJobs("prowjobs"),
 				gc:                          &gc,
@@ -3229,7 +3233,7 @@ func TestTriggerJobs(t *testing.T) {
 				inRepoConfigFailuresTracker: make(map[string]bool),
 			}
 
-			err = c.triggerJobs(logrus.WithField("name", tc.name), tc.instance, tc.change)
+			err = c.triggerJobs(context.Background(), logrus.WithField("name", tc.name), tc.instance, tc.change)
 			if tc.wantError {
 				if err == nil {
 					t.Fatal("Expected error, got nil.")

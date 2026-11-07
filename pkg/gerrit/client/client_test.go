@@ -193,7 +193,7 @@ func TestQueryTermsReachGerritSeparated(t *testing.T) {
 		t.Fatalf("Failed to create client: %v", err)
 	}
 
-	if _, err := c.QueryChangesForProject(srv.URL, "myproject", time.Now(), 1); err != nil {
+	if _, err := c.QueryChangesForProject(context.Background(), srv.URL, "myproject", time.Now(), 1); err != nil {
 		t.Fatalf("Failed to query changes: %v", err)
 	}
 
@@ -302,7 +302,7 @@ func TestChangeExistErrs(t *testing.T) {
 					},
 				},
 			}
-			gotChanged, err := cl.ChangeExist("instance", "id")
+			gotChanged, err := cl.ChangeExist(context.Background(), "instance", "id")
 			gotErr := err != nil
 			if gotErr != tc.wantErr {
 				t.Errorf("%s: ChangeExist() err = %v; wantErr = %t", tc.name, gotErr, tc.wantErr)
@@ -390,7 +390,7 @@ func TestSetReviewLabelVotes(t *testing.T) {
 				"instance": {changeService: f},
 			}}
 
-			err := cl.SetReview("instance", "id", "revision", "message", tc.labels)
+			err := cl.SetReview(context.Background(), "instance", "id", "revision", "message", tc.labels)
 			if gotErr := err != nil; gotErr != tc.wantErr {
 				t.Fatalf("SetReview() err = %v; wantErr = %t", err, tc.wantErr)
 			}
@@ -1234,7 +1234,7 @@ func TestQueryChange(t *testing.T) {
 		}
 
 		testLastSync := LastSyncState{"foo": tc.lastUpdate, "baz": tc.lastUpdate}
-		changes := client.QueryChanges(testLastSync, 2)
+		changes := client.QueryChanges(context.Background(), testLastSync, 2)
 
 		revisions := map[string][]string{}
 		messages := map[string][]gerrit.ChangeMessageInfo{}

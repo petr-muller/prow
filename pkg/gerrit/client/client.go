@@ -314,6 +314,7 @@ func (c *Client) Authenticate(cookiefilePath, tokenPath string) {
 }
 
 func (c *Client) newInstanceHandler(instance string, projects map[string]*config.GerritQueryFilter) (*gerritInstanceHandler, error) {
+	// Handler construction may probe authentication before a request context is available.
 	gc, err := gerrit.NewClient(context.Background(), instance, &c.httpClient)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create gerrit client: %w", err)
@@ -360,11 +361,11 @@ func (c *Client) UpdateClients(instances map[string]map[string]*config.GerritQue
 
 // QueryChanges queries for all changes from all projects after lastUpdate time
 // returns an instance:changes map
-func (c *Client) QueryChanges(lastState LastSyncState, rateLimit int) map[string][]ChangeInfo {
+func (c *Client) QueryChanges(ctx context.Context, lastState LastSyncState, rateLimit int) map[string][]ChangeInfo {
 	result := map[string][]ChangeInfo{}
 	for _, h := range c.getAllHandlers() {
 		lastStateForInstance := lastState[h.instance]
-		changes := h.queryAllChanges(lastStateForInstance, rateLimit)
+		changes := h.queryAllChanges(ctx, lastStateForInstance, rateLimit)
 		if len(changes) == 0 {
 			continue
 		}
@@ -374,7 +375,7 @@ func (c *Client) QueryChanges(lastState LastSyncState, rateLimit int) map[string
 	return result
 }
 
-func (c *Client) QueryChangesForInstance(instance string, lastState LastSyncState, rateLimit int) []ChangeInfo {
+func (c *Client) QueryChangesForInstance(ctx context.Context, instance string, lastState LastSyncState, rateLimit int) []ChangeInfo {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -383,7 +384,7 @@ func (c *Client) QueryChangesForInstance(instance string, lastState LastSyncStat
 		return []ChangeInfo{}
 	}
 	lastStateForInstance := lastState[instance]
-	return h.queryAllChanges(lastStateForInstance, rateLimit)
+	return h.queryAllChanges(ctx, lastStateForInstance, rateLimit)
 }
 
 // QueryChangesForProject queries change for a project.
@@ -393,8 +394,8 @@ func (c *Client) QueryChangesForInstance(instance string, lastState LastSyncStat
 // whether all other projects have been queries or not yet. So caller of this
 // method is responsible for making sure that LastSyncState is up-to-date, if
 // the lastUpdate time is used by caller.
-func (c *Client) QueryChangesForProject(instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]ChangeInfo, error) {
-	log := logrus.WithContext(context.Background()).WithField("instance", instance)
+func (c *Client) QueryChangesForProject(ctx context.Context, instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]ChangeInfo, error) {
+	log := logrus.WithContext(ctx).WithField("instance", instance)
 
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
@@ -408,14 +409,14 @@ func (c *Client) QueryChangesForProject(instance, project string, lastUpdate tim
 		return []ChangeInfo{}, fmt.Errorf("project %q from instance %q not registered in gerrit handler, it might not have been initialized yet", project, instance)
 	}
 
-	changes, err := h.QueryChangesForProject(log, project, lastUpdate, rateLimit, append(queryStringsFromQueryFilter(queryFilters), additionalFilters...)...)
+	changes, err := h.QueryChangesForProject(ctx, log, project, lastUpdate, rateLimit, append(queryStringsFromQueryFilter(queryFilters), additionalFilters...)...)
 	if err != nil {
 		return []ChangeInfo{}, fmt.Errorf("failed to query changes for project %q of %q instance: %v", project, instance, err)
 	}
 	return changes, nil
 }
 
-func (c *Client) GetChange(instance, id string, additionalFields ...string) (*ChangeInfo, error) {
+func (c *Client) GetChange(ctx context.Context, instance, id string, additionalFields ...string) (*ChangeInfo, error) {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -423,7 +424,7 @@ func (c *Client) GetChange(instance, id string, additionalFields ...string) (*Ch
 		return nil, fmt.Errorf("not activated gerrit instance: %s", instance)
 	}
 
-	info, resp, err := h.changeService.GetChange(context.Background(), id, &gerrit.ChangeOptions{AdditionalFields: additionalFields})
+	info, resp, err := h.changeService.GetChange(ctx, id, &gerrit.ChangeOptions{AdditionalFields: additionalFields})
 
 	if err != nil {
 		return nil, fmt.Errorf("error getting current change: %w", responseBodyError(err, resp))
@@ -432,7 +433,7 @@ func (c *Client) GetChange(instance, id string, additionalFields ...string) (*Ch
 	return info, nil
 }
 
-func (c *Client) SubmitChange(instance, id string, wait bool) (*ChangeInfo, error) {
+func (c *Client) SubmitChange(ctx context.Context, instance, id string, wait bool) (*ChangeInfo, error) {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -440,7 +441,7 @@ func (c *Client) SubmitChange(instance, id string, wait bool) (*ChangeInfo, erro
 		return nil, fmt.Errorf("not activated gerrit instance: %s", instance)
 	}
 
-	info, resp, err := h.changeService.SubmitChange(context.Background(), id, &gerrit.SubmitInput{WaitForMerge: wait})
+	info, resp, err := h.changeService.SubmitChange(ctx, id, &gerrit.SubmitInput{WaitForMerge: wait})
 
 	if err != nil {
 		return nil, fmt.Errorf("error submitting current change: %w", responseBodyError(err, resp))
@@ -449,7 +450,7 @@ func (c *Client) SubmitChange(instance, id string, wait bool) (*ChangeInfo, erro
 	return info, nil
 }
 
-func (c *Client) ChangeExist(instance, id string) (bool, error) {
+func (c *Client) ChangeExist(ctx context.Context, instance, id string) (bool, error) {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -457,7 +458,7 @@ func (c *Client) ChangeExist(instance, id string) (bool, error) {
 		return false, fmt.Errorf("not activated gerrit instance: %s", instance)
 	}
 
-	_, resp, err := h.changeService.GetChange(context.Background(), id, nil)
+	_, resp, err := h.changeService.GetChange(ctx, id, nil)
 
 	if err != nil {
 		if resp != nil && resp.StatusCode == http.StatusNotFound {
@@ -480,7 +481,7 @@ func responseBodyError(err error, resp *gerrit.Response) error {
 }
 
 // SetReview writes a review comment base on the change id + revision
-func (c *Client) SetReview(instance, id, revision, message string, labels map[string]string) error {
+func (c *Client) SetReview(ctx context.Context, instance, id, revision, message string, labels map[string]string) error {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -502,7 +503,7 @@ func (c *Client) SetReview(instance, id, revision, message string, labels map[st
 		}
 	}
 
-	_, resp, err := h.changeService.SetReview(context.Background(), id, revision, &gerrit.ReviewInput{Message: message, Labels: votes})
+	_, resp, err := h.changeService.SetReview(ctx, id, revision, &gerrit.ReviewInput{Message: message, Labels: votes})
 
 	if err != nil {
 		return fmt.Errorf("cannot comment to gerrit: %w", responseBodyError(err, resp))
@@ -512,7 +513,7 @@ func (c *Client) SetReview(instance, id, revision, message string, labels map[st
 }
 
 // GetBranchRevision returns SHA of HEAD of a branch
-func (c *Client) GetBranchRevision(instance, project, branch string) (string, error) {
+func (c *Client) GetBranchRevision(ctx context.Context, instance, project, branch string) (string, error) {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -520,7 +521,7 @@ func (c *Client) GetBranchRevision(instance, project, branch string) (string, er
 		return "", fmt.Errorf("not activated gerrit instance: %s", instance)
 	}
 
-	res, resp, err := h.projectService.GetBranch(context.Background(), project, branch)
+	res, resp, err := h.projectService.GetBranch(ctx, project, branch)
 
 	if err != nil {
 		return "", responseBodyError(err, resp)
@@ -530,7 +531,7 @@ func (c *Client) GetBranchRevision(instance, project, branch string) (string, er
 }
 
 // Account returns gerrit account for the given instance
-func (c *Client) Account(instance string) (*gerrit.AccountInfo, error) {
+func (c *Client) Account(ctx context.Context, instance string) (*gerrit.AccountInfo, error) {
 	c.lock.RLock()
 	existing, ok := c.accounts[instance]
 	c.lock.RUnlock()
@@ -551,7 +552,7 @@ func (c *Client) Account(instance string) (*gerrit.AccountInfo, error) {
 		return nil, errors.New("no handlers found")
 	}
 
-	self, resp, err := handler.accountService.GetAccount(context.Background(), "self")
+	self, resp, err := handler.accountService.GetAccount(ctx, "self")
 	if err != nil {
 		return nil, fmt.Errorf("GetAccount() failed with new authentication: %w", responseBodyError(err, resp))
 
@@ -560,7 +561,7 @@ func (c *Client) Account(instance string) (*gerrit.AccountInfo, error) {
 	return c.accounts[instance], nil
 }
 
-func (c *Client) GetMergeableInfo(instance, changeID, revisionID string) (*gerrit.MergeableInfo, error) {
+func (c *Client) GetMergeableInfo(ctx context.Context, instance, changeID, revisionID string) (*gerrit.MergeableInfo, error) {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -568,7 +569,7 @@ func (c *Client) GetMergeableInfo(instance, changeID, revisionID string) (*gerri
 		return nil, fmt.Errorf("not activated Gerrit instance: %s", instance)
 	}
 
-	mergeableInfo, resp, err := h.revisionService.GetMergeable(context.Background(), changeID, revisionID, nil)
+	mergeableInfo, resp, err := h.revisionService.GetMergeable(ctx, changeID, revisionID, nil)
 
 	if err != nil {
 		return nil, responseBodyError(err, resp)
@@ -578,7 +579,7 @@ func (c *Client) GetMergeableInfo(instance, changeID, revisionID string) (*gerri
 
 // private handler implementation details
 
-func (h *gerritInstanceHandler) queryAllChanges(lastState map[string]time.Time, rateLimit int) []gerrit.ChangeInfo {
+func (h *gerritInstanceHandler) queryAllChanges(ctx context.Context, lastState map[string]time.Time, rateLimit int) []gerrit.ChangeInfo {
 	result := []gerrit.ChangeInfo{}
 	timeNow := time.Now()
 	for project, filters := range h.projects {
@@ -589,7 +590,7 @@ func (h *gerritInstanceHandler) queryAllChanges(lastState map[string]time.Time, 
 			log.WithField("now", timeNow).Warn("lastState not found, defaulting to now")
 		}
 		// Ignore the error, it is already logged and we want to continue on to other projects.
-		changes, _ := h.QueryChangesForProject(log, project, lastUpdate, rateLimit, queryStringsFromQueryFilter(filters)...)
+		changes, _ := h.QueryChangesForProject(ctx, log, project, lastUpdate, rateLimit, queryStringsFromQueryFilter(filters)...)
 		result = append(result, changes...)
 	}
 
@@ -600,9 +601,9 @@ func parseStamp(value gerrit.Timestamp) time.Time {
 	return value.Time
 }
 
-func (h *gerritInstanceHandler) injectPatchsetMessages(change *gerrit.ChangeInfo) error {
+func (h *gerritInstanceHandler) injectPatchsetMessages(ctx context.Context, change *gerrit.ChangeInfo) error {
 
-	out, _, err := h.changeService.ListChangeComments(context.Background(), change.ID)
+	out, _, err := h.changeService.ListChangeComments(ctx, change.ID)
 
 	if err != nil {
 		return err
@@ -655,8 +656,8 @@ func queryStringsFromQueryFilter(filters *config.GerritQueryFilter) []string {
 	return res
 }
 
-func (h *gerritInstanceHandler) QueryChangesForProject(log logrus.FieldLogger, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
-	changes, err := h.queryChangesForProjectWithoutMetrics(log, project, lastUpdate, rateLimit, additionalFilters...)
+func (h *gerritInstanceHandler) QueryChangesForProject(ctx context.Context, log logrus.FieldLogger, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
+	changes, err := h.queryChangesForProjectWithoutMetrics(ctx, log, project, lastUpdate, rateLimit, additionalFilters...)
 	if err != nil {
 		clientMetrics.queryResults.WithLabelValues(h.instance, project, ResultError).Inc()
 		log.WithError(err).WithFields(logrus.Fields{
@@ -692,7 +693,7 @@ func (d *deduper) dedupeIntoResult(ci gerrit.ChangeInfo) {
 	d.result = append(d.result, ci)
 }
 
-func (h *gerritInstanceHandler) queryChangesForProjectWithoutMetrics(log logrus.FieldLogger, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
+func (h *gerritInstanceHandler) queryChangesForProjectWithoutMetrics(ctx context.Context, log logrus.FieldLogger, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error) {
 	var opt gerrit.QueryChangeOptions
 	// Gerrit query terms are separated by whitespace. go-gerrit percent-encodes
 	// a literal "+", so it can no longer be used as the separator.
@@ -718,7 +719,7 @@ func (h *gerritInstanceHandler) queryChangesForProjectWithoutMetrics(log logrus.
 		// The change output is sorted by the last update time, most recently updated to oldest updated.
 		// Gerrit API docs: https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#list-changes
 
-		changes, resp, err := h.changeService.QueryChanges(context.Background(), &opt)
+		changes, resp, err := h.changeService.QueryChanges(ctx, &opt)
 
 		if err != nil {
 			// should not happen? Let next sync loop catch up
@@ -772,7 +773,7 @@ func (h *gerritInstanceHandler) queryChangesForProjectWithoutMetrics(log logrus.
 
 				created := parseStamp(rev.Created)
 				log := log.WithField("created", created)
-				if err := h.injectPatchsetMessages(&change); err != nil {
+				if err := h.injectPatchsetMessages(ctx, &change); err != nil {
 					log.WithError(err).Error("Failed to inject patchset messages")
 				}
 				changeMessages := change.Messages
@@ -832,7 +833,7 @@ func ChangedFilesProvider(changeInfo *ChangeInfo) config.ChangedFilesProvider {
 
 // HasRelatedChanges determines if the specified change is part of a chain.
 // In other words, it determines if this change depends on any other changes or if any other changes depend on this change.
-func (c *Client) HasRelatedChanges(instance, id, revision string) (bool, error) {
+func (c *Client) HasRelatedChanges(ctx context.Context, instance, id, revision string) (bool, error) {
 	c.lock.RLock()
 	h, ok := c.handlers[instance]
 	c.lock.RUnlock()
@@ -840,7 +841,7 @@ func (c *Client) HasRelatedChanges(instance, id, revision string) (bool, error) 
 		return false, fmt.Errorf("not activated gerrit instance: %s", instance)
 	}
 
-	info, resp, err := h.changeService.GetRelatedChanges(context.Background(), id, revision)
+	info, resp, err := h.changeService.GetRelatedChanges(ctx, id, revision)
 
 	if err != nil {
 		return false, fmt.Errorf("error getting related changes: %w", responseBodyError(err, resp))

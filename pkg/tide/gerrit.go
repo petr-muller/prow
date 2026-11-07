@@ -86,11 +86,11 @@ func (gcc *gerritContextChecker) MissingRequiredContexts([]string) []string {
 }
 
 type gerritClient interface {
-	QueryChangesForProject(instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error)
-	GetChange(instance, id string, additionalFields ...string) (*gerrit.ChangeInfo, error)
-	GetBranchRevision(instance, project, branch string) (string, error)
-	SubmitChange(instance, id string, wait bool) (*gerrit.ChangeInfo, error)
-	SetReview(instance, id, revision, message string, _ map[string]string) error
+	QueryChangesForProject(ctx context.Context, instance, project string, lastUpdate time.Time, rateLimit int, additionalFilters ...string) ([]gerrit.ChangeInfo, error)
+	GetChange(ctx context.Context, instance, id string, additionalFields ...string) (*gerrit.ChangeInfo, error)
+	GetBranchRevision(ctx context.Context, instance, project, branch string) (string, error)
+	SubmitChange(ctx context.Context, instance, id string, wait bool) (*gerrit.ChangeInfo, error)
+	SetReview(ctx context.Context, instance, id, revision, message string, _ map[string]string) error
 }
 
 // NewController makes a Controller out of the given clients.
@@ -137,7 +137,7 @@ func NewGerritController(
 		}
 	}
 
-	provider := newGerritProvider(logger, cfgAgent.Config, mgr.GetClient(), ircg, cookieFilePath, "", maxQPS, maxBurst)
+	provider := newGerritProvider(ctx, logger, cfgAgent.Config, mgr.GetClient(), ircg, cookieFilePath, "", maxQPS, maxBurst)
 	syncCtrl, err := newSyncController(ctx, logger, mgr, provider, cfgAgent.Config, gc, hist, false, statusUpdate)
 	if err != nil {
 		return nil, err
@@ -153,6 +153,7 @@ var _ provider = (*GerritProvider)(nil)
 //
 // Tide Controller should only use GerritProvider for communicating with Gerrit.
 type GerritProvider struct {
+	ctx         context.Context
 	cfg         config.Getter
 	gc          gerritClient
 	pjclientset ctrlruntimeclient.Client
@@ -165,6 +166,7 @@ type GerritProvider struct {
 }
 
 func newGerritProvider(
+	ctx context.Context,
 	logger *logrus.Entry,
 	cfg config.Getter,
 	pjclientset ctrlruntimeclient.Client,
@@ -183,6 +185,7 @@ func newGerritProvider(
 	gerritClient.ApplyGlobalConfig(orgRepoConfigGetter, nil, cookiefilePath, tokenPathOverride, nil)
 
 	return &GerritProvider{
+		ctx:                ctx,
 		logger:             logger,
 		cfg:                cfg,
 		pjclientset:        pjclientset,
@@ -216,7 +219,7 @@ func (p *GerritProvider) Query() (map[string]CodeReviewCommon, error) {
 				optInByDefault = projFilter.OptInByDefault
 			}
 			go func(projName string, optInByDefault bool) {
-				changes, err := p.gc.QueryChangesForProject(instance, projName, lastUpdate, p.cfg().Gerrit.RateLimit, gerritQueryParam(optInByDefault))
+				changes, err := p.gc.QueryChangesForProject(p.ctx, instance, projName, lastUpdate, p.cfg().Gerrit.RateLimit, gerritQueryParam(optInByDefault))
 				if err != nil {
 					p.logger.WithFields(logrus.Fields{"instance": instance, "project": projName}).WithError(err).Warn("Querying gerrit project for changes.")
 					errChan <- fmt.Errorf("failed querying project '%s' from instance '%s': %v", projName, instance, err)
@@ -270,7 +273,7 @@ func (p *GerritProvider) isAllowedToMerge(crc *CodeReviewCommon) (string, error)
 
 // GetRef gets the latest revision from org/repo/branch.
 func (p *GerritProvider) GetRef(org, repo, ref string) (string, error) {
-	return p.gc.GetBranchRevision(org, repo, ref)
+	return p.gc.GetBranchRevision(p.ctx, org, repo, ref)
 }
 
 // headContexts gets the status contexts for the commit with OID ==
@@ -327,7 +330,7 @@ func (p *GerritProvider) mergePRs(sp subpool, prs []CodeReviewCommon, _ *threadS
 	for _, pr := range prs {
 		logger := logger.WithField("id", pr.Gerrit.ID)
 		logger.Info("Submitting change.")
-		_, err := p.gc.SubmitChange(sp.org, pr.Gerrit.ID, true)
+		_, err := p.gc.SubmitChange(p.ctx, sp.org, pr.Gerrit.ID, true)
 		if err != nil {
 			errs = append(errs, fmt.Errorf("failed submitting change '%s' from org '%s': %v", sp.org, pr.Gerrit.ID, err))
 		} else {
@@ -341,7 +344,7 @@ func (p *GerritProvider) mergePRs(sp subpool, prs []CodeReviewCommon, _ *threadS
 		// the merge was based on batch testing.
 		if isBatch && err != nil {
 			msg := fmt.Sprintf("The Tide batch containing current change passed all required prowjobs, so this submission was performed by Tide. See %s/tide-history for record", p.cfg().Gerrit.DeckURL)
-			if err := p.gc.SetReview(sp.org, pr.Gerrit.ID, pr.Gerrit.CurrentRevision, msg, nil); err != nil {
+			if err := p.gc.SetReview(p.ctx, sp.org, pr.Gerrit.ID, pr.Gerrit.CurrentRevision, msg, nil); err != nil {
 				logger.WithError(err).Warn("Failed commenting after batch submission.")
 			}
 		}
@@ -406,7 +409,7 @@ func (p *GerritProvider) GetChangedFiles(org, repo string, number int) ([]string
 	// what we want, "CURRENT_REVISION" is required for "CURRENT_FILES".
 	// according to
 	// https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#list-changes.
-	change, err := p.gc.GetChange(org, strconv.Itoa(number), "CURRENT_FILES", "CURRENT_REVISION")
+	change, err := p.gc.GetChange(p.ctx, org, strconv.Itoa(number), "CURRENT_FILES", "CURRENT_REVISION")
 	if err != nil {
 		return nil, fmt.Errorf("failed get change: %v", err)
 	}

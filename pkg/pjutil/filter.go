@@ -208,6 +208,17 @@ func (nf *AggregateFilter) Name() string {
 
 // FilterPresubmits determines which presubmits should run by evaluating the user-provided filter.
 func FilterPresubmits(filter Filter, changes config.ChangedFilesProvider, branch string, presubmits []config.Presubmit, logger logrus.FieldLogger) ([]config.Presubmit, error) {
+	// Cache failures as well as successes, without fetching changes until a job needs them.
+	var changesFetched bool
+	var changedFiles []string
+	var changesErr error
+	cachedChanges := func() ([]string, error) {
+		if !changesFetched {
+			changedFiles, changesErr = changes()
+			changesFetched = true
+		}
+		return changedFiles, changesErr
+	}
 
 	var toTrigger []config.Presubmit
 	var namesToTrigger []string
@@ -218,9 +229,13 @@ func FilterPresubmits(filter Filter, changes config.ChangedFilesProvider, branch
 			noMatch++
 			continue
 		}
-		shouldRun, err := presubmit.ShouldRun(branch, changes, forced, defaults)
+		shouldRun, err := presubmit.ShouldRun(branch, cachedChanges, forced, defaults)
 		if err != nil {
-			return nil, fmt.Errorf("%s: should run: %w", presubmit.Name, err)
+			if changesErr == nil {
+				return nil, fmt.Errorf("%s: should run: %w", presubmit.Name, err)
+			}
+			logger.WithField("presubmit", presubmit.Name).WithError(changesErr).Warn("Cannot determine changed files; running presubmit conservatively.")
+			shouldRun = true
 		}
 		if !shouldRun {
 			shouldnotRun++

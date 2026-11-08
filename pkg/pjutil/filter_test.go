@@ -335,7 +335,7 @@ func TestFilterPresubmits(t *testing.T) {
 			expectErr: false,
 		},
 		{
-			name: "error detecting if something should run, nothing to run or skip",
+			name: "run_if_changed falls back to running when changes cannot be fetched",
 			filter: &ArbitraryFilter{
 				override: func(p config.Presubmit) (shouldRun bool, forcedToRun bool, defaultBehavior bool) {
 					return true, false, false
@@ -349,12 +349,16 @@ func TestFilterPresubmits(t *testing.T) {
 				JobBase:  config.JobBase{Name: "ignored"},
 				Reporter: config.Reporter{Context: "second"},
 			}},
-			changesError:      true,
-			expectedToTrigger: nil,
-			expectErr:         true,
+			changesError: true,
+			expectedToTrigger: []config.Presubmit{{
+				JobBase:             config.JobBase{Name: "errors"},
+				Reporter:            config.Reporter{Context: "first"},
+				RegexpChangeMatcher: config.RegexpChangeMatcher{RunIfChanged: "oopsie"},
+			}},
+			expectErr: false,
 		},
 		{
-			name: "error detecting if something should run, nothing to skip",
+			name: "skip_if_only_changed falls back to running when changes cannot be fetched",
 			filter: &ArbitraryFilter{
 				override: func(p config.Presubmit) (shouldRun bool, forcedToRun bool, defaultBehavior bool) {
 					return true, false, false
@@ -368,9 +372,13 @@ func TestFilterPresubmits(t *testing.T) {
 				JobBase:  config.JobBase{Name: "ignored"},
 				Reporter: config.Reporter{Context: "second"},
 			}},
-			changesError:      true,
-			expectedToTrigger: nil,
-			expectErr:         true,
+			changesError: true,
+			expectedToTrigger: []config.Presubmit{{
+				JobBase:             config.JobBase{Name: "errors"},
+				Reporter:            config.Reporter{Context: "first"},
+				RegexpChangeMatcher: config.RegexpChangeMatcher{SkipIfOnlyChanged: "oopsie"},
+			}},
+			expectErr: false,
 		},
 		{
 			name: "some things match and are forced to run, nothing to skip",
@@ -468,6 +476,83 @@ func TestFilterPresubmits(t *testing.T) {
 			}
 			if !reflect.DeepEqual(actualToTrigger, testCase.expectedToTrigger) {
 				t.Errorf("%s: incorrect set of presubmits to skip: %s", testCase.name, diff.Diff(actualToTrigger, testCase.expectedToTrigger))
+			}
+		})
+	}
+}
+
+func TestFilterPresubmitsChangedFiles(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		changes       []string
+		changesErr    error
+		wantTriggered []string
+	}{
+		{
+			name:          "fetch failure runs both conditional presubmits and continues evaluation",
+			changesErr:    errors.New("Sorry, this diff is taking too long to generate"),
+			wantTriggered: []string{"run-if-changed", "skip-if-only-changed", "always"},
+		},
+		{
+			name:          "nonmatching files exclude run_if_changed and documentation excludes skip_if_only_changed",
+			changes:       []string{"docs/readme.md"},
+			wantTriggered: []string{"always"},
+		},
+		{
+			name:          "empty changes are cached too",
+			wantTriggered: []string{"always"},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			presubmits := []config.Presubmit{
+				{JobBase: config.JobBase{Name: "run-if-changed"}, RegexpChangeMatcher: config.RegexpChangeMatcher{RunIfChanged: "^src/"}},
+				{JobBase: config.JobBase{Name: "skip-if-only-changed"}, RegexpChangeMatcher: config.RegexpChangeMatcher{SkipIfOnlyChanged: "^docs/"}},
+				{JobBase: config.JobBase{Name: "always"}, AlwaysRun: true},
+			}
+			if err := config.SetPresubmitRegexes(presubmits); err != nil {
+				t.Fatal(err)
+			}
+			calls := 0
+			changes := func() ([]string, error) {
+				calls++
+				return tc.changes, tc.changesErr
+			}
+			triggered, err := FilterPresubmits(NewTestAllFilter(), changes, "main", presubmits, logrus.New())
+			if err != nil {
+				t.Fatal(err)
+			}
+			var names []string
+			for _, presubmit := range triggered {
+				names = append(names, presubmit.Name)
+			}
+			if diff := cmp.Diff(tc.wantTriggered, names); diff != "" {
+				t.Errorf("triggered presubmits mismatch (-want +got):\n%s", diff)
+			}
+			if calls != 1 {
+				t.Errorf("changed files provider called %d times, want 1", calls)
+			}
+		})
+	}
+}
+
+func TestFilterPresubmitsChangedFilesLazy(t *testing.T) {
+	for _, filter := range []Filter{
+		NewTestAllFilter(),
+		&ArbitraryFilter{override: func(config.Presubmit) (bool, bool, bool) { return false, false, false }},
+		&ArbitraryFilter{override: func(config.Presubmit) (bool, bool, bool) { return true, true, true }},
+	} {
+		t.Run(filter.Name(), func(t *testing.T) {
+			presubmits := []config.Presubmit{{JobBase: config.JobBase{Name: "always"}, AlwaysRun: true}}
+			if _, ok := filter.(*ArbitraryFilter); ok {
+				presubmits[0].AlwaysRun = false
+				presubmits[0].RunIfChanged = "^src/"
+			}
+			changes := func() ([]string, error) {
+				t.Error("changed files provider called unnecessarily")
+				return nil, errors.New("unexpected call")
+			}
+			if _, err := FilterPresubmits(filter, changes, "main", presubmits, logrus.New()); err != nil {
+				t.Fatal(err)
 			}
 		})
 	}

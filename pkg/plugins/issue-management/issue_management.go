@@ -147,7 +147,7 @@ func parseTransferCommand(gc githubClient, e github.GenericCommentEvent) (string
 		return "", nil
 	}
 
-	if len(matches) != 1 || len(matches[0]) != 2 || len(matches[0][1]) == 0 {
+	if len(matches) != 1 || len(matches[0]) != 2 || len(strings.Fields(matches[0][1])) != 1 {
 		return "", gc.CreateComment(
 			e.Repo.Owner.Login, e.Repo.Name, e.Number,
 			plugins.FormatResponseRaw(e.Body, e.HTMLURL, e.User.Login, "`/transfer-issue` must only be used once and with a single destination repo."),

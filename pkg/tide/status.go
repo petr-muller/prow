@@ -730,7 +730,15 @@ func (sc *statusController) search() []CodeReviewCommon {
 			shards.add(resultLabel)
 
 			for _, pr := range result {
-				prs = append(prs, *CodeReviewCommonFromPullRequest(&pr))
+				crc := CodeReviewCommonFromPullRequest(&pr)
+				// The search index can lag behind a merge and still match "state:open".
+				// Filter after updating LatestPR so merged results still advance the watermark.
+				if pr.Merged {
+					sc.logger.WithFields(crc.logFields()).Warn("Search returned an already merged PR, ignoring it.")
+					tideMetrics.searchMerged.WithLabelValues(crc.Org, crc.Repo).Inc()
+					continue
+				}
+				prs = append(prs, *crc)
 			}
 			errs = append(errs, err)
 			return nil

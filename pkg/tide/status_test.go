@@ -23,10 +23,12 @@ import (
 	"sort"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-test/deep"
 	"github.com/google/go-cmp/cmp"
 	"github.com/google/go-cmp/cmp/cmpopts"
+	promtestutil "github.com/prometheus/client_golang/prometheus/testutil"
 	githubql "github.com/shurcooL/githubv4"
 	"github.com/sirupsen/logrus"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -2327,6 +2329,63 @@ func TestNewBaseSHAGetter(t *testing.T) {
 				t.Errorf("baseSHA in the map (%q) does not match expected(%q)", val, tc.expectedSHA)
 			}
 		})
+	}
+}
+
+func TestStatusControllerSearchIgnoresMergedPRs(t *testing.T) {
+	const org, repo = "status-search-org", "repo"
+	open := testPR(org, repo, "A", 1, githubql.MergeableStateMergeable)
+	merged := testPR(org, repo, "A", 2, githubql.MergeableStateMergeable)
+	merged.Merged = true
+	merged.HeadRefOID = "merged-SHA"
+	merged.Commits.Nodes[0].Commit.OID = merged.HeadRefOID
+	open.UpdatedAt = githubql.DateTime{Time: time.Date(2026, time.January, 1, 0, 0, 0, 0, time.UTC)}
+	merged.UpdatedAt = githubql.DateTime{Time: open.UpdatedAt.Add(time.Minute)}
+	ghc := &fgc{prs: map[string][]PullRequest{"": {*open, *merged}}}
+	cfg := func() *config.Config {
+		return &config.Config{ProwConfig: config.ProwConfig{Tide: config.Tide{
+			TideGitHubConfig: config.TideGitHubConfig{Queries: config.TideQueries{{Orgs: []string{org}, Labels: []string{"ready"}}}}}}}
+	}
+	ctx := context.Background()
+	sc, err := newStatusController(
+		ctx,
+		logrus.WithField("test", t.Name()),
+		ghc,
+		newFakeManager(t, ctx),
+		nil,
+		cfg,
+		nil,
+		"",
+		newMergeChecker(cfg, ghc),
+		false,
+		&statusUpdate{
+			dontUpdateStatus: &threadSafePRSet{},
+			newPoolPending:   make(chan bool),
+		},
+	)
+	if err != nil {
+		t.Fatalf("failed to construct status controller: %v", err)
+	}
+
+	counter := tideMetrics.searchMerged.WithLabelValues(org, repo)
+	before := promtestutil.ToFloat64(counter)
+	prs := sc.search()
+	if diff := cmp.Diff([]CodeReviewCommon{*CodeReviewCommonFromPullRequest(open)}, prs); diff != "" {
+		t.Errorf("PRs passed to setStatuses differ (-want +got): %s", diff)
+	}
+	if got := promtestutil.ToFloat64(counter) - before; got != 1 {
+		t.Errorf("expected the merged PR to be counted once, got %v", got)
+	}
+	if got, want := sc.storedState[""].LatestPR.Time, merged.UpdatedAt.Add(-30*time.Second); !got.Equal(want) {
+		t.Errorf("LatestPR = %v, want %v", got, want)
+	}
+
+	sc.setStatuses(prs, nil, blockers.Blockers{}, nil, nil)
+	if _, ok := ghc.statuses[org+"/"+repo+"/SHA/"+statusContext]; !ok {
+		t.Error("open PR did not receive a status")
+	}
+	if _, ok := ghc.statuses[org+"/"+repo+"/merged-SHA/"+statusContext]; ok {
+		t.Error("merged PR received a status")
 	}
 }
 

@@ -32,7 +32,6 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	"k8s.io/apimachinery/pkg/types"
 	"k8s.io/apimachinery/pkg/util/sets"
-	"k8s.io/apimachinery/pkg/util/wait"
 	authorizationv1 "k8s.io/client-go/kubernetes/typed/authorization/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/utils/clock"
@@ -648,23 +647,6 @@ func (r *reconciler) syncPendingJob(ctx context.Context, pj *prowv1.ProwJob) (*r
 		return nil, fmt.Errorf("patching prowjob: %w", err)
 	}
 
-	// If the ProwJob state has changed, we must ensure that the update reaches the cache before
-	// processing the key again. Without this we might accidentally replace intentionally deleted pods
-	// or otherwise incorrectly react to stale ProwJob state.
-	state := pj.Status.State
-	if prevPJ.Status.State == state {
-		return nil, nil
-	}
-	nn := types.NamespacedName{Namespace: pj.Namespace, Name: pj.Name}
-	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
-		if err := r.pjClient.Get(ctx, nn, pj); err != nil {
-			return false, fmt.Errorf("failed to get prowjob: %w", err)
-		}
-		return pj.Status.State == state, nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to wait for cached prowjob %s to get into state %s: %w", nn.String(), state, err)
-	}
-
 	return nil, nil
 }
 
@@ -764,23 +746,6 @@ func (r *reconciler) syncTriggeredJob(ctx context.Context, pj *prowv1.ProwJob) (
 		return nil, fmt.Errorf("patch prowjob: %w", err)
 	}
 
-	// If the job has either MaxConcurrency or JobQueueName configured, we must block here until we observe the state transition in our cache,
-	// otherwise subequent reconciliations for a different run of the same job might incorrectly conclude that they
-	// can run because that decision is made based on the data in the cache.
-	if pj.Spec.MaxConcurrency == 0 && pj.Spec.JobQueueName == "" {
-		return nil, nil
-	}
-	nn := types.NamespacedName{Namespace: pj.Namespace, Name: pj.Name}
-	state := pj.Status.State
-	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 2*time.Second, true, func(ctx context.Context) (bool, error) {
-		if err := r.pjClient.Get(ctx, nn, pj); err != nil {
-			return false, fmt.Errorf("failed to get prowjob: %w", err)
-		}
-		return pj.Status.State == state, nil
-	}); err != nil {
-		return nil, fmt.Errorf("failed to wait for cached prowjob %s to get into state %s: %w", nn.String(), state, err)
-	}
-
 	return nil, nil
 }
 
@@ -875,20 +840,6 @@ func (r *reconciler) startPod(ctx context.Context, pj *prowv1.ProwJob) (string, 
 	r.log.WithFields(pjutil.ProwJobFields(pj)).Debug("Create Pod.")
 	if err != nil {
 		return "", "", fmt.Errorf("create pod %s in cluster %s: %w", podName.String(), pj.ClusterAlias(), err)
-	}
-
-	// We must block until we see the pod, otherwise a new reconciliation may be triggered that tries to create
-	// the pod because its not in the cache yet, errors with IsAlreadyExists and sets the prowjob to failed
-	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 10*time.Second, true, func(ctx context.Context) (bool, error) {
-		if err := client.Get(ctx, podName, pod); err != nil {
-			if kerrors.IsNotFound(err) {
-				return false, nil
-			}
-			return false, fmt.Errorf("failed to get pod %s in cluster %s: %w", podName.String(), pj.ClusterAlias(), err)
-		}
-		return true, nil
-	}); err != nil {
-		return "", "", fmt.Errorf("failed waiting for new pod %s in cluster %s  appear in cache: %w", podName.String(), pj.ClusterAlias(), err)
 	}
 
 	return buildID, pod.Name, nil

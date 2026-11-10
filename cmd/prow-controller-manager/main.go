@@ -29,7 +29,9 @@ import (
 	"k8s.io/apimachinery/pkg/labels"
 	utilerrors "k8s.io/apimachinery/pkg/util/errors"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	ctrlruntimelog "sigs.k8s.io/controller-runtime/pkg/log"
 	"sigs.k8s.io/controller-runtime/pkg/log/zap"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
@@ -153,6 +155,9 @@ func main() {
 		logrus.WithError(err).Fatal("Error getting infrastructure cluster config.")
 	}
 	opts := manager.Options{
+		Client: ctrlruntimeclient.Options{
+			Cache: &ctrlruntimeclient.CacheOptions{EnableReadYourWritesConsistency: ptr.To(true)},
+		},
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
 				cfg().ProwJobNamespace: {},

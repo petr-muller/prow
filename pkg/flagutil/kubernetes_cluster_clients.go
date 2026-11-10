@@ -40,6 +40,7 @@ import (
 	corev1 "k8s.io/client-go/kubernetes/typed/core/v1"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/clientcmd"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/cluster"
@@ -366,6 +367,8 @@ func (o *KubernetesOptions) BuildClusters(dryRun bool, requiredTestPodVerbs []st
 		newOptions := cluster.Options{
 			Client: ctrlruntimeclient.Options{
 				DryRun: &dryRun,
+				// Dry-run writes never reach the cache.
+				Cache: &ctrlruntimeclient.CacheOptions{EnableReadYourWritesConsistency: ptr.To(!dryRun)},
 			},
 			Cache: cache.Options{
 				DefaultNamespaces: map[string]cache.Config{

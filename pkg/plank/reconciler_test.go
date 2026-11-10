@@ -393,22 +393,15 @@ func TestProwJobIndexer(t *testing.T) {
 	}
 }
 
-// TestMaxConcurrencyConsidersCacheStaleness verifies that the reconciliation considers the fact
-// that there is a delay between doing a change and observing it in the client for determining
-// if another copy of a given job may be started.
-// It:
-// * Creates two runs of the same job that has a MaxConcurrency: 1 setting
-// * Using a fake client that applies Patch operations with a delay but returns instantly
-// * Reconciles them in parallel
-// * Verifies that one of them gets a RequeueAfter: 1 second
-// * Verifies that after the other one returns, its state is set to Pending, i.E. it blocked until it observed the state transition it made
-// * Verifies that there is exactly one pod
-func TestMaxConcurrencyConsidersCacheStaleness(t *testing.T) {
+// TestMaxConcurrencySerializesWrites verifies that a second job in the same
+// concurrency group is requeued while the first job's state transition is in flight.
+// The client is responsible for making completed writes visible to subsequent reads.
+func TestMaxConcurrencySerializesWrites(t *testing.T) {
 	testConcurrency := func(pja, pjb *prowv1.ProwJob) func(*testing.T) {
 		return func(t *testing.T) {
 			t.Parallel()
 
-			ctx := context.Background()
+			ctx := t.Context()
 			cfg := func() *config.Config {
 				return &config.Config{ProwConfig: config.ProwConfig{Plank: config.Plank{
 					Controller: config.Controller{
@@ -428,9 +421,13 @@ func TestMaxConcurrencyConsidersCacheStaleness(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to setup fake manager: %v", err)
 			}
-			pjClient := &eventuallyConsistentClient{t: t, Client: fakeMgr.GetClient()}
+			patchStarted := make(chan struct{})
+			releasePatch := make(chan struct{})
+			release := sync.OnceFunc(func() { close(releasePatch) })
+			t.Cleanup(release)
+			pjClient := &blockingPatchClient{Client: fakeMgr.GetClient(), patchStarted: patchStarted, releasePatch: releasePatch}
 
-			r := newReconciler(context.Background(), pjClient, nil, cfg, nil, "")
+			r := newReconciler(ctx, pjClient, nil, cfg, nil, "")
 			r.buildClients = map[string]buildClient{pja.Spec.Cluster: {Client: fakectrlruntimeclient.NewClientBuilder().Build()}}
 
 			wg := &sync.WaitGroup{}
@@ -438,10 +435,12 @@ func TestMaxConcurrencyConsidersCacheStaleness(t *testing.T) {
 			// Give capacity of two so this doesn't stuck the test if we have a bug that results in two reconcile afters
 			gotReconcileAfter := make(chan struct{}, 2)
 
-			startAsyncReconcile := func(pjName string) {
+			startAsyncReconcile := func(pjName string) <-chan struct{} {
+				done := make(chan struct{})
 				go func() {
+					defer close(done)
 					defer wg.Done()
-					result, err := r.Reconcile(context.Background(), reconcile.Request{NamespacedName: types.NamespacedName{Name: pjName}})
+					result, err := r.Reconcile(ctx, reconcile.Request{NamespacedName: types.NamespacedName{Name: pjName}})
 					if err != nil {
 						t.Errorf("reconciliation of pj %s failed: %v", pjName, err)
 					}
@@ -450,16 +449,27 @@ func TestMaxConcurrencyConsidersCacheStaleness(t *testing.T) {
 						return
 					}
 					pj := &prowv1.ProwJob{}
-					if err := r.pjClient.Get(context.Background(), types.NamespacedName{Name: pjName}, pj); err != nil {
+					if err := r.pjClient.Get(ctx, types.NamespacedName{Name: pjName}, pj); err != nil {
 						t.Errorf("failed to get prowjob %s after reconciliation: %v", pjName, err)
 					}
 					if pj.Status.State != prowv1.PendingState {
-						t.Error("pj wasn't in pending state, reconciliation didn't wait the change to appear in the cache")
+						t.Error("pj wasn't in pending state after reconciliation")
 					}
 				}()
+				return done
 			}
 			startAsyncReconcile(pja.Name)
-			startAsyncReconcile(pjb.Name)
+			select {
+			case <-patchStarted:
+			case <-time.After(15 * time.Second):
+				t.Fatal("timed out waiting for first reconciliation to patch its prowjob")
+			}
+			select {
+			case <-startAsyncReconcile(pjb.Name):
+			case <-time.After(15 * time.Second):
+				t.Fatal("timed out waiting for second reconciliation to requeue")
+			}
+			release()
 
 			wg.Wait()
 			close(gotReconcileAfter)
@@ -508,36 +518,23 @@ func TestMaxConcurrencyConsidersCacheStaleness(t *testing.T) {
 	t.Run("queue level JobQueueCapacities", testConcurrency(pja, pjb))
 }
 
-// eventuallyConsistentClient executes patch and create  operations with a delay but instantly returns, before applying the change.
-// This simulates the behaviour of a caching client where we can observe our change only after a delay.
-type eventuallyConsistentClient struct {
-	t *testing.T
+type blockingPatchClient struct {
 	ctrlruntimeclient.Client
+	patchStarted chan<- struct{}
+	releasePatch <-chan struct{}
 }
 
-func (ecc *eventuallyConsistentClient) Patch(ctx context.Context, obj ctrlruntimeclient.Object, patch ctrlruntimeclient.Patch, opts ...ctrlruntimeclient.PatchOption) error {
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		if err := ecc.Client.Patch(ctx, obj, patch, opts...); err != nil {
-			ecc.t.Errorf("eventuallyConsistentClient failed to execute patch: %v", err)
-		}
-	}()
-
-	return nil
+func (c *blockingPatchClient) Patch(ctx context.Context, obj ctrlruntimeclient.Object, patch ctrlruntimeclient.Patch, opts ...ctrlruntimeclient.PatchOption) error {
+	close(c.patchStarted)
+	select {
+	case <-c.releasePatch:
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+	return c.Client.Patch(ctx, obj, patch, opts...)
 }
 
-func (ecc *eventuallyConsistentClient) Create(ctx context.Context, obj ctrlruntimeclient.Object, opts ...ctrlruntimeclient.CreateOption) error {
-	go func() {
-		time.Sleep(100 * time.Millisecond)
-		if err := ecc.Client.Create(ctx, obj, opts...); err != nil {
-			ecc.t.Errorf("eventuallyConsistentClient failed to execute create: %v", err)
-		}
-	}()
-
-	return nil
-}
-
-func TestStartPodBlocksUntilItHasThePodInCache(t *testing.T) {
+func TestStartPodCreatesPod(t *testing.T) {
 	t.Parallel()
 
 	ctx := context.Background()
@@ -552,13 +549,11 @@ func TestStartPodBlocksUntilItHasThePodInCache(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to setup fake manager: %v", err)
 	}
-	pjClient := &eventuallyConsistentClient{t: t, Client: fakeMgr.GetClient()}
-
 	r := &reconciler{
 		log: logrus.NewEntry(logrus.New()),
 		buildClients: map[string]buildClient{
 			"default": {
-				Client: pjClient,
+				Client: fakeMgr.GetClient(),
 			},
 		},
 		config: cfg,
@@ -575,7 +570,7 @@ func TestStartPodBlocksUntilItHasThePodInCache(t *testing.T) {
 		t.Fatalf("startPod: %v", err)
 	}
 	if err := r.buildClients["default"].Get(context.Background(), types.NamespacedName{Name: "name"}, &corev1.Pod{}); err != nil {
-		t.Errorf("couldn't get pod, this likely means startPod didn't block: %v", err)
+		t.Errorf("couldn't get created pod: %v", err)
 	}
 }
 

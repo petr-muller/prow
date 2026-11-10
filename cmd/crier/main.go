@@ -25,7 +25,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	"sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/prow/pkg/io"
@@ -182,6 +184,9 @@ func main() {
 		logrus.WithError(err).Fatal("Failed to get kubeconfig")
 	}
 	mgr, err := manager.New(restCfg, manager.Options{
+		Client: ctrlruntimeclient.Options{
+			Cache: &ctrlruntimeclient.CacheOptions{EnableReadYourWritesConsistency: ptr.To(true)},
+		},
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
 				cfg().ProwJobNamespace: {},

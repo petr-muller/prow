@@ -20,11 +20,9 @@ package criercommonlib
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/types"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/util/retry"
 
 	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
@@ -45,22 +43,6 @@ func updateReportState(ctx context.Context, pj *prowv1.ProwJob, log *logrus.Entr
 		return fmt.Errorf("failed to patch: %w", err)
 	}
 
-	// Block until the update is in the lister to make sure that events from another controller
-	// that also does reporting dont trigger another report because our lister doesn't yet contain
-	// the updated Status
-	name := types.NamespacedName{Namespace: pj.Namespace, Name: pj.Name}
-	if err := wait.PollUntilContextTimeout(ctx, 100*time.Millisecond, 10*time.Second, true, func(ctx context.Context) (bool, error) {
-		if err := pjclientset.Get(ctx, name, pj); err != nil {
-			return false, err
-		}
-		if pj.Status.PrevReportStates != nil &&
-			pj.Status.PrevReportStates[reporterName] == reportedState {
-			return true, nil
-		}
-		return false, nil
-	}); err != nil {
-		return fmt.Errorf("failed to wait for updated report status to be in lister: %w", err)
-	}
 	return nil
 }
 

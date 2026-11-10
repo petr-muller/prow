@@ -28,7 +28,9 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 	"sigs.k8s.io/controller-runtime/pkg/cache"
+	ctrlruntimeclient "sigs.k8s.io/controller-runtime/pkg/client"
 	"sigs.k8s.io/controller-runtime/pkg/manager"
 	metricsserver "sigs.k8s.io/controller-runtime/pkg/metrics/server"
 	"sigs.k8s.io/prow/pkg/config"
@@ -161,6 +163,9 @@ func main() {
 	// Do not activate leader election here, as we do not use the `mgr` to control the lifecylcle of our cotrollers,
 	// this would just be a no-op.
 	mgr, err := manager.New(kubeCfg, manager.Options{
+		Client: ctrlruntimeclient.Options{
+			Cache: &ctrlruntimeclient.CacheOptions{EnableReadYourWritesConsistency: ptr.To(true)},
+		},
 		Cache: cache.Options{
 			DefaultNamespaces: map[string]cache.Config{
 				cfg().ProwJobNamespace: {},

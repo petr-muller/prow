@@ -52,7 +52,7 @@ func handleAbort(prowJobClient prowv1.ProwJobInterface, cfg authCfgGetter, goa *
 		}
 		switch r.Method {
 		case http.MethodPost:
-			if pj.Status.State != prowapi.TriggeredState && pj.Status.State != prowapi.PendingState {
+			if pj.Status.State != prowapi.SchedulingState && pj.Status.State != prowapi.TriggeredState && pj.Status.State != prowapi.PendingState {
 				http.Error(w, fmt.Sprintf("Cannot abort job with state: %q.", pj.Status.State), http.StatusBadRequest)
 				l.Debug("Cannot abort job with state.")
 				return

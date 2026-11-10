@@ -48,6 +48,15 @@ func TestAbort(t *testing.T) {
 		httpMethod  string
 	}{
 		{
+			name:        "Abort on scheduling state",
+			login:       "authorized",
+			authorized:  []string{"authorized", "alsoauthorized"},
+			allowAnyone: false,
+			jobState:    prowapi.SchedulingState,
+			httpCode:    http.StatusOK,
+			httpMethod:  http.MethodPost,
+		},
+		{
 			name:        "Abort on triggered state",
 			login:       "authorized",
 			authorized:  []string{"authorized", "alsoauthorized"},
@@ -81,6 +90,15 @@ func TestAbort(t *testing.T) {
 			allowAnyone: false,
 			jobState:    prowapi.AbortedState,
 			httpCode:    http.StatusBadRequest,
+			httpMethod:  http.MethodPost,
+		},
+		{
+			name:        "User not authorized to abort scheduling job",
+			login:       "random-dude",
+			authorized:  []string{"authorized", "alsoauthorized"},
+			allowAnyone: false,
+			jobState:    prowapi.SchedulingState,
+			httpCode:    http.StatusUnauthorized,
 			httpMethod:  http.MethodPost,
 		},
 		{

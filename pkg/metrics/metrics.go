@@ -34,6 +34,20 @@ import (
 
 type CreateServer func(http.Handler) interrupts.ListenAndServer
 
+func init() {
+	// Dependency initialization installs the client-go adapters before we enable
+	// the opt-in metrics. Empty options keep the Kubernetes-default buckets.
+	ctrlruntimemetrics.RegisterRESTClientMetricsWithOptions(
+		ctrlruntimemetrics.RESTClientMetricsOptions{},
+		ctrlruntimemetrics.MetricRequestLatency,
+		ctrlruntimemetrics.MetricDNSResolutionLatency,
+		ctrlruntimemetrics.MetricRequestSize,
+		ctrlruntimemetrics.MetricResponseSize,
+		ctrlruntimemetrics.MetricRateLimiterLatency,
+		ctrlruntimemetrics.MetricRequestRetry,
+	)
+}
+
 // ExposeMetricsWithRegistry chooses whether to serve or push metrics for the service with the registry
 func ExposeMetricsWithRegistry(component string, pushGateway config.PushGateway, port int, reg prometheus.Gatherer, createServer CreateServer) {
 	if pushGateway.Endpoint != "" {

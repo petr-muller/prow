@@ -21,10 +21,15 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/prometheus/client_golang/prometheus/collectors"
+	"github.com/prometheus/common/expfmt"
+	"github.com/prometheus/common/model"
+	clientmetrics "k8s.io/client-go/tools/metrics"
 	ctrlruntimemetrics "sigs.k8s.io/controller-runtime/pkg/metrics"
 
 	"sigs.k8s.io/prow/pkg/config"
@@ -64,6 +69,61 @@ func TestExposeMetrics(t *testing.T) {
 	}
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("response status was not %d but %d", http.StatusOK, resp.StatusCode)
+	}
+}
+
+func TestExposeRESTClientMetrics(t *testing.T) {
+	ctx := t.Context()
+	u := url.URL{Host: "rest-client-metrics.example.com"}
+	clientmetrics.RequestLatency.Observe(ctx, "GET", u, 25*time.Millisecond)
+	clientmetrics.ResolverLatency.Observe(ctx, u.Host, 10*time.Millisecond)
+	clientmetrics.RequestSize.Observe(ctx, "GET", u.Host, 128)
+	clientmetrics.ResponseSize.Observe(ctx, "GET", u.Host, 256)
+	clientmetrics.RateLimiterLatency.Observe(ctx, "GET", u, 5*time.Millisecond)
+	clientmetrics.RequestRetry.IncrementRetry(ctx, "503", "GET", u.Host)
+	clientmetrics.RequestResult.Increment(ctx, "200", "GET", u.Host)
+
+	// Repeated endpoint setup must keep the metrics registered without duplicates.
+	for range 2 {
+		fls := fakeListenAndServer{ctx: ctx}
+		ExposeMetricsWithRegistry("test", config.PushGateway{}, flagutil.DefaultMetricsPort, nil, fls.CreateServer)
+		resp, err := http.Get(fls.server.URL + "/metrics")
+		if err != nil {
+			t.Fatalf("failed getting metrics: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Fatalf("response status was not %d but %d", http.StatusOK, resp.StatusCode)
+		}
+		parser := expfmt.NewTextParser(model.UTF8Validation)
+		families, err := parser.TextToMetricFamilies(resp.Body)
+		if err != nil {
+			t.Fatalf("failed parsing metrics: %v", err)
+		}
+		for _, name := range []string{
+			"rest_client_request_duration_seconds",
+			"rest_client_dns_resolution_duration_seconds",
+			"rest_client_request_size_bytes",
+			"rest_client_response_size_bytes",
+			"rest_client_rate_limiter_duration_seconds",
+			"rest_client_request_retries_total",
+			"rest_client_requests_total",
+		} {
+			family := families[name]
+			if family == nil || len(family.Metric) == 0 {
+				t.Errorf("scrape is missing observations for %s", name)
+				continue
+			}
+			for _, metric := range family.Metric {
+				if strings.HasSuffix(name, "_total") {
+					if metric.GetCounter().GetValue() < 1 {
+						t.Errorf("%s did not count the client-go observation", name)
+					}
+				} else if metric.GetHistogram().GetSampleCount() < 1 {
+					t.Errorf("%s did not record the client-go observation", name)
+				}
+			}
+		}
 	}
 }
 

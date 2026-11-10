@@ -73,6 +73,7 @@ const (
 // GetAllProwJobStates returns all possible job states.
 func GetAllProwJobStates() []ProwJobState {
 	return []ProwJobState{
+		SchedulingState,
 		TriggeredState,
 		PendingState,
 		SuccessState,

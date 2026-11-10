@@ -2064,6 +2064,46 @@ func TestReport(t *testing.T) {
 	}
 }
 
+func TestShouldReportPresubmitState(t *testing.T) {
+	tests := []struct {
+		state v1.ProwJobState
+		want  bool
+	}{
+		{state: v1.SchedulingState, want: false},
+		{state: v1.SuccessState, want: true},
+	}
+	for _, tc := range tests {
+		t.Run(string(tc.state), func(t *testing.T) {
+			pj := &v1.ProwJob{
+				ObjectMeta: metav1.ObjectMeta{
+					Name: "ci-foo",
+					Labels: map[string]string{
+						kube.GerritRevision:    "abc",
+						kube.ProwJobTypeLabel:  presubmit,
+						kube.GerritReportLabel: codeReview,
+					},
+					Annotations: map[string]string{
+						kube.GerritID:       "123-abc",
+						kube.GerritInstance: "gerrit",
+					},
+				},
+				Spec: v1.ProwJobSpec{
+					Job:    "ci-foo",
+					Type:   v1.PresubmitJob,
+					Report: true,
+				},
+				Status: v1.ProwJobStatus{State: tc.state},
+			}
+			reporter := &Client{
+				pjclientset: fakectrlruntimeclient.NewClientBuilder().WithRuntimeObjects(pj).Build(),
+			}
+			if got := reporter.ShouldReport(context.Background(), logrus.NewEntry(logrus.StandardLogger()), pj); got != tc.want {
+				t.Errorf("ShouldReport() = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestMultipleWorks(t *testing.T) {
 	samplePJ := v1.ProwJob{
 		ObjectMeta: metav1.ObjectMeta{
@@ -2230,6 +2270,27 @@ func TestJobReportFormats(t *testing.T) {
 	re := regexp.MustCompile(jobReportFormatLegacyRegex)
 	if !re.MatchString(serializedWithoutNewline) {
 		t.Fatalf("could not parse serialized job report line %q with regex %q", serializedWithoutNewline, jobReportFormatLegacyRegex)
+	}
+}
+
+func TestSchedulingJobReportRoundTrip(t *testing.T) {
+	pj := &v1.ProwJob{
+		Spec: v1.ProwJobSpec{Job: "ci-foo"},
+		Status: v1.ProwJobStatus{
+			State: v1.SchedulingState,
+			URL:   "https://example.com/ci-foo",
+		},
+	}
+	want := jobFromPJ(pj)
+	if want.Icon != hourglass {
+		t.Errorf("scheduling job icon = %q, want %q", want.Icon, hourglass)
+	}
+	var got Job
+	if err := deserialize(strings.TrimSuffix(want.serialize(), "\n"), &got); err != nil {
+		t.Fatalf("deserialize() failed: %v", err)
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("round-trip job = %+v, want %+v", got, want)
 	}
 }
 

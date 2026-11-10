@@ -94,11 +94,12 @@ const (
 
 var (
 	stateIcon = map[v1.ProwJobState]string{
-		v1.PendingState:   hourglass,
-		v1.TriggeredState: hourglass,
-		v1.SuccessState:   tick,
-		v1.FailureState:   cross,
-		v1.AbortedState:   prohibited,
+		v1.SchedulingState: hourglass,
+		v1.PendingState:    hourglass,
+		v1.TriggeredState:  hourglass,
+		v1.SuccessState:    tick,
+		v1.FailureState:    cross,
+		v1.AbortedState:    prohibited,
 	}
 )
 
@@ -176,7 +177,7 @@ func (c *Client) ShouldReport(ctx context.Context, log *logrus.Entry, pj *v1.Pro
 	ctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 	defer cancel()
 
-	if pj.Status.State == v1.TriggeredState || pj.Status.State == v1.PendingState {
+	if pj.Status.State == v1.SchedulingState || pj.Status.State == v1.TriggeredState || pj.Status.State == v1.PendingState {
 		// not done yet
 		log.Info("PJ not finished")
 		return false

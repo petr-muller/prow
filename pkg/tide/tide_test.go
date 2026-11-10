@@ -88,6 +88,30 @@ func testPullsMatchList(t *testing.T, test string, actual []CodeReviewCommon, ex
 	}
 }
 
+func TestToSimpleState(t *testing.T) {
+	testCases := []struct {
+		state    prowapi.ProwJobState
+		expected simpleState
+	}{
+		{state: prowapi.SchedulingState, expected: pendingState},
+		{state: prowapi.TriggeredState, expected: pendingState},
+		{state: prowapi.PendingState, expected: pendingState},
+		{state: prowapi.SuccessState, expected: successState},
+		{state: prowapi.FailureState, expected: failureState},
+		{state: prowapi.AbortedState, expected: failureState},
+		{state: prowapi.ErrorState, expected: failureState},
+		{state: "", expected: failureState},
+		{state: "unknown", expected: failureState},
+	}
+	for _, tc := range testCases {
+		t.Run(string(tc.state), func(t *testing.T) {
+			if actual := toSimpleState(tc.state); actual != tc.expected {
+				t.Errorf("toSimpleState(%q) = %q, want %q", tc.state, actual, tc.expected)
+			}
+		})
+	}
+}
+
 func TestAccumulateBatch(t *testing.T) {
 	jobSet := []config.Presubmit{
 		{
@@ -136,6 +160,15 @@ func TestAccumulateBatch(t *testing.T) {
 			presubmits: jobSet,
 			pulls:      []pull{{1, "a"}, {2, "b"}},
 			prowJobs:   []prowjob{{job: "foo", state: prowapi.PendingState, prs: []pull{{1, "a"}}}},
+		},
+		{
+			name: "batch scheduling",
+			presubmits: []config.Presubmit{
+				{Reporter: config.Reporter{Context: "foo"}},
+			},
+			pulls:    []pull{{1, "a"}, {2, "b"}},
+			prowJobs: []prowjob{{job: "foo", state: prowapi.SchedulingState, prs: []pull{{1, "a"}, {2, "b"}}}},
+			pending:  true,
 		},
 		{
 			name:       "batch pending, successful previous run",
@@ -341,6 +374,16 @@ func TestAccumulate(t *testing.T) {
 		pendings  []int
 		none      []int
 	}{
+		{
+			name:         "scheduling presubmit is pending",
+			pullRequests: map[int]string{1: "headsha"},
+			presubmits:   map[int][]config.Presubmit{1: jobSet},
+			prowJobs: []prowjob{
+				{1, "job1", prowapi.SchedulingState, "headsha"},
+				{1, "job2", prowapi.SuccessState, "headsha"},
+			},
+			pendings: []int{1},
+		},
 		{
 			pullRequests: map[int]string{1: "", 2: "", 3: "", 4: "", 5: "", 6: "", 7: ""},
 			presubmits: map[int][]config.Presubmit{
@@ -688,12 +731,17 @@ func TestAccumulate(t *testing.T) {
 				})
 			}
 
-			successes, pendings, nones, _ := syncCtrl.accumulate(test.presubmits, pulls, pjs, baseSHA)
+			successes, pendings, nones, missingTests := syncCtrl.accumulate(test.presubmits, pulls, pjs, baseSHA)
 
 			t.Logf("test run %d", i)
 			testPullsMatchList(t, "successes", successes, test.successes)
 			testPullsMatchList(t, "pendings", pendings, test.pendings)
 			testPullsMatchList(t, "nones", nones, test.none)
+			for _, pr := range test.pendings {
+				if len(missingTests[pr]) > 0 {
+					t.Errorf("Pending PR %d has missing tests: %+v", pr, missingTests[pr])
+				}
+			}
 		})
 	}
 }

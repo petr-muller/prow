@@ -569,6 +569,8 @@ func TestGetProwJobsForPRs(t *testing.T) {
 	}
 	presubmitJobPending := *presubmitJobSuccess.DeepCopy()
 	presubmitJobPending.Status.State = prowapi.PendingState
+	presubmitJobScheduling := *presubmitJobSuccess.DeepCopy()
+	presubmitJobScheduling.Status.State = prowapi.SchedulingState
 	presubmitJobPR2Success := *presubmitJobSuccess.DeepCopy()
 	presubmitJobPR2Success.Spec.Refs.Pulls = []prowapi.Pull{
 		{Number: 2, SHA: "fooRef"},
@@ -640,6 +642,19 @@ func TestGetProwJobsForPRs(t *testing.T) {
 				2: {
 					successfulBatchJob:   map[string]prowapi.ProwJob{"fooContext": *batchJobSuccess.DeepCopy()},
 					pendingPresubmitJobs: map[string]bool{},
+				},
+			},
+		},
+		{
+			name: "matching refs, presubmit job scheduling",
+			prs: []CodeReviewCommon{
+				{Number: 1, HeadRefOID: "fooRef"},
+			},
+			pjs: []prowapi.ProwJob{presubmitJobScheduling},
+			expected: map[int]prowJobsByContext{
+				1: {
+					successfulBatchJob:   map[string]prowapi.ProwJob{},
+					pendingPresubmitJobs: map[string]bool{"fooContext": true},
 				},
 			},
 		},

@@ -904,7 +904,7 @@ const (
 )
 
 func toSimpleState(s prowapi.ProwJobState) simpleState {
-	if s == prowapi.TriggeredState || s == prowapi.PendingState {
+	if s == prowapi.SchedulingState || s == prowapi.TriggeredState || s == prowapi.PendingState {
 		return pendingState
 	} else if s == prowapi.SuccessState {
 		return successState

@@ -33,8 +33,33 @@
   {{block "scripts" .Arguments}}{{end}}
   {{if eq .PageName "index"}}
   <script type="text/javascript">
+    var themeStorageFallback = Object.create(null);
+    var themeStorageAvailable = true;
+
+    function safeStorageGet(key) {
+      if (themeStorageAvailable) {
+        try {
+          themeStorageFallback[key] = localStorage.getItem(key);
+        } catch (e) {
+          themeStorageAvailable = false;
+        }
+      }
+      return key in themeStorageFallback ? themeStorageFallback[key] : null;
+    }
+
+    function safeStorageSet(key, value) {
+      themeStorageFallback[key] = value;
+      if (themeStorageAvailable) {
+        try {
+          localStorage.setItem(key, value);
+        } catch (e) {
+          themeStorageAvailable = false;
+        }
+      }
+    }
+
     (function() {
-      var theme = localStorage.getItem('prow-theme');
+      var theme = safeStorageGet('prow-theme');
       var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
       if (theme === 'dark' || (!theme && prefersDark)) {
         document.documentElement.classList.add('dark-mode');
@@ -138,7 +163,7 @@
   }
 
   function getEffectiveTheme() {
-    var stored = localStorage.getItem('prow-theme');
+    var stored = safeStorageGet('prow-theme');
     if (stored === 'dark' || stored === 'light') {
       return stored;
     }
@@ -153,7 +178,7 @@
       toggleBtn.addEventListener('click', function() {
         var isCurrentlyDark = document.documentElement.classList.contains('dark-mode');
         var nextTheme = isCurrentlyDark ? 'light' : 'dark';
-        localStorage.setItem('prow-theme', nextTheme);
+        safeStorageSet('prow-theme', nextTheme);
         updateThemeUI(nextTheme === 'dark');
       });
     }
@@ -161,7 +186,7 @@
     if (window.matchMedia) {
       var mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
       var listener = function(e) {
-        if (!localStorage.getItem('prow-theme')) {
+        if (!safeStorageGet('prow-theme')) {
           updateThemeUI(e.matches);
         }
       };

@@ -1155,12 +1155,16 @@ pre.prettyprint code.job-definition {
  */
 html.dark-mode body#index,
 body#index.dark-mode {
-    background: #121212 !important;
     color: #e0e0e0;
 }
 
-html.dark-mode body#index .mdl-layout__header,
-body#index.dark-mode .mdl-layout__header {
+html.dark-mode body#index:not([data-branded-background="true"]),
+body#index.dark-mode:not([data-branded-background="true"]) {
+    background: #121212 !important;
+}
+
+html.dark-mode body#index .mdl-layout__header:not([data-branded-header="true"]),
+body#index.dark-mode .mdl-layout__header:not([data-branded-header="true"]) {
     background-color: #212121 !important;
 }
 

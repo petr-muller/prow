@@ -11,6 +11,85 @@ declare const allBuilds: ProwJobList;
 declare const spyglass: boolean;
 declare const rerunCreatesJob: boolean;
 
+// Initialized by the pre-body theme bootstrap in base.html.
+declare const prowThemeStorage: {value: string | null; available: boolean};
+
+function getThemePreference(): string | null {
+  if (prowThemeStorage.available) {
+    try {
+      prowThemeStorage.value = localStorage.getItem('prow-theme');
+    } catch (e) {
+      prowThemeStorage.available = false;
+    }
+  }
+  return prowThemeStorage.value;
+}
+
+function setThemePreference(theme: string): void {
+  prowThemeStorage.value = theme;
+  if (prowThemeStorage.available) {
+    try {
+      localStorage.setItem('prow-theme', theme);
+    } catch (e) {
+      prowThemeStorage.available = false;
+    }
+  }
+}
+
+function initTheme(): void {
+  const toggleBtn = document.getElementById('theme-toggle');
+  const toggleIcon = document.getElementById('theme-toggle-icon');
+  const logo = document.getElementById('header-logo') as HTMLImageElement;
+  const hasCustomLogo = logo && logo.getAttribute('data-custom-logo') === 'true';
+  const mediaQuery = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
+
+  const updateThemeUI = (isDark: boolean): void => {
+    document.documentElement.classList.toggle('dark-mode', isDark);
+    if (toggleIcon) {
+      toggleIcon.textContent = isDark ? 'brightness_7' : 'brightness_2';
+    }
+    if (toggleBtn) {
+      toggleBtn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
+      toggleBtn.setAttribute('aria-label', toggleBtn.title);
+    }
+    if (logo && !hasCustomLogo) {
+      const url = new URL(logo.src);
+      url.pathname = isDark ? '/static/logo-dark.png' : '/static/logo-light.png';
+      logo.src = url.href;
+    }
+  };
+
+  const stored = getThemePreference();
+  updateThemeUI(stored === 'dark' || (stored !== 'light' && !!mediaQuery && mediaQuery.matches));
+
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      const isDark = !document.documentElement.classList.contains('dark-mode');
+      setThemePreference(isDark ? 'dark' : 'light');
+      updateThemeUI(isDark);
+    });
+  }
+
+  if (mediaQuery) {
+    const listener = (event: MediaQueryListEvent): void => {
+      if (!getThemePreference()) {
+        updateThemeUI(event.matches);
+      }
+    };
+    if (mediaQuery.addEventListener) {
+      mediaQuery.addEventListener('change', listener);
+    } else if (mediaQuery.addListener) {
+      mediaQuery.addListener(listener);
+    }
+  }
+}
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', initTheme);
+} else {
+  initTheme();
+}
+
 function genShortRefKey(baseRef: string, pulls: Pull[] = []) {
   return [baseRef, ...pulls.map((p) => p.number)].filter((n) => n).join(",");
 }

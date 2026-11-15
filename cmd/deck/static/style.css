@@ -1153,267 +1153,244 @@ pre.prettyprint code.job-definition {
 /**
  * Dark Mode for Main Prow Status Dashboard (body#index)
  */
-html.dark-mode body#index,
-body#index.dark-mode {
-    color: #e0e0e0;
+html.dark-mode {
+    --prow-dark-background: #121212;
+    --prow-dark-header: #212121;
+    --prow-dark-surface: #1e1e1e;
+    --prow-dark-surface-active: #2d2d2d;
+    --prow-dark-text: #e0e0e0;
+    --prow-dark-text-emphasis: #ffffff;
+    --prow-dark-divider: #333333;
+    --prow-dark-text-secondary: #cccccc;
+    --prow-dark-navigation-hover: #2a2a2a;
+    --prow-dark-text-footer: #888888;
+    --prow-dark-text-muted: #b0b0b0;
+    --prow-dark-control-border: #555555;
+    --prow-dark-text-placeholder: #777777;
+    --prow-dark-search-background: #222222;
+    --prow-dark-search-active: #383838;
+    --prow-dark-text-axis: #aaaaaa;
+    --prow-dark-table-hover: #282828;
+    --prow-dark-link: #82B1FF;
+    --prow-dark-link-hover: #B388FF;
+    --prow-dark-modal-border: #444444;
+    --prow-dark-accordion-background: #242424;
+    --prow-dark-card-shadow: rgba(0,0,0,0.5);
+    --prow-dark-overlay-shadow: rgba(0,0,0,0.6);
+    --prow-dark-modal-backdrop: rgba(0,0,0,0.7);
+    --prow-dark-modal-shadow: rgba(0,0,0,0.8);
 }
 
-html.dark-mode body#index:not([data-branded-background="true"]),
-body#index.dark-mode:not([data-branded-background="true"]) {
-    background: #121212 !important;
+html.dark-mode body#index {
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .mdl-layout__header:not([data-branded-header="true"]),
-body#index.dark-mode .mdl-layout__header:not([data-branded-header="true"]) {
-    background-color: #212121 !important;
+html.dark-mode body#index:not([data-branded-background="true"]) {
+    background: var(--prow-dark-background) !important;
 }
 
-html.dark-mode body#index .header-title,
-body#index.dark-mode .header-title {
-    color: #ffffff;
+html.dark-mode body#index .mdl-layout__header:not([data-branded-header="true"]) {
+    background-color: var(--prow-dark-header) !important;
 }
 
-html.dark-mode body#index #theme-toggle,
-body#index.dark-mode #theme-toggle {
-    color: #ffffff;
+html.dark-mode body#index .header-title {
+    color: var(--prow-dark-text-emphasis);
 }
 
-html.dark-mode body#index .mdl-layout__drawer,
-body#index.dark-mode .mdl-layout__drawer {
-    background-color: #1e1e1e;
-    border-right: 1px solid #2d2d2d;
-    color: #e0e0e0;
+html.dark-mode body#index #theme-toggle {
+    color: var(--prow-dark-text-emphasis);
 }
 
-html.dark-mode body#index .mdl-layout__drawer .mdl-layout-title,
-body#index.dark-mode .mdl-layout__drawer .mdl-layout-title {
-    color: #ffffff;
-    border-bottom: 1px solid #333333;
+html.dark-mode body#index .mdl-layout__drawer {
+    background-color: var(--prow-dark-surface);
+    border-right: 1px solid var(--prow-dark-surface-active);
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .mdl-layout__drawer .mdl-navigation__link,
-body#index.dark-mode .mdl-layout__drawer .mdl-navigation__link {
-    color: #cccccc !important;
+html.dark-mode body#index .mdl-layout__drawer .mdl-layout-title {
+    color: var(--prow-dark-text-emphasis);
+    border-bottom: 1px solid var(--prow-dark-divider);
 }
 
-html.dark-mode body#index .mdl-layout__drawer .mdl-navigation__link:hover,
-body#index.dark-mode .mdl-layout__drawer .mdl-navigation__link:hover {
-    background-color: #2a2a2a;
-    color: #ffffff !important;
+html.dark-mode body#index .mdl-layout__drawer .mdl-navigation__link {
+    color: var(--prow-dark-text-secondary) !important;
 }
 
-html.dark-mode body#index .mdl-layout__drawer .mdl-navigation__link--current,
-body#index.dark-mode .mdl-layout__drawer .mdl-navigation__link--current {
-    background-color: #2d2d2d;
-    color: #ffffff !important;
+html.dark-mode body#index .mdl-layout__drawer .mdl-navigation__link:hover {
+    background-color: var(--prow-dark-navigation-hover);
+    color: var(--prow-dark-text-emphasis) !important;
 }
 
-html.dark-mode body#index .mdl-layout__drawer footer,
-body#index.dark-mode .mdl-layout__drawer footer {
-    color: #888888;
+html.dark-mode body#index .mdl-layout__drawer .mdl-navigation__link--current {
+    background-color: var(--prow-dark-surface-active);
+    color: var(--prow-dark-text-emphasis) !important;
+}
+
+html.dark-mode body#index .mdl-layout__drawer footer {
+    color: var(--prow-dark-text-footer);
 }
 
 /* Filter card box and controls */
-html.dark-mode body#index #filter-box.card-box,
-body#index.dark-mode #filter-box.card-box {
-    background-color: #1e1e1e;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-    color: #e0e0e0;
+html.dark-mode body#index #filter-box.card-box {
+    background-color: var(--prow-dark-surface);
+    box-shadow: 0 2px 4px var(--prow-dark-card-shadow);
+    color: var(--prow-dark-text);
 }
 
 html.dark-mode body#index #filter-list li,
-body#index.dark-mode #filter-list li,
-html.dark-mode body#index #job-count,
-body#index.dark-mode #job-count {
-    color: #b0b0b0;
+html.dark-mode body#index #job-count {
+    color: var(--prow-dark-text-muted);
 }
 
-html.dark-mode body#index select,
-body#index.dark-mode select {
-    color: #e0e0e0;
-    background-color: #1e1e1e;
-    border-bottom: 1px solid #555555;
+html.dark-mode body#index select {
+    color: var(--prow-dark-text);
+    background-color: var(--prow-dark-surface);
+    border-bottom: 1px solid var(--prow-dark-control-border);
 }
 
-html.dark-mode body#index select option,
-body#index.dark-mode select option {
-    background-color: #1e1e1e;
-    color: #e0e0e0;
+html.dark-mode body#index select option {
+    background-color: var(--prow-dark-surface);
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .fuzzy-search-input,
-body#index.dark-mode .fuzzy-search-input {
+html.dark-mode body#index .fuzzy-search-input {
     background-color: transparent;
-    color: #e0e0e0;
-    border-bottom: 1px solid #555555;
+    color: var(--prow-dark-text);
+    border-bottom: 1px solid var(--prow-dark-control-border);
 }
 
-html.dark-mode body#index .fuzzy-search-input::placeholder,
-body#index.dark-mode .fuzzy-search-input::placeholder {
-    color: #777777;
+html.dark-mode body#index .fuzzy-search-input::placeholder {
+    color: var(--prow-dark-text-placeholder);
 }
 
-html.dark-mode body#index .fuzzy-search-list,
-body#index.dark-mode .fuzzy-search-list {
-    background-color: #222222;
-    border: 1px solid #383838;
-    box-shadow: 0 4px 12px rgba(0,0,0,0.6);
-    color: #e0e0e0;
+html.dark-mode body#index .fuzzy-search-list {
+    background-color: var(--prow-dark-search-background);
+    border: 1px solid var(--prow-dark-search-active);
+    box-shadow: 0 4px 12px var(--prow-dark-overlay-shadow);
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index #job-list li,
-body#index.dark-mode #job-list li {
-    color: #e0e0e0;
+html.dark-mode body#index #job-list li {
+    color: var(--prow-dark-text);
 }
 
 html.dark-mode body#index #job-list li:hover,
-body#index.dark-mode #job-list li:hover,
-html.dark-mode body#index .job-selected,
-body#index.dark-mode .job-selected {
-    background-color: #383838 !important;
-    color: #ffffff;
+html.dark-mode body#index .job-selected {
+    background-color: var(--prow-dark-search-active) !important;
+    color: var(--prow-dark-text-emphasis);
 }
 
 /* Histogram */
-html.dark-mode body#index table#job-histogram,
-body#index.dark-mode table#job-histogram {
-    background: #1e1e1e;
-    box-shadow: 0 0 4px rgba(0,0,0,0.6);
+html.dark-mode body#index table#job-histogram {
+    background: var(--prow-dark-surface);
+    box-shadow: 0 0 4px var(--prow-dark-overlay-shadow);
 }
 
 html.dark-mode body#index #job-histogram-labels > span,
-body#index.dark-mode #job-histogram-labels > span,
-html.dark-mode body#index #job-histogram-labels-y-max,
-body#index.dark-mode #job-histogram-labels-y-max {
-    color: #aaaaaa;
+html.dark-mode body#index #job-histogram-labels-y-max {
+    color: var(--prow-dark-text-axis);
 }
 
-html.dark-mode body#index #job-histogram-labels-y-mid,
-body#index.dark-mode #job-histogram-labels-y-mid {
-    color: #777777;
+html.dark-mode body#index #job-histogram-labels-y-mid {
+    color: var(--prow-dark-text-placeholder);
 }
 
 /* Builds data table */
-html.dark-mode body#index .mdl-data-table,
-body#index.dark-mode .mdl-data-table {
-    background-color: #1e1e1e !important;
-    color: #e0e0e0;
-    box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+html.dark-mode body#index .mdl-data-table {
+    background-color: var(--prow-dark-surface) !important;
+    color: var(--prow-dark-text);
+    box-shadow: 0 2px 4px var(--prow-dark-card-shadow);
 }
 
-html.dark-mode body#index .mdl-data-table th,
-body#index.dark-mode .mdl-data-table th {
-    color: #b0b0b0;
-    border-top: 1px solid #333333;
-    border-bottom: 1px solid #333333;
-    background-color: #1e1e1e;
+html.dark-mode body#index .mdl-data-table th {
+    color: var(--prow-dark-text-muted);
+    border-top: 1px solid var(--prow-dark-divider);
+    border-bottom: 1px solid var(--prow-dark-divider);
+    background-color: var(--prow-dark-surface);
 }
 
-html.dark-mode body#index .mdl-data-table td,
-body#index.dark-mode .mdl-data-table td {
-    color: #e0e0e0;
+html.dark-mode body#index .mdl-data-table td {
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .mdl-data-table tr,
-body#index.dark-mode .mdl-data-table tr {
-    border-top: 1px solid #2d2d2d;
+html.dark-mode body#index .mdl-data-table tr {
+    border-top: 1px solid var(--prow-dark-surface-active);
     background-color: transparent;
 }
 
-html.dark-mode body#index .mdl-data-table tbody tr:hover,
-body#index.dark-mode .mdl-data-table tbody tr:hover {
-    background-color: #282828 !important;
+html.dark-mode body#index .mdl-data-table tbody tr:hover {
+    background-color: var(--prow-dark-table-hover) !important;
 }
 
-html.dark-mode body#index .mdl-data-table tr.changed,
-body#index.dark-mode .mdl-data-table tr.changed {
-    border-top: 1px solid #555555;
+html.dark-mode body#index .mdl-data-table tr.changed {
+    border-top: 1px solid var(--prow-dark-control-border);
 }
 
 /* Links and action buttons in dark mode */
 html.dark-mode body#index a:link,
-body#index.dark-mode a:link,
-html.dark-mode body#index a:visited,
-body#index.dark-mode a:visited {
-    color: #82B1FF;
+html.dark-mode body#index a:visited {
+    color: var(--prow-dark-link);
 }
 
-html.dark-mode body#index a:hover,
-body#index.dark-mode a:hover {
-    color: #B388FF;
+html.dark-mode body#index a:hover {
+    color: var(--prow-dark-link-hover);
 }
 
-html.dark-mode body#index .icon-button,
-body#index.dark-mode .icon-button {
-    color: #b0b0b0;
+html.dark-mode body#index .icon-button {
+    color: var(--prow-dark-text-muted);
 }
 
-html.dark-mode body#index .icon-button:hover,
-body#index.dark-mode .icon-button:hover {
-    color: #ffffff;
+html.dark-mode body#index .icon-button:hover {
+    color: var(--prow-dark-text-emphasis);
 }
 
-html.dark-mode body#index #top-navigator,
-body#index.dark-mode #top-navigator {
-    background-color: #333333;
-    color: #e0e0e0;
+html.dark-mode body#index #top-navigator {
+    background-color: var(--prow-dark-divider);
+    color: var(--prow-dark-text);
 }
 
 /* Modals */
-html.dark-mode body#index #rerun,
-body#index.dark-mode #rerun {
-    background-color: rgba(0,0,0,0.7);
+html.dark-mode body#index #rerun {
+    background-color: var(--prow-dark-modal-backdrop);
 }
 
 html.dark-mode body#index .rerun-content,
-body#index.dark-mode .rerun-content,
-html.dark-mode body#index .abort-content,
-body#index.dark-mode .abort-content {
-    background-color: #1e1e1e;
-    color: #e0e0e0;
-    border: 1px solid #444444;
-    box-shadow: 0px 20px 80px 0px rgba(0,0,0,0.8);
+html.dark-mode body#index .abort-content {
+    background-color: var(--prow-dark-surface);
+    color: var(--prow-dark-text);
+    border: 1px solid var(--prow-dark-modal-border);
+    box-shadow: 0px 20px 80px 0px var(--prow-dark-modal-shadow);
 }
 
 html.dark-mode body#index .rerunModal-title,
-body#index.dark-mode .rerunModal-title,
-html.dark-mode body#index .abortModal-title,
-body#index.dark-mode .abortModal-title {
-    color: #ffffff;
+html.dark-mode body#index .abortModal-title {
+    color: var(--prow-dark-text-emphasis);
 }
 
 html.dark-mode body#index .rerunModal-description,
-body#index.dark-mode .rerunModal-description,
-html.dark-mode body#index .abortModal-description,
-body#index.dark-mode .abortModal-description {
-    color: #cccccc;
+html.dark-mode body#index .abortModal-description {
+    color: var(--prow-dark-text-secondary);
 }
 
-html.dark-mode body#index .rerunModal-radioLabel,
-body#index.dark-mode .rerunModal-radioLabel {
-    color: #e0e0e0;
+html.dark-mode body#index .rerunModal-radioLabel {
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .rerunModal-accordionButton,
-body#index.dark-mode .rerunModal-accordionButton {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
+html.dark-mode body#index .rerunModal-accordionButton {
+    background-color: var(--prow-dark-surface-active);
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .rerunModal-accordionPanel,
-body#index.dark-mode .rerunModal-accordionPanel {
-    background-color: #242424;
+html.dark-mode body#index .rerunModal-accordionPanel {
+    background-color: var(--prow-dark-accordion-background);
 }
 
 html.dark-mode body#index .rerunModal-accordionPanel code,
-body#index.dark-mode .rerunModal-accordionPanel code,
-html.dark-mode body#index code,
-body#index.dark-mode code {
-    background-color: #2d2d2d;
-    color: #e0e0e0;
+html.dark-mode body#index code {
+    background-color: var(--prow-dark-surface-active);
+    color: var(--prow-dark-text);
 }
 
-html.dark-mode body#index .mdl-button,
-body#index.dark-mode .mdl-button {
-    color: #e0e0e0;
+html.dark-mode body#index .mdl-button {
+    color: var(--prow-dark-text);
 }

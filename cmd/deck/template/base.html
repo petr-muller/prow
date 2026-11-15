@@ -33,38 +33,18 @@
   {{block "scripts" .Arguments}}{{end}}
   {{if eq .PageName "index"}}
   <script type="text/javascript">
-    var themeStorageFallback = Object.create(null);
-    var themeStorageAvailable = true;
-
-    function safeStorageGet(key) {
-      if (themeStorageAvailable) {
-        try {
-          themeStorageFallback[key] = localStorage.getItem(key);
-        } catch (e) {
-          themeStorageAvailable = false;
-        }
-      }
-      return key in themeStorageFallback ? themeStorageFallback[key] : null;
+    // Shared with the index bundle so storage failures keep the page's preference.
+    var prowThemeStorage = {value: null, available: true};
+    try {
+      prowThemeStorage.value = localStorage.getItem('prow-theme');
+    } catch (e) {
+      prowThemeStorage.available = false;
     }
-
-    function safeStorageSet(key, value) {
-      themeStorageFallback[key] = value;
-      if (themeStorageAvailable) {
-        try {
-          localStorage.setItem(key, value);
-        } catch (e) {
-          themeStorageAvailable = false;
-        }
-      }
+    var theme = prowThemeStorage.value;
+    var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+    if (theme === 'dark' || (!theme && prefersDark)) {
+      document.documentElement.classList.add('dark-mode');
     }
-
-    (function() {
-      var theme = safeStorageGet('prow-theme');
-      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
-      if (theme === 'dark' || (!theme && prefersDark)) {
-        document.documentElement.classList.add('dark-mode');
-      }
-    })();
   </script>
   {{end}}
 </head>
@@ -122,92 +102,6 @@
   <div class="mdl-snackbar__text"></div>
   <button class="mdl-snackbar__action" type="button"></button>
 </div>
-{{if eq .PageName "index"}}
-<script type="text/javascript">
-(function() {
-  var toggleBtn = document.getElementById('theme-toggle');
-  var toggleIcon = document.getElementById('theme-toggle-icon');
-  var logo = document.getElementById('header-logo');
-  var hasCustomLogo = logo && logo.getAttribute('data-custom-logo') === 'true';
-
-  function updateThemeUI(isDark) {
-    if (isDark) {
-      document.documentElement.classList.add('dark-mode');
-      if (document.body) {
-        document.body.classList.add('dark-mode');
-      }
-      if (toggleIcon) {
-        toggleIcon.textContent = 'brightness_7';
-      }
-      if (toggleBtn) {
-        toggleBtn.title = 'Switch to light mode';
-        toggleBtn.setAttribute('aria-label', toggleBtn.title);
-      }
-      if (logo && !hasCustomLogo) {
-        logo.src = '/static/logo-dark.png?v={{deckVersion}}';
-      }
-    } else {
-      document.documentElement.classList.remove('dark-mode');
-      if (document.body) {
-        document.body.classList.remove('dark-mode');
-      }
-      if (toggleIcon) {
-        toggleIcon.textContent = 'brightness_2';
-      }
-      if (toggleBtn) {
-        toggleBtn.title = 'Switch to dark mode';
-        toggleBtn.setAttribute('aria-label', toggleBtn.title);
-      }
-      if (logo && !hasCustomLogo) {
-        logo.src = '/static/logo-light.png?v={{deckVersion}}';
-      }
-    }
-  }
-
-  function getEffectiveTheme() {
-    var stored = safeStorageGet('prow-theme');
-    if (stored === 'dark' || stored === 'light') {
-      return stored;
-    }
-    return (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) ? 'dark' : 'light';
-  }
-
-  function initTheme() {
-    var current = getEffectiveTheme();
-    updateThemeUI(current === 'dark');
-
-    if (toggleBtn) {
-      toggleBtn.addEventListener('click', function() {
-        var isCurrentlyDark = document.documentElement.classList.contains('dark-mode');
-        var nextTheme = isCurrentlyDark ? 'light' : 'dark';
-        safeStorageSet('prow-theme', nextTheme);
-        updateThemeUI(nextTheme === 'dark');
-      });
-    }
-
-    if (window.matchMedia) {
-      var mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
-      var listener = function(e) {
-        if (!safeStorageGet('prow-theme')) {
-          updateThemeUI(e.matches);
-        }
-      };
-      if (mediaQuery.addEventListener) {
-        mediaQuery.addEventListener('change', listener);
-      } else if (mediaQuery.addListener) {
-        mediaQuery.addListener(listener);
-      }
-    }
-  }
-
-  if (document.readyState === 'loading') {
-    document.addEventListener('DOMContentLoaded', initTheme);
-  } else {
-    initTheme();
-  }
-})();
-</script>
-{{end}}
 </body>
 </html>
 {{end}}

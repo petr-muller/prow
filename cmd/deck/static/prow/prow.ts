@@ -39,8 +39,6 @@ function setThemePreference(theme: string): void {
 function initTheme(): void {
   const toggleBtn = document.getElementById('theme-toggle');
   const toggleIcon = document.getElementById('theme-toggle-icon');
-  const logo = document.getElementById('header-logo') as HTMLImageElement;
-  const hasCustomLogo = logo && logo.getAttribute('data-custom-logo') === 'true';
   const mediaQuery = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)');
 
   const updateThemeUI = (isDark: boolean): void => {
@@ -51,11 +49,6 @@ function initTheme(): void {
     if (toggleBtn) {
       toggleBtn.title = isDark ? 'Switch to light mode' : 'Switch to dark mode';
       toggleBtn.setAttribute('aria-label', toggleBtn.title);
-    }
-    if (logo && !hasCustomLogo) {
-      const url = new URL(logo.src);
-      url.pathname = isDark ? '/static/logo-dark.png' : '/static/logo-light.png';
-      logo.src = url.href;
     }
   };
 

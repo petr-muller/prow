@@ -9,6 +9,19 @@ description: >
 
 Deck uses the GitHub API to display pull request status information and to authorize rerun and abort actions based on GitHub organization membership. It requires GitHub authentication credentials and should be configured with ghproxy to manage rate limits. See [Managing GitHub API Access](/docs/github-api-access/) for details on authentication methods, endpoint configuration, and rate limit management.
 
+## Appearance
+
+The main Prow status dashboard (`/`) follows the system's light or dark theme
+until a user chooses a theme with its header toggle. The choice persists in the
+browser when local storage is available. Spyglass remains dark regardless of
+that preference; other Deck pages retain their light appearance.
+
+CSS selects the default logo for each page's theme, including before JavaScript
+loads. Configured branding logos and colors keep their configured values.
+Expanding dynamic theming to other pages and making Spyglass switchable are
+tracked in [#944](https://github.com/kubernetes-sigs/prow/issues/944). These require
+separate page and lens styling work and are deferred from logo consolidation.
+
 ## Running Deck locally
 
 Deck can be run locally by executing `./cmd/deck/runlocal`. The scripts starts Deck via

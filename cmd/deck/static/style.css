@@ -46,6 +46,18 @@ a:visited {
     height: 48px;
 }
 
+/* Spyglass stays dark; only the status dashboard follows the user's theme. */
+.logo-dark,
+body#spyglass .logo-light,
+html.dark-mode body#index .logo-light {
+    display: none;
+}
+
+body#spyglass .logo-dark,
+html.dark-mode body#index .logo-dark {
+    display: inline;
+}
+
 h1 {
     font-weight: normal;
     font-size: 2em;

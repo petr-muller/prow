@@ -48,17 +48,20 @@
   </script>
   {{end}}
 </head>
-{{ $defaultLogo := "/static/logo-light.png" }}
-{{- if .DarkMode -}}
-{{- $defaultLogo = "/static/logo-dark.png" -}}
-{{- end -}}
 <body id="{{.PageName}}"{{if branding.BackgroundColor}} data-branded-background="true" style="background-color: {{branding.BackgroundColor}};"{{end}}>
 <div id="alert-container"></div>
 <div class="mdl-layout mdl-js-layout mdl-layout--fixed-header">
   <header class="mdl-layout__header"{{if branding.HeaderColor}} data-branded-header="true" style="background-color: {{branding.HeaderColor}};"{{end}}>
     <div id="header-title" class="mdl-layout__header-row">
       <a href="/"
-         class="logo"><img id="header-logo" data-custom-logo="{{if branding.Logo}}true{{else}}false{{end}}" src="{{or branding.Logo $defaultLogo}}?v={{deckVersion}}" alt="kubernetes logo" class="logo"/></a>
+         class="logo">
+        {{if branding.Logo}}
+        <img src="{{branding.Logo}}?v={{deckVersion}}" alt="kubernetes logo" class="logo"/>
+        {{else}}
+        <img src="/static/logo-light.png?v={{deckVersion}}" alt="kubernetes logo" class="logo logo-light"/>
+        <img src="/static/logo-dark.png?v={{deckVersion}}" alt="kubernetes logo" class="logo logo-dark"/>
+        {{end}}
+      </a>
       <span class="mdl-layout-title header-title">{{block "pageTitle" .Arguments}}{{template "title" .}}{{end}}</span>
       {{if eq .PageName "index"}}
       <div class="mdl-layout-spacer"></div>

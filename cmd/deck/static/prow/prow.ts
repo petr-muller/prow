@@ -827,7 +827,7 @@ function drawJobBar(total: number, jobCountMap: Map<ProwJobState, number>): void
     } else {
       el.textContent = count.toString();
       tt.textContent = `${count} ${stateToAdj(state)} jobs`;
-      el.style.width = `${Math.max((count / total * 100), 1)  }%`;
+      el.style.width = `${count / total * 100}%`;
     }
   });
 }

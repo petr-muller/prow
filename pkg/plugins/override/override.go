@@ -507,7 +507,7 @@ func handle(oc overrideClient, log *logrus.Entry, e *github.GenericCommentEvent,
 			return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
 		}
 
-		checkrunContexts = make([]Context, len(checkruns.CheckRuns))
+		checkrunContexts = make([]Context, 0, len(checkruns.CheckRuns))
 		for _, checkrun := range checkruns.CheckRuns {
 			var state string
 			if checkrun.CompletedAt == "" {

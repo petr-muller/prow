@@ -281,6 +281,29 @@ developers that expect consistent behavior from these commands. More generally, 
 possible to configure a job's `trigger` to match any command that is otherwise known
 to Prow in some other context, like `/close`. It is similarly not suggested to do this.
 
+When the `trigger` plugin opts in with `trigger_github_workflows: true` in
+`plugins.yaml` (disabled by default), trusted commenters can also act on GitHub
+Actions runs for the PR's current head SHA:
+
+* `/ok-to-test` approves runs awaiting approval for a fork PR. If the PR's head
+  branch is in the base repository, it re-runs those runs instead. This command
+  is ignored when `ignore_ok_to_test: true`.
+* `/retest` and `/test all` re-run completed runs whose conclusion is `failure`,
+  `cancelled`, `timed_out`, or `startup_failure`.
+
+Only runs triggered by `pull_request` or `pull_request_target` are considered.
+The commenter must be trusted by the `trigger` plugin: organization members and,
+by default, repository collaborators qualify; `only_org_members`, `trusted_apps`,
+and `trusted_org` control these trust rules. The Prow bot itself is also
+trusted. An `ok-to-test` label remaining on a PR does not let an untrusted author
+approve or re-run Actions with these commands, although their comments may still
+start ProwJobs. A new push does not automatically approve Actions runs.
+
+Prow's GitHub credentials need **Actions: read** permission to list workflow runs
+and **Actions: write** permission to approve or re-run them. See GitHub's
+[workflow-run REST API documentation](https://docs.github.com/en/rest/actions/workflow-runs)
+for the permission requirements of each endpoint.
+
 #### Posting GitHub Status Contexts
 
 Presubmit and postsubmit jobs post a status context to the GitHub

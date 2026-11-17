@@ -703,7 +703,17 @@ triggers:
       # Repos is either of the form org/repos or just org.
       repos:
         - ""
-      # TriggerGitHubWorkflows enables workflows run by github to be triggered by prow.
+      # TriggerGitHubWorkflows opts in to GitHub Actions commands (disabled by default).
+      # Only trusted commenters, as determined by the trigger trust settings, may use them.
+      # /ok-to-test (unless ignored) approves runs awaiting approval for the PR head SHA
+      # on fork PRs, or re-runs those runs when the head is in the base repository.
+      # /retest and /test all re-run completed runs for the PR head SHA with conclusions
+      # failure, cancelled, timed_out, or startup_failure. Only pull_request and
+      # pull_request_target workflow runs are considered.
+      # An ok-to-test label does not let untrusted commenters start Actions runs,
+      # although it may allow them to start ProwJobs.
+      # Prow needs GitHub Actions read permission to list runs and write permission
+      # to approve or re-run them. See https://docs.github.com/en/rest/actions/workflow-runs
       trigger_github_workflows: true
       # TrustedApps is the explicit list of GitHub apps whose PRs will be automatically
       # considered as trusted. The list should contain usernames of each GitHub App without [bot] suffix.

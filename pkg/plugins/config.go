@@ -607,7 +607,17 @@ type Trigger struct {
 	// IgnoreOkToTest makes trigger ignore /ok-to-test comments.
 	// This is a security mitigation to only allow testing from trusted users.
 	IgnoreOkToTest bool `json:"ignore_ok_to_test,omitempty"`
-	// TriggerGitHubWorkflows enables workflows run by github to be triggered by prow.
+	// TriggerGitHubWorkflows opts in to GitHub Actions commands (disabled by default).
+	// Only trusted commenters, as determined by the trigger trust settings, may use them.
+	// /ok-to-test (unless ignored) approves runs awaiting approval for the PR head SHA
+	// on fork PRs, or re-runs those runs when the head is in the base repository.
+	// /retest and /test all re-run completed runs for the PR head SHA with conclusions
+	// failure, cancelled, timed_out, or startup_failure. Only pull_request and
+	// pull_request_target workflow runs are considered.
+	// An ok-to-test label does not let untrusted commenters start Actions runs,
+	// although it may allow them to start ProwJobs.
+	// Prow needs GitHub Actions read permission to list runs and write permission
+	// to approve or re-run them. See https://docs.github.com/en/rest/actions/workflow-runs
 	TriggerGitHubWorkflows bool `json:"trigger_github_workflows,omitempty"`
 	// OrgInvite holds configuration for the org invite message
 	// shown to non-org members when they open a PR.

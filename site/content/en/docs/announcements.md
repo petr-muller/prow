@@ -9,6 +9,22 @@ description: >
 
 New features added to each component:
 
+- *September 30, 2026* The `trigger_github_workflows` opt-in now takes effect after
+    [#955](https://github.com/kubernetes-sigs/prow/pull/955) fixed workflow-run queries
+    that previously returned no runs. Installations already setting this flag to
+    `true` will now approve or re-run GitHub Actions in response to trusted
+    commenters: `/ok-to-test` approves runs awaiting approval for fork PRs and
+    re-runs those runs for PRs whose head is in the base repository; `/retest` and
+    `/test all` re-run completed runs with conclusions `failure`, `cancelled`,
+    `timed_out`, or `startup_failure`. These commands affect only `pull_request`
+    and `pull_request_target` runs for the PR's current head SHA. An `ok-to-test`
+    label does not let untrusted authors start Actions runs, although ProwJobs
+    may still start. Prow needs GitHub Actions read permission to list runs and
+    write permission to approve or re-run them; see GitHub's
+    [workflow-run REST API documentation](https://docs.github.com/en/rest/actions/workflow-runs).
+    See [Triggering Jobs With Comments](/docs/jobs/#triggering-jobs-with-comments)
+    for trust settings and command details. New pushes do not automatically
+    approve runs.
 - *August 20, 2026* The `trigger` plugin supports new `/test-manual-required` command. It starts all
     required presubmit jobs that can only be triggered manually: jobs with `always_run: false` (or unset)
     and neither `run_if_changed` nor `skip_if_only_changed` set. It excludes optional, automatically

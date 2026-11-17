@@ -720,12 +720,14 @@ If you are trying to override a checkrun that has a space in it, you must put a 
 			if overrides.Has(checkrun.Context) {
 				prowOverrideCR := github.CheckRun{
 					Name:       checkrun.Context,
+					DetailsURL: e.HTMLURL,
+					ExternalID: e.GUID,
 					HeadSHA:    sha,
 					Status:     "completed",
 					Conclusion: "success",
 					Output: github.CheckRunOutput{
 						Title:   checkRunOverrideTitlePrefix + checkrun.Context,
-						Summary: fmt.Sprintf("Prow has received override command for the %s checkrun.", checkrun.Context),
+						Summary: fmt.Sprintf("Prow override of %s requested by %s.", checkrun.Context, user),
 					},
 				}
 				if _, err := oc.CreateCheckRun(org, repo, prowOverrideCR); err != nil {

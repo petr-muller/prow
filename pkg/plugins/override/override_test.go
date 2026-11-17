@@ -42,13 +42,15 @@ import (
 )
 
 const (
-	fakeOrg     = "fake-org"
-	fakeRepo    = "fake-repo"
-	fakePR      = 33
-	fakeSHA     = "deadbeef"
-	fakeBaseRef = "fake-branch"
-	fakeBaseSHA = "fffffffffffffffffffffffffffffffffffffff0"
-	adminUser   = "admin-user"
+	fakeOrg        = "fake-org"
+	fakeRepo       = "fake-repo"
+	fakePR         = 33
+	fakeSHA        = "deadbeef"
+	fakeBaseRef    = "fake-branch"
+	fakeBaseSHA    = "fffffffffffffffffffffffffffffffffffffff0"
+	adminUser      = "admin-user"
+	fakeCommentURL = "https://github.com/fake-org/fake-repo/pull/33#issuecomment-123"
+	fakeGUID       = "override-event-guid"
 )
 
 // fakeProwApp is the GitHub App the fake client reports as Prow's own by default.
@@ -485,9 +487,9 @@ func TestHandle(t *testing.T) {
 				CheckRuns: []github.CheckRun{
 					{Name: "incomplete-checkrun"},
 					{Name: "failure-checkrun", CompletedAt: "1800 BC", Conclusion: "failure"},
-					{ID: 1, Name: "failure-checkrun", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 1, Name: "failure-checkrun", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   fmt.Sprintf("Prow override - %s", "failure-checkrun"),
-						Summary: fmt.Sprintf("Prow has received override command for the %s checkrun.", "failure-checkrun"),
+						Summary: "Prow override of failure-checkrun requested by " + adminUser + ".",
 					}},
 				},
 			},
@@ -507,9 +509,9 @@ func TestHandle(t *testing.T) {
 				CheckRuns: []github.CheckRun{
 					{Name: "incomplete-checkrun"},
 					{Name: "test / Unit Tests", CompletedAt: "1800 BC", Conclusion: "failure"},
-					{ID: 1, Name: "test / Unit Tests", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 1, Name: "test / Unit Tests", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   fmt.Sprintf("Prow override - %s", "test / Unit Tests"),
-						Summary: fmt.Sprintf("Prow has received override command for the %s checkrun.", "test / Unit Tests"),
+						Summary: "Prow override of test / Unit Tests requested by " + adminUser + ".",
 					}},
 				},
 			},
@@ -550,9 +552,9 @@ func TestHandle(t *testing.T) {
 				CheckRuns: []github.CheckRun{
 					{Name: "incomplete-checkrun"},
 					{Name: "test / Unit Tests", CompletedAt: "1800 BC", Conclusion: "failure"},
-					{ID: 1, Name: "test / Unit Tests", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 1, Name: "test / Unit Tests", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   fmt.Sprintf("Prow override - %s", "test / Unit Tests"),
-						Summary: fmt.Sprintf("Prow has received override command for the %s checkrun.", "test / Unit Tests"),
+						Summary: "Prow override of test / Unit Tests requested by " + adminUser + ".",
 					}},
 				},
 			},
@@ -626,9 +628,9 @@ func TestHandle(t *testing.T) {
 			expectedCheckRuns: &github.CheckRunList{
 				CheckRuns: []github.CheckRun{
 					{Name: "soak-gate", Status: "in_progress", StartedAt: "1800 BC"},
-					{ID: 1, Name: "soak-gate", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 1, Name: "soak-gate", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   "Prow override - soak-gate",
-						Summary: "Prow has received override command for the soak-gate checkrun.",
+						Summary: "Prow override of soak-gate requested by " + adminUser + ".",
 					}},
 				},
 			},
@@ -649,13 +651,13 @@ func TestHandle(t *testing.T) {
 				CheckRuns: []github.CheckRun{
 					{Name: "gate-b", Status: "queued"},
 					{Name: "gate-a", Status: "in_progress"},
-					{ID: 1, Name: "gate-a", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 1, Name: "gate-a", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   "Prow override - gate-a",
-						Summary: "Prow has received override command for the gate-a checkrun.",
+						Summary: "Prow override of gate-a requested by " + adminUser + ".",
 					}},
-					{ID: 2, Name: "gate-b", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 2, Name: "gate-b", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   "Prow override - gate-b",
-						Summary: "Prow has received override command for the gate-b checkrun.",
+						Summary: "Prow override of gate-b requested by " + adminUser + ".",
 					}},
 				},
 			},
@@ -694,9 +696,9 @@ func TestHandle(t *testing.T) {
 			expectedCheckRuns: &github.CheckRunList{
 				CheckRuns: []github.CheckRun{
 					{Name: "soak-gate", Status: "in_progress"},
-					{ID: 1, Name: "soak-gate", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+					{ID: 1, Name: "soak-gate", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 						Title:   "Prow override - soak-gate",
-						Summary: "Prow has received override command for the soak-gate checkrun.",
+						Summary: "Prow override of soak-gate requested by " + adminUser + ".",
 					}},
 				},
 			},
@@ -1568,6 +1570,8 @@ func TestHandle(t *testing.T) {
 					Login: tc.user,
 				},
 				Body:       tc.comment,
+				HTMLURL:    fakeCommentURL,
+				GUID:       fakeGUID,
 				Number:     tc.number,
 				IsPR:       !tc.issue,
 				IssueState: tc.state,
@@ -2302,13 +2306,13 @@ func TestOverrideCheckRunLifecycle(t *testing.T) {
 
 	originalRun := github.CheckRun{ID: 100, Name: "soak-gate", Status: "in_progress"}
 	overrideRun := func(id int64) github.CheckRun {
-		return github.CheckRun{ID: id, Name: "soak-gate", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
+		return github.CheckRun{ID: id, Name: "soak-gate", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "success", App: fakeProwApp, Output: github.CheckRunOutput{
 			Title:   "Prow override - soak-gate",
-			Summary: "Prow has received override command for the soak-gate checkrun.",
+			Summary: "Prow override of soak-gate requested by " + adminUser + ".",
 		}}
 	}
 	cancelledRun := func(id int64) github.CheckRun {
-		return github.CheckRun{ID: id, Name: "soak-gate", HeadSHA: fakeSHA, Status: "completed", CompletedAt: "1800 BC", Conclusion: "cancelled", App: fakeProwApp, Output: github.CheckRunOutput{
+		return github.CheckRun{ID: id, Name: "soak-gate", HeadSHA: fakeSHA, DetailsURL: fakeCommentURL, ExternalID: fakeGUID, Status: "completed", CompletedAt: "1800 BC", Conclusion: "cancelled", App: fakeProwApp, Output: github.CheckRunOutput{
 			Title:   "Prow override cancelled - soak-gate",
 			Summary: "Override cancelled by " + adminUser,
 		}}
@@ -2326,6 +2330,8 @@ func TestOverrideCheckRunLifecycle(t *testing.T) {
 			IssueState: "open",
 			Action:     github.GenericCommentActionCreated,
 			Body:       body,
+			HTMLURL:    fakeCommentURL,
+			GUID:       fakeGUID,
 			Number:     fakePR,
 			User:       github.User{Login: adminUser},
 			Repo:       github.Repo{Owner: github.User{Login: fakeOrg}, Name: fakeRepo},

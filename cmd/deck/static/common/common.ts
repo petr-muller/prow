@@ -6,6 +6,7 @@ import {ProwJobState, Pull} from "../api/prow";
 
 // State enum describes different state a job can be in
 export enum State {
+  SCHEDULING = 'scheduling',
   TRIGGERED = 'triggered',
   PENDING = 'pending',
   SUCCESS = 'success',
@@ -61,6 +62,9 @@ export namespace cell {
     displayState = displayState[0].toUpperCase() + displayState.slice(1);
     let displayIcon = "";
     switch (s) {
+      case State.SCHEDULING:
+        displayIcon = "hourglass_empty";
+        break;
       case State.TRIGGERED:
         displayIcon = "schedule";
         break;

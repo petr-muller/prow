@@ -162,6 +162,10 @@ i.state {
     vertical-align: middle;
 }
 
+.state.scheduling, .state.scheduling.mdl-list__item-icon.material-icons {
+    color: #03A9F4;
+}
+
 .state.triggered, .state.pending, .state.triggered.mdl-list__item-icon.material-icons,
 .state.pending.mdl-list__item-icon.material-icons {
     color: #FFCA28;

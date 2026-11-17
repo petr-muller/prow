@@ -2353,11 +2353,7 @@ func (c *client) GetFailedActionRunsByHeadBranch(org, repo, branchName, headSHA 
 	durationLogger := c.log("GetFailedActionRunsByHeadBranch", org, repo)
 	defer durationLogger()
 
-	runs, err := c.listWorkflowRuns(org, repo, url.Values{
-		"per_page": []string{"100"},
-		"head_sha": []string{headSHA},
-		"branch":   []string{branchName},
-	})
+	runs, err := c.listPullRequestWorkflowRuns(org, repo, branchName, headSHA, nil)
 
 	prRuns := []WorkflowRun{}
 
@@ -2365,9 +2361,6 @@ func (c *client) GetFailedActionRunsByHeadBranch(org, repo, branchName, headSHA 
 	// run, and it takes only one value, so the client filters the runs.
 	// See https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository
 	for _, run := range runs {
-		if !slices.Contains(pullRequestWorkflowRunEvents, run.Event) {
-			continue
-		}
 		if run.Status == "completed" && slices.Contains(retestableWorkflowRunConclusions, run.Conclusion) {
 			prRuns = append(prRuns, run)
 		}
@@ -2376,14 +2369,36 @@ func (c *client) GetFailedActionRunsByHeadBranch(org, repo, branchName, headSHA 
 	return prRuns, err
 }
 
-// listWorkflowRuns reads all the pages of the workflow runs that agree with
-// the query.
+// listPullRequestWorkflowRuns reads all pages of pull request workflow runs
+// for the given branch and head SHA, with any extra query parameters.
 //
 // The GitHub API matches the "event" query parameter as an exact string, and
-// it has no syntax for more than one value. Thus the caller must filter the
-// events on the client.
+// it has no syntax for more than one value. Thus this helper filters the
+// pull_request and pull_request_target events on the client.
 //
 // See https://docs.github.com/en/rest/actions/workflow-runs#list-workflow-runs-for-a-repository
+func (c *client) listPullRequestWorkflowRuns(org, repo, branchName, headSHA string, extra url.Values) ([]WorkflowRun, error) {
+	values := url.Values{
+		"per_page": []string{"100"},
+		"head_sha": []string{headSHA},
+		"branch":   []string{branchName},
+	}
+	for key, value := range extra {
+		values[key] = value
+	}
+	runs, err := c.listWorkflowRuns(org, repo, values)
+
+	prRuns := []WorkflowRun{}
+	for _, run := range runs {
+		if slices.Contains(pullRequestWorkflowRunEvents, run.Event) {
+			prRuns = append(prRuns, run)
+		}
+	}
+	return prRuns, err
+}
+
+// listWorkflowRuns reads all the pages of the workflow runs that agree with
+// the query.
 func (c *client) listWorkflowRuns(org, repo string, values url.Values) ([]WorkflowRun, error) {
 	var runs []WorkflowRun
 	err := c.readPaginatedResultsWithValues(
@@ -2442,21 +2457,9 @@ func (c *client) GetPendingApprovalActionRuns(org, repo, branchName, headSHA str
 
 	// The "status" parameter is overloaded: the value "action_required" matches
 	// the conclusion of the run, not its status.
-	runs, err := c.listWorkflowRuns(org, repo, url.Values{
-		"per_page": []string{"100"},
-		"head_sha": []string{headSHA},
-		"branch":   []string{branchName},
-		"status":   []string{"action_required"},
+	return c.listPullRequestWorkflowRuns(org, repo, branchName, headSHA, url.Values{
+		"status": []string{"action_required"},
 	})
-
-	prRuns := []WorkflowRun{}
-	for _, run := range runs {
-		if slices.Contains(pullRequestWorkflowRunEvents, run.Event) {
-			prRuns = append(prRuns, run)
-		}
-	}
-
-	return prRuns, err
 }
 
 // ApproveGitHubWorkflowRun approves a pending workflow run

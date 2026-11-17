@@ -2350,7 +2350,7 @@ func (c *client) GetPullRequest(org, repo string, number int) (*PullRequest, err
 }
 
 func (c *client) GetFailedActionRunsByHeadBranch(org, repo, branchName, headSHA string) ([]WorkflowRun, error) {
-	durationLogger := c.log("GetJobsByHeadBranch", org, repo)
+	durationLogger := c.log("GetFailedActionRunsByHeadBranch", org, repo)
 	defer durationLogger()
 
 	runs, err := c.listWorkflowRuns(org, repo, url.Values{

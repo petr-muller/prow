@@ -174,7 +174,7 @@ func handleGenericComment(c Client, cp commentPruner, trigger plugins.Trigger, g
 	if trigger.TriggerGitHubWorkflows && trustedResponse.IsTrusted && (pjutil.RetestRe.MatchString(textToCheck) || pjutil.TestAllRe.MatchString(textToCheck)) {
 		headSHA, err := refGetter.HeadSHA()
 		if err != nil {
-			c.Logger.Warnf("headSHA unavailable, failed github actions for pr will not be triggered: %v", pr)
+			c.Logger.Warnf("HeadSHA failed for %s/%s#%d; GitHub Actions runs for the PR will not be rerun: %v", org, repo, pr.Number, err)
 		} else {
 			failedRuns, err := c.GitHubClient.GetFailedActionRunsByHeadBranch(org, repo, pr.Head.Ref, headSHA)
 			if err != nil {

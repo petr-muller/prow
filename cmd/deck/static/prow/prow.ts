@@ -198,6 +198,7 @@ function handleUpKey(): void {
 }
 
 window.onload = (): void => {
+  initJobBar();
   const topNavigator = document.getElementById("top-navigator")!;
   let navigatorTimeOut: any;
   const main = document.querySelector("main")! ;
@@ -799,19 +800,24 @@ function batchRevisionCell(build: ProwJob): HTMLTableDataCellElement {
 
 const jobBarStates: ProwJobState[] = ["success", "pending", "scheduling", "triggered", "error", "failure", "aborted", "unknown"];
 
+function initJobBar(): void {
+  const jobBar = document.getElementById("job-bar")!;
+  jobBarStates.forEach((state) => {
+    const bar = document.createElement("div");
+    bar.id = `job-bar-${state}`;
+    bar.classList.add("job-bar-state");
+    jobBar.appendChild(bar);
+
+    const tooltip = document.createElement("div");
+    tooltip.id = `${state}-tooltip`;
+    tooltip.classList.add("mdl-tooltip");
+    tooltip.setAttribute("for", bar.id);
+    jobBar.appendChild(tooltip);
+  });
+}
+
 function normalizeJobBarState(state: string): ProwJobState {
-  switch (state) {
-    case "scheduling":
-    case "success":
-    case "pending":
-    case "triggered":
-    case "error":
-    case "failure":
-    case "aborted":
-      return state;
-    default:
-      return "unknown";
-  }
+  return jobBarStates.includes(state as ProwJobState) ? state as ProwJobState : "unknown";
 }
 
 function drawJobBar(total: number, jobCountMap: Map<ProwJobState, number>): void {

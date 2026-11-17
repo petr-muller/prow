@@ -17,8 +17,41 @@ limitations under the License.
 package github
 
 import (
+	"encoding/json"
 	"testing"
 )
+
+func TestRequiredStatusChecksAppCompatibility(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		body       string
+		wantChecks int
+		wantAppID  *int64
+	}{
+		{name: "legacy GHES contexts only", body: `{"strict":true,"contexts":["gate"]}`},
+		{name: "unpinned", body: `{"contexts":["gate"],"checks":[{"context":"gate","app_id":null}]}`, wantChecks: 1},
+		{name: "explicit any App", body: `{"contexts":["gate"],"checks":[{"context":"gate","app_id":-1}]}`, wantChecks: 1, wantAppID: new(int64(-1))},
+		{name: "App pinned", body: `{"contexts":["gate"],"checks":[{"context":"gate","app_id":42}]}`, wantChecks: 1, wantAppID: new(int64(42))},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var checks RequiredStatusChecks
+			if err := json.Unmarshal([]byte(tc.body), &checks); err != nil {
+				t.Fatal(err)
+			}
+			if len(checks.Contexts) != 1 || checks.Contexts[0] != "gate" || len(checks.Checks) != tc.wantChecks {
+				t.Fatalf("unexpected required checks: %#v", checks)
+			}
+			if tc.wantChecks == 0 {
+				return
+			}
+			check := checks.Checks[0]
+			if check.Context != "gate" || (check.AppID == nil) != (tc.wantAppID == nil) ||
+				check.AppID != nil && *check.AppID != *tc.wantAppID {
+				t.Errorf("unexpected required check: %#v", check)
+			}
+		})
+	}
+}
 
 func TestRepoRequestToRepoSetsPrivate(t *testing.T) {
 	testCases := []struct {

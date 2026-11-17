@@ -573,6 +573,34 @@ func handle(oc overrideClient, log *logrus.Entry, e *github.GenericCommentEvent,
 	}
 
 	if branchProtection != nil && branchProtection.RequiredStatusChecks != nil {
+		// Check the required source before creating any override statuses, jobs, or
+		// check runs. A check from another App cannot satisfy a pinned requirement.
+		// Older GHES responses omit Checks and retain the context-only behavior.
+		var app *github.App
+		var blocked []string
+		for _, check := range branchProtection.RequiredStatusChecks.Checks {
+			pre := presubmitForContext(presubmits, check.Context)
+			if !oc.UsesAppAuth() || check.AppID == nil || *check.AppID <= 0 ||
+				!(overrides.Has(check.Context) || pre != nil && overrides.Has(pre.Name)) {
+				continue
+			}
+			if app == nil {
+				app, err = oc.GetApp()
+				if err != nil || app == nil || app.ID == 0 {
+					resp := "Cannot determine Prow's GitHub App ID to verify App-pinned required checks; no overrides were applied."
+					log.WithError(err).Warn(resp)
+					return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
+				}
+			}
+			if *check.AppID != app.ID {
+				blocked = append(blocked, fmt.Sprintf("`%s` requires GitHub App ID %d, but Prow uses GitHub App ID %d. A Prow override cannot satisfy this branch protection requirement.", check.Context, *check.AppID, app.ID))
+			}
+		}
+		if len(blocked) > 0 {
+			sort.Strings(blocked)
+			resp := strings.Join(blocked, "\n\n") + "\n\nNo overrides were applied."
+			return oc.CreateComment(org, repo, number, plugins.FormatResponseRaw(e.Body, e.HTMLURL, user, resp))
+		}
 		for _, context := range branchProtection.RequiredStatusChecks.Contexts {
 			if !contexts.Has(context) {
 				contexts.Insert(context)

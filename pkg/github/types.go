@@ -690,6 +690,15 @@ func (r BranchProtectionRequest) String() string {
 type RequiredStatusChecks struct {
 	Strict   bool     `json:"strict"` // PR must be up to date (include latest base branch commit).
 	Contexts []string `json:"contexts"`
+	// Checks includes the required source App, when supplied by GitHub (GHES 3.4+).
+	Checks []RequiredStatusCheck `json:"checks,omitempty"`
+}
+
+// RequiredStatusCheck identifies a required context and its optional source App.
+type RequiredStatusCheck struct {
+	Context string `json:"context"`
+	// A nil AppID or -1 allows any App to provide the check.
+	AppID *int64 `json:"app_id"`
 }
 
 // RequiredPullRequestReviewsRequest controls a request for review rights.

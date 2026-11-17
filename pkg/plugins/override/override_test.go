@@ -1623,6 +1623,95 @@ func TestHandle(t *testing.T) {
 	}
 }
 
+func TestHandleAppPinnedRequiredChecks(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		appID       *int64
+		legacy      bool
+		withoutApp  bool
+		app         *github.App
+		getAppErr   error
+		request     string
+		presubmits  []config.Presubmit
+		sticky      bool
+		wantBlocked string
+	}{
+		{name: "Prow App matches", appID: new(fakeProwApp.ID)},
+		{name: "foreign App", appID: new(int64(99)), wantBlocked: "`gate` requires GitHub App ID 99, but Prow uses GitHub App ID 4242"},
+		{name: "foreign App blocks mixed request", appID: new(int64(99)), request: "gate other", wantBlocked: "A Prow override cannot satisfy this branch protection requirement"},
+		{name: "foreign App blocks sticky override", appID: new(int64(99)), sticky: true, wantBlocked: "`gate` requires GitHub App ID 99"},
+		{name: "foreign App blocks job alias", appID: new(int64(99)), request: "gate-job", presubmits: []config.Presubmit{{JobBase: config.JobBase{Name: "gate-job"}, Reporter: config.Reporter{Context: "gate"}}}, wantBlocked: "`gate` requires GitHub App ID 99"},
+		{name: "identity lookup fails", appID: new(fakeProwApp.ID), getAppErr: errors.New("unavailable"), wantBlocked: "Cannot determine Prow's GitHub App ID"},
+		{name: "identity lacks numeric ID", appID: new(fakeProwApp.ID), app: &github.App{Slug: "prow"}, wantBlocked: "Cannot determine Prow's GitHub App ID"},
+		{name: "legacy GHES does not need identity", legacy: true, getAppErr: errors.New("must not query")},
+		{name: "unpinned does not need identity", getAppErr: errors.New("must not query")},
+		{name: "any App does not need identity", appID: new(int64(-1)), getAppErr: errors.New("must not query")},
+		{name: "unrequested pin does not need identity", appID: new(int64(99)), request: "other", getAppErr: errors.New("must not query")},
+		{name: "non-App auth preserves status override", appID: new(int64(99)), withoutApp: true, getAppErr: errors.New("must not query")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			requirements := &github.RequiredStatusChecks{Contexts: []string{"gate"}}
+			if !tc.legacy {
+				requirements.Checks = []github.RequiredStatusCheck{{Context: "gate", AppID: tc.appID}}
+			}
+			initialStatuses := []github.Status{{Context: "gate", State: github.StatusFailure}, {Context: "other", State: github.StatusFailure}}
+			initialRuns := []github.CheckRun{{Name: "gate", Status: "in_progress"}}
+			fc := &fakeClient{
+				statuses:         append([]github.Status{}, initialStatuses...),
+				checkruns:        &github.CheckRunList{CheckRuns: append([]github.CheckRun{}, initialRuns...)},
+				branchProtection: &github.BranchProtection{RequiredStatusChecks: requirements},
+				usesAppsAuth:     !tc.withoutApp,
+				app:              tc.app,
+				getAppErr:        tc.getAppErr,
+				ps:               tc.presubmits,
+				jobs:             sets.New[string](),
+			}
+			request := tc.request
+			if request == "" {
+				request = "gate"
+			}
+			command := "/override "
+			if tc.sticky {
+				command = "/override-sticky "
+			}
+			event := &github.GenericCommentEvent{
+				IsPR: true, IssueState: "open", Action: github.GenericCommentActionCreated,
+				Body: command + request, Number: fakePR,
+				User: github.User{Login: adminUser},
+				Repo: github.Repo{Owner: github.User{Login: fakeOrg}, Name: fakeRepo},
+			}
+			if err := handle(fc, logrus.WithField("plugin", pluginName), event, plugins.Override{}, tc.sticky); err != nil {
+				t.Fatal(err)
+			}
+			comments := strings.Join(fc.comments, "\n")
+			if tc.wantBlocked != "" {
+				if !strings.Contains(comments, tc.wantBlocked) || !strings.Contains(comments, "No overrides were applied.") && !strings.Contains(comments, "no overrides were applied.") {
+					t.Errorf("expected blocked explanation %q, got %q", tc.wantBlocked, comments)
+				}
+				if strings.Contains(comments, "Overrode contexts") {
+					t.Errorf("blocked request claimed success: %s", comments)
+				}
+				if diff := cmp.Diff(initialStatuses, fc.statuses); diff != "" {
+					t.Errorf("blocked request changed statuses (-want +got): %s", diff)
+				}
+				if diff := cmp.Diff(initialRuns, fc.checkruns.CheckRuns); diff != "" {
+					t.Errorf("blocked request changed check runs (-want +got): %s", diff)
+				}
+				if len(fc.jobs) != 0 || len(fc.prowJobs) != 0 {
+					t.Error("blocked request changed ProwJobs")
+				}
+				return
+			}
+			if !strings.Contains(comments, "Overrode contexts on behalf of "+adminUser+": "+request) {
+				t.Errorf("expected successful override, got %q", comments)
+			}
+			if request == "gate" && !tc.withoutApp && len(fc.checkruns.CheckRuns) != len(initialRuns)+1 {
+				t.Error("expected a Prow override check run")
+			}
+		})
+	}
+}
+
 func TestHelpProvider(t *testing.T) {
 	cases := []struct {
 		name        string

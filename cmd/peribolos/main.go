@@ -1175,10 +1175,20 @@ func configureOrg(opt options, client github.Client, orgName string, orgConfig o
 	// dry run) does not check role references. With --fix-org-roles set, validation runs
 	// regardless of --confirm, so a dry run surfaces undefined team/user references before
 	// applying. Note this does not check that the referenced roles exist in GitHub; that
-	// requires an API call and happens later in configureOrgRoles, before any mutations.
+	// requires an API call and is checked by the role preflight below.
 	if opt.fixOrgRoles {
 		if err := orgConfig.ValidateRoles(); err != nil {
 			return fmt.Errorf("invalid role configuration: %w", err)
+		}
+	}
+
+	// Read and validate every configured role before any subsystem can mutate the org.
+	var roleSnapshots map[string]orgRoleSnapshot
+	if opt.fixOrgRoles {
+		var err error
+		roleSnapshots, err = prefetchOrgRoles(client, orgName, orgConfig)
+		if err != nil {
+			return fmt.Errorf("failed to preflight %s organization roles: %w", orgName, err)
 		}
 	}
 
@@ -1256,7 +1266,7 @@ func configureOrg(opt options, client github.Client, orgName string, orgConfig o
 	// Configure organization roles
 	if !opt.fixOrgRoles {
 		logrus.Infof("Skipping organization roles configuration")
-	} else if err := configureOrgRoles(client, orgName, orgConfig, githubTeams, ignoredTeamSlugs, ignoredSecretTeamSlugs, invitees); err != nil {
+	} else if err := configureOrgRoles(client, orgName, orgConfig, roleSnapshots, githubTeams, ignoredTeamSlugs, ignoredSecretTeamSlugs, invitees); err != nil {
 		return fmt.Errorf("failed to configure %s organization roles: %w", orgName, err)
 	}
 
@@ -1804,37 +1814,56 @@ type orgRolesClient interface {
 	ListUsersWithRole(org string, roleID int) ([]github.OrganizationRoleAssignment, error)
 }
 
-// configureOrgRoles configures organization roles for teams and users.
-// ignoredTeamSlugs holds teams excluded per the ignore flags (secret/enterprise); their
-// role assignments are left untouched rather than reconciled against the filtered team set.
-// ignoredSecretTeamSlugs is the subset of those that are secret; they are reported by count
-// (not by slug) so a secret team's name is never leaked to the logs.
-func configureOrgRoles(client orgRolesClient, orgName string, orgConfig org.Config, githubTeams map[string]github.Team, ignoredTeamSlugs sets.Set[string], ignoredSecretTeamSlugs sets.Set[string], invitees sets.Set[string]) error {
-	// Get current organization roles from GitHub
+// orgRoleSnapshot holds role state read before any organization changes are applied.
+type orgRoleSnapshot struct {
+	role  github.OrganizationRole
+	teams []github.OrganizationRoleAssignment
+	users []github.OrganizationRoleAssignment
+}
+
+// prefetchOrgRoles validates all role names and reads their assignments without
+// needing the team-name-to-slug map, which is only available after configuring teams.
+func prefetchOrgRoles(client orgRolesClient, orgName string, orgConfig org.Config) (map[string]orgRoleSnapshot, error) {
+	if len(orgConfig.Roles) == 0 {
+		return nil, nil
+	}
+
 	roles, err := client.ListOrganizationRoles(orgName)
 	if err != nil {
-		return fmt.Errorf("failed to list organization roles: %w", err)
+		return nil, fmt.Errorf("failed to list organization roles: %w", err)
 	}
-
-	if len(roles) == 0 && len(orgConfig.Roles) == 0 {
-		return nil
-	}
-
-	// Build a lookup of GitHub roles by lowercase name
 	githubRolesByName := make(map[string]github.OrganizationRole, len(roles))
 	for _, role := range roles {
 		githubRolesByName[strings.ToLower(role.Name)] = role
 	}
-
-	// Validate all configured roles exist in GitHub BEFORE any mutations
 	for roleName := range orgConfig.Roles {
 		if _, ok := githubRolesByName[strings.ToLower(roleName)]; !ok {
-			return fmt.Errorf("role %q does not exist in organization %s - create the role in GitHub before assigning it", roleName, orgName)
+			return nil, fmt.Errorf("role %q does not exist in organization %s - create the role in GitHub before assigning it", roleName, orgName)
 		}
 	}
 
-	logrus.Debugf("Processing %d configured organization roles (of %d total in org)", len(orgConfig.Roles), len(roles))
+	snapshots := make(map[string]orgRoleSnapshot, len(orgConfig.Roles))
+	for roleName := range orgConfig.Roles {
+		role := githubRolesByName[strings.ToLower(roleName)]
+		teams, err := client.ListTeamsWithRole(orgName, role.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list teams with role %s: %w", role.Name, err)
+		}
+		users, err := client.ListUsersWithRole(orgName, role.ID)
+		if err != nil {
+			return nil, fmt.Errorf("failed to list users with role %s: %w", role.Name, err)
+		}
+		snapshots[strings.ToLower(roleName)] = orgRoleSnapshot{role: role, teams: teams, users: users}
+	}
+	return snapshots, nil
+}
 
+// configureOrgRoles configures organization roles using prefetched assignments.
+// ignoredTeamSlugs holds teams excluded per the ignore flags (secret/enterprise); their
+// role assignments are left untouched rather than reconciled against the filtered team set.
+// ignoredSecretTeamSlugs is the subset of those that are secret; they are reported by count
+// (not by slug) so a secret team's name is never leaked to the logs.
+func configureOrgRoles(client orgRolesClient, orgName string, orgConfig org.Config, snapshots map[string]orgRoleSnapshot, githubTeams map[string]github.Team, ignoredTeamSlugs sets.Set[string], ignoredSecretTeamSlugs sets.Set[string], invitees sets.Set[string]) error {
 	var allErrors []error
 
 	// Only manage roles that are explicitly declared in config. Roles absent
@@ -1846,11 +1875,12 @@ func configureOrgRoles(client orgRolesClient, orgName string, orgConfig org.Conf
 	// because GitHub ships predefined roles and roles may be managed outside
 	// peribolos.
 	for roleName, roleConfig := range orgConfig.Roles {
-		role := githubRolesByName[strings.ToLower(roleName)]
-		if err := configureRoleTeamAssignments(client, orgName, role.Name, role.ID, roleConfig.Teams, githubTeams, ignoredTeamSlugs, ignoredSecretTeamSlugs); err != nil {
+		snapshot := snapshots[strings.ToLower(roleName)]
+		role := snapshot.role
+		if err := configureRoleTeamAssignments(client, orgName, role.Name, role.ID, roleConfig.Teams, snapshot.teams, githubTeams, ignoredTeamSlugs, ignoredSecretTeamSlugs); err != nil {
 			allErrors = append(allErrors, fmt.Errorf("failed to configure team assignments for role %s: %w", role.Name, err))
 		}
-		if err := configureRoleUserAssignments(client, orgName, role.Name, role.ID, roleConfig.Users, invitees); err != nil {
+		if err := configureRoleUserAssignments(client, orgName, role.Name, role.ID, roleConfig.Users, snapshot.users, invitees); err != nil {
 			allErrors = append(allErrors, fmt.Errorf("failed to configure user assignments for role %s: %w", role.Name, err))
 		}
 	}
@@ -1859,13 +1889,7 @@ func configureOrgRoles(client orgRolesClient, orgName string, orgConfig org.Conf
 }
 
 // configureRoleTeamAssignments configures team assignments for a specific role
-func configureRoleTeamAssignments(client orgRolesClient, orgName, roleName string, roleID int, wantTeams []string, githubTeams map[string]github.Team, ignoredTeamSlugs sets.Set[string], ignoredSecretTeamSlugs sets.Set[string]) error {
-	// Get current team assignments for this role
-	currentTeams, err := client.ListTeamsWithRole(orgName, roleID)
-	if err != nil {
-		return fmt.Errorf("failed to list teams with role %s: %w", roleName, err)
-	}
-
+func configureRoleTeamAssignments(client orgRolesClient, orgName, roleName string, roleID int, wantTeams []string, currentTeams []github.OrganizationRoleAssignment, githubTeams map[string]github.Team, ignoredTeamSlugs sets.Set[string], ignoredSecretTeamSlugs sets.Set[string]) error {
 	// If we want no teams and have no teams, we're done
 	if len(wantTeams) == 0 && len(currentTeams) == 0 {
 		return nil
@@ -1956,13 +1980,7 @@ func configureRoleTeamAssignments(client orgRolesClient, orgName, roleName strin
 }
 
 // configureRoleUserAssignments configures user assignments for a specific role
-func configureRoleUserAssignments(client orgRolesClient, orgName, roleName string, roleID int, wantUsers []string, invitees sets.Set[string]) error {
-	// Get current user assignments for this role
-	currentUsers, err := client.ListUsersWithRole(orgName, roleID)
-	if err != nil {
-		return fmt.Errorf("failed to list users with role %s: %w", roleName, err)
-	}
-
+func configureRoleUserAssignments(client orgRolesClient, orgName, roleName string, roleID int, wantUsers []string, currentUsers []github.OrganizationRoleAssignment, invitees sets.Set[string]) error {
 	// Create maps to preserve original casing while comparing normalized usernames
 	wantMap := make(map[string]string) // normalized -> original
 	for _, user := range wantUsers {

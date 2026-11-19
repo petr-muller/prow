@@ -35,6 +35,7 @@ import (
 	"sigs.k8s.io/prow/pkg/github"
 
 	"k8s.io/apimachinery/pkg/util/sets"
+	"k8s.io/utils/ptr"
 )
 
 func TestOptions(t *testing.T) {
@@ -5749,7 +5750,10 @@ func TestConfigureOrgRoles(t *testing.T) {
 		githubTeams := map[string]github.Team{}
 		invitees := sets.Set[string]{}
 
-		err := configureOrgRoles(client, "test-org", orgConfig, githubTeams, nil, nil, invitees)
+		snapshots, err := prefetchOrgRoles(client, "test-org", orgConfig)
+		if err == nil {
+			err = configureOrgRoles(client, "test-org", orgConfig, snapshots, githubTeams, nil, nil, invitees)
+		}
 		if err == nil {
 			t.Fatal("Expected error for non-existent role, but got none")
 		}
@@ -5783,7 +5787,10 @@ func TestConfigureOrgRoles(t *testing.T) {
 		githubTeams := map[string]github.Team{}
 		invitees := sets.Set[string]{}
 
-		err := configureOrgRoles(client, "test-org", orgConfig, githubTeams, nil, nil, invitees)
+		snapshots, err := prefetchOrgRoles(client, "test-org", orgConfig)
+		if err == nil {
+			err = configureOrgRoles(client, "test-org", orgConfig, snapshots, githubTeams, nil, nil, invitees)
+		}
 		if err != nil {
 			t.Errorf("Expected case-insensitive role matching to succeed, got error: %v", err)
 		}
@@ -5818,7 +5825,10 @@ func TestConfigureOrgRoles(t *testing.T) {
 		githubTeams := map[string]github.Team{}
 		invitees := sets.Set[string]{}
 
-		err := configureOrgRoles(client, "test-org", orgConfig, githubTeams, nil, nil, invitees)
+		snapshots, err := prefetchOrgRoles(client, "test-org", orgConfig)
+		if err == nil {
+			err = configureOrgRoles(client, "test-org", orgConfig, snapshots, githubTeams, nil, nil, invitees)
+		}
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -5869,7 +5879,10 @@ func TestConfigureOrgRoles(t *testing.T) {
 		githubTeams := map[string]github.Team{}
 		invitees := sets.Set[string]{}
 
-		err := configureOrgRoles(client, "test-org", orgConfig, githubTeams, nil, nil, invitees)
+		snapshots, err := prefetchOrgRoles(client, "test-org", orgConfig)
+		if err == nil {
+			err = configureOrgRoles(client, "test-org", orgConfig, snapshots, githubTeams, nil, nil, invitees)
+		}
 		if err != nil {
 			t.Errorf("Unexpected error: %v", err)
 		}
@@ -5895,6 +5908,13 @@ func TestConfigureOrgRoles(t *testing.T) {
 
 // fakeOrgRolesClient is a mock client for testing organization roles functionality
 type fakeOrgRolesClient struct {
+	github.Client
+	mutationsStarted   bool
+	roleReads          []string
+	assignmentReads    int
+	failAssignmentRead int
+	metadataEdits      int
+
 	roles                    []github.OrganizationRole
 	teamsWithRole            map[int][]github.OrganizationRoleAssignment
 	usersWithRole            map[int][]github.OrganizationRoleAssignment
@@ -5912,6 +5932,10 @@ type fakeOrgRolesClient struct {
 }
 
 func (f *fakeOrgRolesClient) ListOrganizationRoles(org string) ([]github.OrganizationRole, error) {
+	if f.metadataEdits != 0 || f.mutationsStarted {
+		return nil, errors.New("role read after mutation")
+	}
+	f.roleReads = append(f.roleReads, "roles")
 	if f.listOrganizationRolesErr != nil {
 		return nil, f.listOrganizationRolesErr
 	}
@@ -5919,6 +5943,7 @@ func (f *fakeOrgRolesClient) ListOrganizationRoles(org string) ([]github.Organiz
 }
 
 func (f *fakeOrgRolesClient) AssignOrganizationRoleToTeam(org, teamSlug string, roleID int) error {
+	f.mutationsStarted = true
 	if f.assignTeamRoleErr != nil {
 		return f.assignTeamRoleErr
 	}
@@ -5927,6 +5952,7 @@ func (f *fakeOrgRolesClient) AssignOrganizationRoleToTeam(org, teamSlug string, 
 }
 
 func (f *fakeOrgRolesClient) RemoveOrganizationRoleFromTeam(org, teamSlug string, roleID int) error {
+	f.mutationsStarted = true
 	if f.removeTeamRoleErr != nil {
 		return f.removeTeamRoleErr
 	}
@@ -5935,6 +5961,7 @@ func (f *fakeOrgRolesClient) RemoveOrganizationRoleFromTeam(org, teamSlug string
 }
 
 func (f *fakeOrgRolesClient) AssignOrganizationRoleToUser(org, user string, roleID int) error {
+	f.mutationsStarted = true
 	if f.assignUserRoleErr != nil {
 		return f.assignUserRoleErr
 	}
@@ -5943,6 +5970,7 @@ func (f *fakeOrgRolesClient) AssignOrganizationRoleToUser(org, user string, role
 }
 
 func (f *fakeOrgRolesClient) RemoveOrganizationRoleFromUser(org, user string, roleID int) error {
+	f.mutationsStarted = true
 	if f.removeUserRoleErr != nil {
 		return f.removeUserRoleErr
 	}
@@ -5951,6 +5979,15 @@ func (f *fakeOrgRolesClient) RemoveOrganizationRoleFromUser(org, user string, ro
 }
 
 func (f *fakeOrgRolesClient) ListTeamsWithRole(org string, roleID int) ([]github.OrganizationRoleAssignment, error) {
+	if f.metadataEdits != 0 || f.mutationsStarted {
+		return nil, errors.New("role read after mutation")
+	}
+	f.roleReads = append(f.roleReads, fmt.Sprintf("teams/%d", roleID))
+	f.assignmentReads++
+	if f.assignmentReads == f.failAssignmentRead {
+		return nil, fmt.Errorf("assignment read failed")
+	}
+
 	if f.listTeamsWithRoleErr != nil {
 		return nil, f.listTeamsWithRoleErr
 	}
@@ -5958,6 +5995,15 @@ func (f *fakeOrgRolesClient) ListTeamsWithRole(org string, roleID int) ([]github
 }
 
 func (f *fakeOrgRolesClient) ListUsersWithRole(org string, roleID int) ([]github.OrganizationRoleAssignment, error) {
+	if f.metadataEdits != 0 || f.mutationsStarted {
+		return nil, errors.New("role read after mutation")
+	}
+	f.roleReads = append(f.roleReads, fmt.Sprintf("users/%d", roleID))
+	f.assignmentReads++
+	if f.assignmentReads == f.failAssignmentRead {
+		return nil, fmt.Errorf("assignment read failed")
+	}
+
 	if f.listUsersWithRoleErr != nil {
 		return nil, f.listUsersWithRoleErr
 	}
@@ -5977,7 +6023,6 @@ func TestConfigureRoleTeamAssignments(t *testing.T) {
 		ignoredSecretTeamSlugs sets.Set[string]
 		expectAssigned         []string
 		expectRemoved          []string
-		listTeamsErr           error
 		assignErr              error
 		removeErr              error
 		expectError            bool
@@ -6088,20 +6133,6 @@ func TestConfigureRoleTeamAssignments(t *testing.T) {
 			expectError:    true,
 		},
 		{
-			name:         "list teams error is propagated",
-			roleName:     "security-manager",
-			roleID:       1,
-			wantTeams:    []string{"security-team"},
-			currentTeams: []github.OrganizationRoleAssignment{},
-			githubTeams: map[string]github.Team{
-				"security-team": {ID: 10, Slug: "security-team", Name: "Security Team"},
-			},
-			listTeamsErr:   fmt.Errorf("api error"),
-			expectAssigned: []string{},
-			expectRemoved:  []string{},
-			expectError:    true,
-		},
-		{
 			name:      "remove error is propagated",
 			roleName:  "security-manager",
 			roleID:    1,
@@ -6193,12 +6224,11 @@ func TestConfigureRoleTeamAssignments(t *testing.T) {
 				teamsWithRole: map[int][]github.OrganizationRoleAssignment{
 					tc.roleID: tc.currentTeams,
 				},
-				listTeamsWithRoleErr: tc.listTeamsErr,
-				assignTeamRoleErr:    tc.assignErr,
-				removeTeamRoleErr:    tc.removeErr,
+				assignTeamRoleErr: tc.assignErr,
+				removeTeamRoleErr: tc.removeErr,
 			}
 
-			err := configureRoleTeamAssignments(client, "test-org", tc.roleName, tc.roleID, tc.wantTeams, tc.githubTeams, tc.ignoredTeamSlugs, tc.ignoredSecretTeamSlugs)
+			err := configureRoleTeamAssignments(client, "test-org", tc.roleName, tc.roleID, tc.wantTeams, tc.currentTeams, tc.githubTeams, tc.ignoredTeamSlugs, tc.ignoredSecretTeamSlugs)
 
 			if tc.expectError && err == nil {
 				t.Error("Expected error but got none")
@@ -6243,7 +6273,7 @@ func TestConfigureRoleTeamAssignmentsSecretTeamNotLogged(t *testing.T) {
 
 	// Empty wantTeams: both ignored teams keep the role, so both must be surfaced.
 	err := configureRoleTeamAssignments(
-		client, "test-org", "security-manager", 1, nil,
+		client, "test-org", "security-manager", 1, nil, client.teamsWithRole[1],
 		map[string]github.Team{},
 		sets.New[string](secretSlug, enterpriseSlug),
 		sets.New[string](secretSlug),
@@ -6299,7 +6329,6 @@ func TestConfigureRoleUserAssignments(t *testing.T) {
 		currentUsers   []github.OrganizationRoleAssignment
 		expectAssigned []string
 		expectRemoved  []string
-		listUsersErr   error
 		assignErr      error
 		removeErr      error
 		expectError    bool
@@ -6395,13 +6424,12 @@ func TestConfigureRoleUserAssignments(t *testing.T) {
 				usersWithRole: map[int][]github.OrganizationRoleAssignment{
 					tc.roleID: tc.currentUsers,
 				},
-				listUsersWithRoleErr: tc.listUsersErr,
-				assignUserRoleErr:    tc.assignErr,
-				removeUserRoleErr:    tc.removeErr,
+				assignUserRoleErr: tc.assignErr,
+				removeUserRoleErr: tc.removeErr,
 			}
 			invitees := sets.Set[string]{}
 
-			err := configureRoleUserAssignments(client, "test-org", tc.roleName, tc.roleID, tc.wantUsers, invitees)
+			err := configureRoleUserAssignments(client, "test-org", tc.roleName, tc.roleID, tc.wantUsers, tc.currentUsers, invitees)
 
 			if tc.expectError && err == nil {
 				t.Error("Expected error but got none")
@@ -6432,7 +6460,7 @@ func TestConfigureRoleUserAssignmentsSkipsPendingInvitees(t *testing.T) {
 	// User has a pending invitation to the org
 	invitees := sets.New[string]("pending-user")
 
-	err := configureRoleUserAssignments(client, "test-org", "security-manager", 1, []string{"pending-user", "existing-user"}, invitees)
+	err := configureRoleUserAssignments(client, "test-org", "security-manager", 1, []string{"pending-user", "existing-user"}, client.usersWithRole[1], invitees)
 	if err != nil {
 		t.Errorf("Unexpected error: %v", err)
 	}
@@ -6474,7 +6502,7 @@ func TestConfigureRoleUserAssignmentsSkipsIndirect(t *testing.T) {
 	}
 
 	// Config wants no users — only direct and mixed assignments should be removed
-	err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{}, sets.Set[string]{})
+	err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{}, client.usersWithRole[1], sets.Set[string]{})
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
@@ -6486,16 +6514,6 @@ func TestConfigureRoleUserAssignmentsSkipsIndirect(t *testing.T) {
 
 // Test error propagation in team assignments
 func TestConfigureRoleTeamAssignmentsErrors(t *testing.T) {
-	t.Run("list teams error", func(t *testing.T) {
-		client := &fakeOrgRolesClient{
-			listTeamsWithRoleErr: fmt.Errorf("api error"),
-		}
-		err := configureRoleTeamAssignments(client, "test-org", "test-role", 1, []string{"team"}, map[string]github.Team{}, nil, nil)
-		if err == nil {
-			t.Error("Expected error but got none")
-		}
-	})
-
 	t.Run("assign error", func(t *testing.T) {
 		client := &fakeOrgRolesClient{
 			teamsWithRole:     map[int][]github.OrganizationRoleAssignment{1: {}},
@@ -6504,7 +6522,7 @@ func TestConfigureRoleTeamAssignmentsErrors(t *testing.T) {
 		githubTeams := map[string]github.Team{
 			"my-team": {ID: 1, Slug: "my-team"},
 		}
-		err := configureRoleTeamAssignments(client, "test-org", "test-role", 1, []string{"my-team"}, githubTeams, nil, nil)
+		err := configureRoleTeamAssignments(client, "test-org", "test-role", 1, []string{"my-team"}, client.teamsWithRole[1], githubTeams, nil, nil)
 		if err == nil {
 			t.Error("Expected error but got none")
 		}
@@ -6517,7 +6535,7 @@ func TestConfigureRoleTeamAssignmentsErrors(t *testing.T) {
 			},
 			removeTeamRoleErr: fmt.Errorf("remove failed"),
 		}
-		err := configureRoleTeamAssignments(client, "test-org", "test-role", 1, []string{}, map[string]github.Team{}, nil, nil)
+		err := configureRoleTeamAssignments(client, "test-org", "test-role", 1, []string{}, client.teamsWithRole[1], map[string]github.Team{}, nil, nil)
 		if err == nil {
 			t.Error("Expected error but got none")
 		}
@@ -6526,22 +6544,12 @@ func TestConfigureRoleTeamAssignmentsErrors(t *testing.T) {
 
 // Test error propagation in user assignments
 func TestConfigureRoleUserAssignmentsErrors(t *testing.T) {
-	t.Run("list users error", func(t *testing.T) {
-		client := &fakeOrgRolesClient{
-			listUsersWithRoleErr: fmt.Errorf("api error"),
-		}
-		err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{"user"}, sets.Set[string]{})
-		if err == nil {
-			t.Error("Expected error but got none")
-		}
-	})
-
 	t.Run("assign error", func(t *testing.T) {
 		client := &fakeOrgRolesClient{
 			usersWithRole:     map[int][]github.OrganizationRoleAssignment{1: {}},
 			assignUserRoleErr: fmt.Errorf("assign failed"),
 		}
-		err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{"user"}, sets.Set[string]{})
+		err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{"user"}, client.usersWithRole[1], sets.Set[string]{})
 		if err == nil {
 			t.Error("Expected error but got none")
 		}
@@ -6554,7 +6562,7 @@ func TestConfigureRoleUserAssignmentsErrors(t *testing.T) {
 			},
 			removeUserRoleErr: fmt.Errorf("remove failed"),
 		}
-		err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{}, sets.Set[string]{})
+		err := configureRoleUserAssignments(client, "test-org", "test-role", 1, []string{}, client.usersWithRole[1], sets.Set[string]{})
 		if err == nil {
 			t.Error("Expected error but got none")
 		}
@@ -6585,7 +6593,10 @@ func TestConfigureOrgRolesValidatesBeforeMutating(t *testing.T) {
 		},
 	}
 
-	err := configureOrgRoles(client, "test-org", orgConfig, map[string]github.Team{}, nil, nil, sets.Set[string]{})
+	snapshots, err := prefetchOrgRoles(client, "test-org", orgConfig)
+	if err == nil {
+		err = configureOrgRoles(client, "test-org", orgConfig, snapshots, map[string]github.Team{}, nil, nil, sets.Set[string]{})
+	}
 	if err == nil {
 		t.Fatal("Expected error for non-existent role")
 	}
@@ -6622,4 +6633,79 @@ func slicesEqualUnordered(a, b []string) bool {
 		return true
 	}
 	return slices.Equal(normalizeSlice(a), normalizeSlice(b))
+}
+
+func (f *fakeOrgRolesClient) GetOrg(name string) (*github.Organization, error) {
+	return &github.Organization{}, nil
+}
+
+func (f *fakeOrgRolesClient) EditOrg(name string, value github.Organization) (*github.Organization, error) {
+	f.metadataEdits++
+	return &value, nil
+}
+
+func TestConfigureOrgRolePreflight(t *testing.T) {
+	for _, test := range []struct {
+		name         string
+		failRead     int
+		listRolesErr error
+		missingRole  bool
+	}{
+		{name: "all reads before metadata"},
+		{name: "second role team read fails", failRead: 3},
+		{name: "second role user read fails", failRead: 4},
+		{name: "role listing fails", listRolesErr: errors.New("roles unavailable")},
+		{name: "unknown role", missingRole: true},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			client := &fakeOrgRolesClient{
+				roles:                    []github.OrganizationRole{{ID: 1, Name: "first"}, {ID: 2, Name: "second"}},
+				failAssignmentRead:       test.failRead,
+				listOrganizationRolesErr: test.listRolesErr,
+				teamsWithRole: map[int][]github.OrganizationRoleAssignment{
+					1: {{Slug: "stale-team"}}, 2: {{Slug: "stale-team"}},
+				},
+				usersWithRole: map[int][]github.OrganizationRoleAssignment{
+					1: {{Login: "stale-user"}}, 2: {{Login: "stale-user"}},
+				},
+			}
+			config := org.Config{
+				Metadata: org.Metadata{Description: ptr.To("updated")},
+				Roles: map[string]org.Role{
+					"first":  {Users: []string{"new-user"}},
+					"second": {Users: []string{"new-user"}},
+				},
+			}
+			if test.missingRole {
+				config.Roles["missing"] = org.Role{}
+			}
+			wantError := test.failRead != 0 || test.listRolesErr != nil || test.missingRole
+			err := configureOrg(options{fixOrgRoles: true, fixOrg: true, fixTeams: wantError, ignoreInvitees: true}, client, "test-org", config)
+			if (err != nil) != wantError {
+				t.Fatalf("configureOrg() error = %v, want error %t", err, wantError)
+			}
+			if wantError && client.metadataEdits != 0 {
+				t.Errorf("metadata mutated before role preflight completed")
+			}
+			if !wantError && (client.metadataEdits != 1 || client.assignmentReads != 4) {
+				t.Errorf("expected four assignment reads and one metadata edit, got reads=%d edits=%d", client.assignmentReads, client.metadataEdits)
+			}
+			if test.failRead != 0 && client.assignmentReads != test.failRead {
+				t.Errorf("expected failure on assignment read %d, got %d reads", test.failRead, client.assignmentReads)
+			}
+			if len(client.assignedTeamRoles)+len(client.removedTeamRoles)+len(client.assignedUserRoles)+len(client.removedUserRoles) != 0 {
+				t.Errorf("role assignments mutated during preflight")
+			}
+		})
+	}
+}
+
+func TestConfigureOrgEmptyRolesSkipsRoleAPIs(t *testing.T) {
+	client := &fakeOrgRolesClient{}
+	if err := configureOrg(options{fixOrgRoles: true, ignoreInvitees: true}, client, "test-org", org.Config{Roles: map[string]org.Role{}}); err != nil {
+		t.Fatalf("configureOrg() failed: %v", err)
+	}
+	if len(client.roleReads) != 0 {
+		t.Errorf("empty roles made organization-role API calls: %v", client.roleReads)
+	}
 }

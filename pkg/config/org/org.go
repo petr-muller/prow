@@ -294,6 +294,8 @@ func PruneRepoDefaults(repo Repo) Repo {
 	pruneDefault(&repo.HasWiki, true)
 	pruneDefault(&repo.AllowRebaseMerge, true)
 	pruneDefault(&repo.AllowSquashMerge, true)
+	pruneDefault(&repo.SquashMergeCommitTitle, "PR_TITLE")
+	pruneDefault(&repo.SquashMergeCommitMessage, "COMMIT_MESSAGES")
 	pruneDefault(&repo.AllowMergeCommit, true)
 	pruneDefault(&repo.DeleteBranchOnMerge, false)
 

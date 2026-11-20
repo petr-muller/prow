@@ -463,18 +463,20 @@ func dumpOrgConfig(client dumpClient, orgName string, ignoreSecretTeams bool, ig
 			visibility = &full.Visibility
 		}
 		repoConfig := org.PruneRepoDefaults(org.Repo{
-			Description:         &full.Description,
-			HomePage:            &full.Homepage,
-			Visibility:          visibility,
-			HasIssues:           &full.HasIssues,
-			HasProjects:         &full.HasProjects,
-			HasWiki:             &full.HasWiki,
-			AllowMergeCommit:    &full.AllowMergeCommit,
-			AllowSquashMerge:    &full.AllowSquashMerge,
-			AllowRebaseMerge:    &full.AllowRebaseMerge,
-			DeleteBranchOnMerge: &full.DeleteBranchOnMerge,
-			Archived:            &full.Archived,
-			DefaultBranch:       &full.DefaultBranch,
+			Description:              &full.Description,
+			HomePage:                 &full.Homepage,
+			Visibility:               visibility,
+			HasIssues:                &full.HasIssues,
+			HasProjects:              &full.HasProjects,
+			HasWiki:                  &full.HasWiki,
+			AllowMergeCommit:         &full.AllowMergeCommit,
+			AllowSquashMerge:         &full.AllowSquashMerge,
+			SquashMergeCommitTitle:   &full.SquashMergeCommitTitle,
+			SquashMergeCommitMessage: &full.SquashMergeCommitMessage,
+			AllowRebaseMerge:         &full.AllowRebaseMerge,
+			DeleteBranchOnMerge:      &full.DeleteBranchOnMerge,
+			Archived:                 &full.Archived,
+			DefaultBranch:            &full.DefaultBranch,
 			// Collaborators will be set conditionally below
 		})
 

@@ -2201,7 +2201,9 @@ func TestDumpOrgConfig(t *testing.T) {
 						Archived:      true,
 						DefaultBranch: master,
 					},
-					DeleteBranchOnMerge: true,
+					DeleteBranchOnMerge:      true,
+					SquashMergeCommitTitle:   "COMMIT_OR_PR_TITLE",
+					SquashMergeCommitMessage: "PR_BODY",
 				},
 				{
 					Repo: github.Repo{
@@ -2211,6 +2213,8 @@ func TestDumpOrgConfig(t *testing.T) {
 						HasWiki:       true,
 						DefaultBranch: master,
 					},
+					SquashMergeCommitTitle:   "PR_TITLE",
+					SquashMergeCommitMessage: "COMMIT_MESSAGES",
 				},
 				{
 					Repo: github.Repo{
@@ -2220,6 +2224,8 @@ func TestDumpOrgConfig(t *testing.T) {
 						HasWiki:       true,
 						DefaultBranch: master,
 					},
+					SquashMergeCommitTitle:   "PR_TITLE",
+					SquashMergeCommitMessage: "COMMIT_MESSAGES",
 				},
 			},
 			expected: org.Config{
@@ -2277,15 +2283,17 @@ func TestDumpOrgConfig(t *testing.T) {
 				Admins:  []string{"admin", "james", "giant", "peach"},
 				Repos: map[string]org.Repo{
 					"project": {
-						Description:         &repoDescription,
-						HomePage:            &repoHomepage,
-						HasProjects:         &yes,
-						AllowMergeCommit:    &no,
-						AllowRebaseMerge:    &no,
-						AllowSquashMerge:    &no,
-						Archived:            &yes,
-						DefaultBranch:       &master,
-						DeleteBranchOnMerge: &yes,
+						Description:              &repoDescription,
+						HomePage:                 &repoHomepage,
+						HasProjects:              &yes,
+						AllowMergeCommit:         &no,
+						AllowRebaseMerge:         &no,
+						AllowSquashMerge:         &no,
+						Archived:                 &yes,
+						DefaultBranch:            &master,
+						DeleteBranchOnMerge:      &yes,
+						SquashMergeCommitTitle:   new("COMMIT_OR_PR_TITLE"),
+						SquashMergeCommitMessage: new("PR_BODY"),
 					},
 					// Non-public visibilities survive PruneRepoDefaults, so they
 					// must round-trip into the dumped config.

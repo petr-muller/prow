@@ -17,8 +17,32 @@ limitations under the License.
 package github
 
 import (
+	"reflect"
 	"testing"
 )
+
+func TestRepoRequestDefined(t *testing.T) {
+	t.Run("zero value", func(t *testing.T) {
+		if (RepoRequest{}).Defined() {
+			t.Error("expected zero request to be undefined")
+		}
+	})
+
+	requestType := reflect.TypeOf(RepoRequest{})
+	for i := 0; i < requestType.NumField(); i++ {
+		t.Run(requestType.Field(i).Name, func(t *testing.T) {
+			var request RepoRequest
+			field := reflect.ValueOf(&request).Elem().Field(i)
+			if field.Kind() != reflect.Pointer {
+				t.Fatalf("expected pointer field, got %s", field.Kind())
+			}
+			field.Set(reflect.New(field.Type().Elem()))
+			if !request.Defined() {
+				t.Error("expected request with one field set to be defined")
+			}
+		})
+	}
+}
 
 func TestRepoRequestToRepoSetsPrivate(t *testing.T) {
 	testCases := []struct {

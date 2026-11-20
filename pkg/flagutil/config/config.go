@@ -93,5 +93,16 @@ func (o *ConfigOptions) ConfigAgent(reuse ...*config.Agent) (*config.Agent, erro
 }
 
 func (o *ConfigOptions) ConfigAgentWithAdditionals(ca *config.Agent, additionals []func(*config.Config) error) (*config.Agent, error) {
-	return ca, ca.Start(o.ConfigPath, o.JobConfigPaths.Strings(), o.SupplementalProwConfigDirs.Strings(), o.SupplementalProwConfigsFileNameSuffix, additionals...)
+	return loadConfig(o, func(configPath string, jobConfigPaths, supplementalDirs []string, supplementalSuffix string, additionals ...func(*config.Config) error) (*config.Agent, error) {
+		return ca, ca.Start(configPath, jobConfigPaths, supplementalDirs, supplementalSuffix, additionals...)
+	}, additionals)
+}
+
+// LoadStrict loads the configured files with strict YAML parsing.
+func (o *ConfigOptions) LoadStrict(additionals ...func(*config.Config) error) (*config.Config, error) {
+	return loadConfig(o, config.LoadStrict, additionals)
+}
+
+func loadConfig[T any](o *ConfigOptions, load func(string, []string, []string, string, ...func(*config.Config) error) (T, error), additionals []func(*config.Config) error) (T, error) {
+	return load(o.ConfigPath, o.JobConfigPaths.Strings(), o.SupplementalProwConfigDirs.Strings(), o.SupplementalProwConfigsFileNameSuffix, additionals...)
 }

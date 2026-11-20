@@ -17,6 +17,7 @@ limitations under the License.
 package flagutil
 
 import (
+	"errors"
 	"flag"
 	"os"
 	"path/filepath"
@@ -26,6 +27,7 @@ import (
 	"github.com/google/go-cmp/cmp"
 	"k8s.io/apimachinery/pkg/util/sets"
 
+	"sigs.k8s.io/prow/pkg/config"
 	"sigs.k8s.io/prow/pkg/flagutil"
 )
 
@@ -196,6 +198,109 @@ func TestConfigAgentJobConfigPaths(t *testing.T) {
 			}
 			if diff := cmp.Diff(sets.New(tc.expected...), actual); diff != "" {
 				t.Errorf("unexpected periodics (-want +got):\n%s", diff)
+			}
+		})
+	}
+}
+
+func TestConfigLoadingPaths(t *testing.T) {
+	for _, suffix := range []string{"_prowconfig.yaml", "_custom.yaml"} {
+		t.Run(suffix, func(t *testing.T) {
+			dir := t.TempDir()
+			prowConfig := filepath.Join(dir, "config.yaml")
+			if err := os.WriteFile(prowConfig, []byte("plank:\n  job_queue_capacities:\n    main: 1\n"), 0600); err != nil {
+				t.Fatal(err)
+			}
+			var jobPaths, supplementalDirs []string
+			for _, name := range []string{"a", "b"} {
+				jobPath := filepath.Join(dir, "jobs-"+name)
+				writePeriodicJobConfig(t, jobPath, name+".yaml", name)
+				jobPaths = append(jobPaths, jobPath)
+				supplementalDir := filepath.Join(dir, "supplemental-"+name)
+				if err := os.Mkdir(supplementalDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(filepath.Join(supplementalDir, "queues"+suffix), []byte("plank:\n  job_queue_capacities:\n    "+name+": 1\n"), 0600); err != nil {
+					t.Fatal(err)
+				}
+				// Files that do not match the selected suffix must be ignored.
+				if err := os.WriteFile(filepath.Join(supplementalDir, "ignored.yaml"), []byte("invalid: ["), 0600); err != nil {
+					t.Fatal(err)
+				}
+				supplementalDirs = append(supplementalDirs, supplementalDir)
+			}
+			options := ConfigOptions{
+				ConfigPath:                            prowConfig,
+				JobConfigPaths:                        flagutil.NewStrings(jobPaths...),
+				SupplementalProwConfigDirs:            flagutil.NewStrings(supplementalDirs...),
+				SupplementalProwConfigsFileNameSuffix: suffix,
+			}
+			cfg, err := options.LoadStrict()
+			if err != nil {
+				t.Fatalf("LoadStrict failed: %v", err)
+			}
+			agent, err := options.ConfigAgent()
+			if err != nil {
+				t.Fatalf("ConfigAgent failed: %v", err)
+			}
+			for name, loaded := range map[string]*config.Config{"LoadStrict": cfg, "ConfigAgent": agent.Config()} {
+				actual := sets.New[string]()
+				for _, periodic := range loaded.AllPeriodics() {
+					actual.Insert(periodic.Name)
+				}
+				if diff := cmp.Diff(sets.New("a", "b"), actual); diff != "" {
+					t.Errorf("%s: unexpected periodics (-want +got):\n%s", name, diff)
+				}
+				if diff := cmp.Diff(config.JobQueueCapacities{"main": 1, "a": 1, "b": 1}, loaded.Plank.JobQueueCapacities); diff != "" {
+					t.Errorf("%s: unexpected queue capacities (-want +got):\n%s", name, diff)
+				}
+			}
+
+			called := false
+			wantErr := errors.New("additional validation failed")
+			_, err = options.LoadStrict(func(got *config.Config) error {
+				called = true
+				if diff := cmp.Diff(cfg.Plank.JobQueueCapacities, got.Plank.JobQueueCapacities); diff != "" {
+					t.Errorf("callback received unexpected config (-want +got):\n%s", diff)
+				}
+				return wantErr
+			})
+			if !called || err != wantErr {
+				t.Errorf("callback called = %v, error = %v, want true and %v", called, err, wantErr)
+			}
+		})
+	}
+}
+
+func TestLoadStrictErrors(t *testing.T) {
+	dir := t.TempDir()
+	valid := filepath.Join(dir, "config.yaml")
+	if err := os.WriteFile(valid, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	invalid := filepath.Join(dir, "invalid.yaml")
+	if err := os.WriteFile(invalid, []byte("unknown_field: true\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	missing := filepath.Join(dir, "missing")
+	for name, options := range map[string]ConfigOptions{
+		"missing prow config": {ConfigPath: missing},
+		"unknown prow field":  {ConfigPath: invalid},
+		"missing job config":  {ConfigPath: valid, JobConfigPaths: flagutil.NewStrings(missing)},
+		"unknown job field":   {ConfigPath: valid, JobConfigPaths: flagutil.NewStrings(invalid)},
+		"missing supplemental directory": {
+			ConfigPath: valid, SupplementalProwConfigDirs: flagutil.NewStrings(missing),
+			SupplementalProwConfigsFileNameSuffix: "_custom.yaml",
+		},
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, wantErr := config.LoadStrict(options.ConfigPath, options.JobConfigPaths.Strings(), options.SupplementalProwConfigDirs.Strings(), options.SupplementalProwConfigsFileNameSuffix)
+			if wantErr == nil {
+				t.Fatal("expected config.LoadStrict to fail")
+			}
+			cfg, err := options.LoadStrict()
+			if err == nil || err.Error() != wantErr.Error() || cfg != nil {
+				t.Errorf("LoadStrict() = (%v, %v), want (nil, %v)", cfg, err, wantErr)
 			}
 		})
 	}

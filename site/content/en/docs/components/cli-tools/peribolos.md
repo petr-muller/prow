@@ -92,6 +92,20 @@ Note that any fields missing from the config will not be managed by peribolos. S
 
 For more details please see GitHub documentation around [edit org], [update org membership], [edit team], [update team membership].
 
+### Repository settings
+
+Use the `repos` key under an org to configure repository settings:
+
+```yaml
+orgs:
+  this-org:
+    repos:
+      some-repo:
+        delete_branch_on_merge: true
+```
+
+This enables automatic deletion of head branches after pull requests are merged in `some-repo`. Omitted repo fields are not managed by peribolos and retain their current values. Explicitly setting `delete_branch_on_merge: false` disables automatic head-branch deletion.
+
 ### Organization roles
 
 The `roles` key assigns [custom organization roles] to teams and users. Role management is opt-in and deliberately conservative:

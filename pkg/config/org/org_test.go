@@ -209,10 +209,11 @@ func TestRepoUnmarshalJSON(t *testing.T) {
 
 func TestValidateRoles(t *testing.T) {
 	tests := []struct {
-		name        string
-		config      Config
-		expectError bool
-		errorPart   string
+		authoritativeMembership bool
+		name                    string
+		config                  Config
+		expectError             bool
+		errorPart               string
 	}{
 		{
 			name: "no roles - should pass",
@@ -224,7 +225,8 @@ func TestValidateRoles(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "valid role with existing team",
+			name:                    "valid role with existing team",
+			authoritativeMembership: true,
 			config: Config{
 				Teams: map[string]Team{
 					"security-team": {Members: []string{"user1"}},
@@ -297,7 +299,8 @@ func TestValidateRoles(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "role with only users (no teams)",
+			name:                    "role with only users (no teams)",
+			authoritativeMembership: true,
 			config: Config{
 				Teams: map[string]Team{
 					"some-team": {Members: []string{"user1"}},
@@ -313,7 +316,8 @@ func TestValidateRoles(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "role references user who is not org member",
+			name:                    "role references user who is not org member",
+			authoritativeMembership: true,
 			config: Config{
 				Admins:  []string{"admin-user"},
 				Members: []string{"member-user"},
@@ -327,7 +331,8 @@ func TestValidateRoles(t *testing.T) {
 			errorPart:   "non-member-user",
 		},
 		{
-			name: "role references user with different casing - should pass",
+			name:                    "role references user with different casing - should pass",
+			authoritativeMembership: true,
 			config: Config{
 				Admins: []string{"AdminUser"},
 				Roles: map[string]Role{
@@ -339,7 +344,8 @@ func TestValidateRoles(t *testing.T) {
 			expectError: false,
 		},
 		{
-			name: "role with both valid and invalid users",
+			name:                    "role with both valid and invalid users",
+			authoritativeMembership: true,
 			config: Config{
 				Admins: []string{"valid-user"},
 				Roles: map[string]Role{
@@ -420,6 +426,15 @@ func TestValidateRoles(t *testing.T) {
 			errorPart:   "role name collision",
 		},
 		{
+			name: "role user not validated when declared membership is not authoritative",
+			config: Config{
+				Members: []string{"alice"},
+				Roles: map[string]Role{
+					"security-manager": {Users: []string{"bob"}},
+				},
+			},
+		},
+		{
 			name: "role user not validated when membership is not declared",
 			config: Config{
 				Teams: map[string]Team{
@@ -458,7 +473,7 @@ func TestValidateRoles(t *testing.T) {
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			err := tc.config.ValidateRoles()
+			err := tc.config.ValidateRoles(tc.authoritativeMembership)
 			if tc.expectError {
 				if err == nil {
 					t.Error("Expected error but got none")

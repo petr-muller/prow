@@ -3496,7 +3496,7 @@ func TestDumpOrgConfig(t *testing.T) {
 					t.Errorf("did not get correct config, diff: %s", diff)
 				}
 				if tc.validateRoles {
-					if err := actual.ValidateRoles(); err != nil {
+					if err := actual.ValidateRoles(true); err != nil {
 						t.Errorf("dumped config failed ValidateRoles: %v", err)
 					}
 				}
@@ -6707,5 +6707,32 @@ func TestConfigureOrgEmptyRolesSkipsRoleAPIs(t *testing.T) {
 	}
 	if len(client.roleReads) != 0 {
 		t.Errorf("empty roles made organization-role API calls: %v", client.roleReads)
+	}
+}
+
+func TestConfigureOrgRoleUserValidation(t *testing.T) {
+	for _, fixOrgMembers := range []bool{false, true} {
+		t.Run(fmt.Sprintf("fix-org-members=%t", fixOrgMembers), func(t *testing.T) {
+			client := &fakeOrgRolesClient{
+				roles: []github.OrganizationRole{{ID: 1, Name: "security-manager"}},
+			}
+			config := org.Config{
+				Members: []string{"alice"},
+				Roles: map[string]org.Role{
+					"security-manager": {Users: []string{"bob"}},
+				},
+			}
+			err := configureOrg(options{fixOrgRoles: true, fixOrgMembers: fixOrgMembers, ignoreInvitees: true}, client, "test-org", config)
+			if fixOrgMembers {
+				if err == nil || !strings.Contains(err.Error(), `references user "bob" who is not an org member`) {
+					t.Fatalf("expected undefined role user error, got %v", err)
+				}
+				if len(client.roleReads) != 0 {
+					t.Errorf("role APIs called before user validation: %v", client.roleReads)
+				}
+			} else if err != nil {
+				t.Fatalf("non-authoritative membership rejected role user: %v", err)
+			}
+		})
 	}
 }

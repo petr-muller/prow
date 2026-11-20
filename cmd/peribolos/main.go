@@ -1177,7 +1177,8 @@ func configureOrg(opt options, client github.Client, orgName string, orgConfig o
 	// applying. Note this does not check that the referenced roles exist in GitHub; that
 	// requires an API call and is checked by the role preflight below.
 	if opt.fixOrgRoles {
-		if err := orgConfig.ValidateRoles(); err != nil {
+		authoritativeMembership := opt.fixOrgMembers && (len(orgConfig.Members) > 0 || len(orgConfig.Admins) > 0)
+		if err := orgConfig.ValidateRoles(authoritativeMembership); err != nil {
 			return fmt.Errorf("invalid role configuration: %w", err)
 		}
 	}

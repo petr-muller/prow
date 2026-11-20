@@ -147,11 +147,11 @@ type Role struct {
 // ValidateRoles checks that the organization roles configuration is internally consistent:
 //   - role names must not collide case-insensitively (GitHub role names are case-insensitive).
 //   - every team referenced by a role must be declared in the config (including nested teams).
-//   - every user referenced by a role must be a declared org member. This check runs only
-//     when the config declares membership (Members/Admins); when it does not, membership may
-//     be managed elsewhere and the full member set is unknown, so the user check is skipped
-//     rather than rejecting valid configs.
-func (c *Config) ValidateRoles() error {
+//   - every user referenced by a role must be a declared org member when
+//     authoritativeMembership is true. Callers must only enable this check when
+//     reconciling org membership from declared Members/Admins; otherwise the full
+//     member set is unknown and user references cannot be validated.
+func (c *Config) ValidateRoles(authoritativeMembership bool) error {
 	if len(c.Roles) == 0 {
 		return nil
 	}
@@ -190,8 +190,7 @@ func (c *Config) ValidateRoles() error {
 	}
 
 	// Validate each role's team and user references. User references are only checked
-	// when the config declares membership; see the ValidateRoles doc comment for why.
-	validateUsers := len(c.Members) > 0 || len(c.Admins) > 0
+	// when membership is authoritative; see the ValidateRoles doc comment for why.
 	var errors []string
 	for roleName, role := range c.Roles {
 		for _, teamName := range role.Teams {
@@ -199,7 +198,7 @@ func (c *Config) ValidateRoles() error {
 				errors = append(errors, fmt.Sprintf("role %q references undefined team %q", roleName, teamName))
 			}
 		}
-		if !validateUsers {
+		if !authoritativeMembership {
 			continue
 		}
 		for _, user := range role.Users {

@@ -814,6 +814,66 @@ func TestValidateUnknownFieldsAllSupplementalConfig(t *testing.T) {
 	}
 }
 
+func TestValidateUnknownFieldsSupplementalPlugins(t *testing.T) {
+	for _, warning := range []string{unknownFieldsWarning, unknownFieldsAllWarning} {
+		for _, suffix := range []string{"_pluginconfig.yaml", "_custom.yaml"} {
+			t.Run(warning+"/"+suffix, func(t *testing.T) {
+				root := t.TempDir()
+				write := func(path, content string) {
+					t.Helper()
+					if err := os.WriteFile(path, []byte(content), 0600); err != nil {
+						t.Fatal(err)
+					}
+				}
+				configPath := filepath.Join(root, "config.yaml")
+				pluginPath := filepath.Join(root, "plugins.yaml")
+				write(configPath, "{}\n")
+				write(pluginPath, "{}\n")
+
+				supplementalDir := filepath.Join(root, "supplemental")
+				nestedDir := filepath.Join(supplementalDir, "org")
+				if err := os.MkdirAll(nestedDir, 0700); err != nil {
+					t.Fatal(err)
+				}
+				const unknownField = "unknown_shard_field: true\n"
+				write(filepath.Join(root, "outside"+suffix), unknownField)
+				write(filepath.Join(nestedDir, "ignored.yaml"), unknownField)
+				shardPath := filepath.Join(nestedDir, "approve"+suffix)
+				const shard = `approve:
+- repos: [org/repo]
+  issue_required: true
+`
+				write(shardPath, shard)
+				opts := options{
+					config: configflagutil.ConfigOptions{ConfigPath: configPath},
+					pluginsConfig: pluginsflagutil.PluginOptions{
+						PluginConfigPath:                         pluginPath,
+						SupplementalPluginsConfigDirs:            flagutil.NewStrings(supplementalDir),
+						SupplementalPluginsConfigsFileNameSuffix: suffix,
+					},
+					warnings: flagutil.NewStrings(warning),
+				}
+				if err := validate(opts); err != nil {
+					t.Fatalf("validation of valid shard failed: %v", err)
+				}
+
+				write(shardPath, shard+"  "+unknownField)
+				err := validate(opts)
+				warnings, ok := err.(utilerrors.Aggregate)
+				if !ok || len(warnings.Errors()) != 1 || !strings.Contains(err.Error(), shardPath) ||
+					!strings.Contains(err.Error(), `unknown field "unknown_shard_field"`) {
+					t.Errorf("validation error = %v, want one unknown_shard_field warning in %s", err, shardPath)
+				}
+
+				opts.excludeWarnings = flagutil.NewStrings(warning)
+				if err := validate(opts); err != nil {
+					t.Errorf("validation with %s excluded failed: %v", warning, err)
+				}
+			})
+		}
+	}
+}
+
 func TestValidateStrictBranches(t *testing.T) {
 	trueVal := true
 	falseVal := false

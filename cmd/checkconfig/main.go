@@ -390,6 +390,15 @@ func validate(o options) error {
 		if err := validateUnknownFields(&plugins.Configuration{}, pcfgBytes, o.pluginsConfig.PluginConfigPath); err != nil {
 			errs = append(errs, err)
 		}
+		if shardErrors := plugins.WalkSupplementalConfigFiles(o.pluginsConfig.SupplementalPluginsConfigDirs.Strings(), o.pluginsConfig.SupplementalPluginsConfigsFileNameSuffix, func(path string) error {
+			data, err := os.ReadFile(path)
+			if err != nil {
+				return fmt.Errorf("error reading supplemental plugin config %s for validation: %w", path, err)
+			}
+			return validateUnknownFields(&plugins.Configuration{}, data, path)
+		}); shardErrors != nil {
+			errs = append(errs, shardErrors.Errors()...)
+		}
 	}
 	if o.warningEnabled(tideStrictBranchWarning) {
 		if err := validateStrictBranches(cfg.ProwConfig); err != nil {

@@ -304,54 +304,22 @@ func (pa *ConfigAgent) Load(path string, supplementalPluginConfigDirs []string, 
 		return err
 	}
 
-	var errs []error
-	for _, supplementalPluginConfigDir := range supplementalPluginConfigDirs {
-		if supplementalPluginConfigFileSuffix == "" {
-			break
+	if err := WalkSupplementalConfigFiles(supplementalPluginConfigDirs, supplementalPluginConfigFileSuffix, func(path string) error {
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return fmt.Errorf("failed to read %s: %w", path, err)
 		}
-		if err := filepath.Walk(supplementalPluginConfigDir, func(path string, info fs.FileInfo, err error) error {
-			if err != nil {
-				return err
-			}
 
-			// Kubernetes configmap mounts create symlinks for the configmap keys that point to files prefixed with '..'.
-			// This allows it to do  atomic changes by changing the symlink to a new target when the configmap content changes.
-			// This means that we should ignore the '..'-prefixed files, otherwise we might end up reading a half-written file and will
-			// get duplicate data.
-			if strings.HasPrefix(info.Name(), "..") {
-				if info.IsDir() {
-					return filepath.SkipDir
-				}
-				return nil
-			}
-
-			if info.IsDir() || !strings.HasSuffix(path, supplementalPluginConfigFileSuffix) {
-				return nil
-			}
-
-			data, err := os.ReadFile(path)
-			if err != nil {
-				errs = append(errs, fmt.Errorf("failed to read %s: %w", path, err))
-				return nil
-			}
-
-			cfg := &Configuration{}
-			if err := yaml.Unmarshal(data, cfg); err != nil {
-				errs = append(errs, fmt.Errorf("failed to unmarshal %s: %w", path, err))
-				return nil
-			}
-
-			if err := np.mergeFrom(cfg); err != nil {
-				errs = append(errs, fmt.Errorf("failed to merge config from %s into main config: %w", path, err))
-			}
-
-			return nil
-
-		}); err != nil {
-			errs = append(errs, fmt.Errorf("failed to walk %s: %w", supplementalPluginConfigDir, err))
+		cfg := &Configuration{}
+		if err := yaml.Unmarshal(data, cfg); err != nil {
+			return fmt.Errorf("failed to unmarshal %s: %w", path, err)
 		}
-	}
-	if err := utilerrors.NewAggregate(errs); err != nil {
+
+		if err := np.mergeFrom(cfg); err != nil {
+			return fmt.Errorf("failed to merge config from %s into main config: %w", path, err)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
 
@@ -371,6 +339,45 @@ func (pa *ConfigAgent) Load(path string, supplementalPluginConfigDirs []string, 
 
 	pa.Set(np)
 	return nil
+}
+
+// WalkSupplementalConfigFiles visits the files selected for supplemental plugin
+// configuration. It collects visit errors while continuing to other files.
+func WalkSupplementalConfigFiles(dirs []string, suffix string, visit func(string) error) utilerrors.Aggregate {
+	if suffix == "" {
+		return nil
+	}
+	var errs []error
+	for _, dir := range dirs {
+		if err := filepath.Walk(dir, func(path string, info fs.FileInfo, err error) error {
+			if err != nil {
+				return err
+			}
+
+			// Kubernetes configmap mounts create symlinks for the configmap keys that point to files prefixed with '..'.
+			// This allows it to do atomic changes by changing the symlink to a new target when the configmap content changes.
+			// This means that we should ignore the '..'-prefixed files, otherwise we might end up reading a half-written file and will
+			// get duplicate data.
+			if strings.HasPrefix(info.Name(), "..") {
+				if info.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+
+			if info.IsDir() || !strings.HasSuffix(path, suffix) {
+				return nil
+			}
+
+			if err := visit(path); err != nil {
+				errs = append(errs, err)
+			}
+			return nil
+		}); err != nil {
+			errs = append(errs, fmt.Errorf("failed to walk %s: %w", dir, err))
+		}
+	}
+	return utilerrors.NewAggregate(errs)
 }
 
 // Config returns the agent current Configuration.
